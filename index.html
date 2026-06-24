@@ -279,7 +279,7 @@
         <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)">Activated in
           <select id="agFilter" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:13px;background:#fff;font-weight:600;color:var(--ink)"></select>
         </div>
-        <div style="font-size:13px;color:var(--muted)">Showing <b id="agShown" style="color:var(--ink)">0</b> · <b id="agRmrTotal" style="color:var(--orange)">$0</b>/mo RMR · maturity as of <b id="agQtrLabel"></b></div>
+        <div style="font-size:13px;color:var(--muted)">Showing <b id="agShown" style="color:var(--ink)">0</b> · <b id="agRmrTotal" style="color:var(--orange)">$0</b>/mo RMR</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
         <label style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px">Flag margin under
@@ -350,7 +350,7 @@
         <div class="fld"><label>Other startup cost <span class="hint">$ one-time</span></label><input id="f_scost" type="number" step="0.01" placeholder="0"></div>
         <div class="fld full"><label>Subcontractor annual cost <span class="hint">$ / year — e.g. sprinkler contractor, spread monthly</span></label><input id="f_sub" type="number" step="0.01" placeholder="0"></div>
         <div class="fieldset-h">Margin</div>
-        <div class="fld"><label>Target margin <span class="hint">% — optional, overrides the global low-margin flag</span></label><input id="f_target" type="number" step="1" placeholder="(use global)"></div>
+        <div class="fld"><label>Target margin <span class="hint">% — optional, overrides the global margin-flag threshold</span></label><input id="f_target" type="number" step="1" placeholder="(use global)"></div>
         <div class="fld full"><label>Notes</label><input id="f_notes" placeholder="Optional"></div>
         <div class="preview" id="mPreview"></div>
       </div>
@@ -406,20 +406,16 @@
         <div class="row"><b>OFF</b> — the agreement shows in the <b>Pending Renewals</b> tab and shifts color (green → amber → red) as its renewal date nears. You must <b>manually renew</b> it there to release the renewal commission.</div>
       </div>
 
-      <h3>The low-margin hold</h3>
-      <div class="guide-callout">A thin-margin deal's commission is held until the company breaks even on it.</div>
-      <p>If an account's <b>True margin</b> is below your flag (default 40%), its commission doesn't pay at activation — it's <b>held</b> until the account's running cash covers the commission and costs (breakeven). Healthy-margin deals pay right away. A low-margin deal that never breaks even stays held. This protects the company from paying on a deal that hasn't earned its keep.</p>
-
       <h3>What the colors mean</h3>
       <div class="guide-legend">
         <div class="row"><span class="chip c-payable">Payable</span> owed to you this quarter</div>
         <div class="row"><span class="chip c-paid">Paid</span> you've marked it collected</div>
         <div class="row"><span class="chip c-maturing">Manual renewal needed</span> renew it to get paid</div>
-        <div class="row"><span class="chip c-held">Held</span> low margin (not yet broken even) or overdue renewal</div>
+        <div class="row"><span class="chip c-held">Urgent / overdue</span> renewal date is here or past</div>
       </div>
 
       <h3>Margin is information only</h3>
-      <p><b>True margin</b> = recurring profit after direct, labor, and subcontractor costs. It's shown as an account-health readout and powers the low-margin hold above — but it never changes the size of your commission. There are no accelerators; the commission is simply the term rate × RMR.</p>
+      <p><b>True margin</b> = recurring profit after direct, labor, and subcontractor costs. It's shown as an account-health readout so you can see at a glance which deals are thin — but it <b>never changes your pay</b>. Every commission pays at its rate, when it's due, regardless of margin. There are no accelerators and no holds; the commission is simply the term rate × RMR.</p>
     </div>
   </div>
 </div>
@@ -469,7 +465,7 @@ function qLabel(qi){const y=Math.floor(qi/4),q=(qi%4)+1;return`Q${q} ${y}`;}
 function qIndexFromDate(d){return qIndexFromYM(d.getFullYear(),d.getMonth());}
 const CUR_QI=qIndexFromDate(now);
 
-/* core model — clean plan: initial % + renewal % by term, low-margin maturity hold */
+/* core model — clean plan: initial % + renewal % by term (paid immediately, no holds) */
 function inspectionMonth(m,f){if(!f)return false;const iv=Math.round(12/f);return iv>0&&m%iv===0;}
 function INIT_MULT(t){t=+t;if(t>=36)return 2.00;if(t===24)return 1.25;if(t===12)return 1.00;return 1.00;}   // M2M→1.00
 function RENEW_MULT(t){t=+t;if(t>=36)return 0;if(t===24)return 1.25;if(t===12)return 1.50;return 0;}          // once, at first renewal
@@ -481,44 +477,29 @@ function compute(a){
   const startup=(+a.startup_labor_hours||0)*(+a.loaded_labor_rate||0)+(+a.other_startup_cost||0);
   const initialCommission=rmr*INIT_MULT(term);
   const renewalCommission=rmr*RENEW_MULT(term);
-  // billing schedule drives revenue timing for the breakeven (maturity) calc
+  // billing schedule (kept for the annual-billed readout on custom-billed accounts)
   const sched=(a.custom_billing&&Array.isArray(a.billing_schedule)&&a.billing_schedule.length)?a.billing_schedule:null;
   let actMonth0=0;
   if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad))actMonth0=ad.getMonth();}
   function revAt(m){ if(!sched)return rmr; const since=m-1,cal=((actMonth0+since)%12)+1; let s=0; for(const r of sched){if((+r.month)===cal){if(r.once&&since>=12)continue; s+=(+r.amount||0);}} return s; }
-  // True margin — info readout + low-margin gate
+  // True margin — info-only readout
   const inspAnnual=(+a.inspection_frequency||0)*(+a.hours_per_inspection||0)*(+a.loaded_labor_rate||0);
   const annualBasis=direct*12+inspAnnual+(+a.subcontractor_annual_cost||0);
   const statedAnnual=rmr*12;
-  const grossMargin=statedAnnual>0?(statedAnnual-annualBasis)/statedAnnual:null;
-  const thin=grossMargin!=null&&grossMargin<marginThreshold(a);
-  // breakeven: first month cumulative gross profit covers the initial commission paid in month 1
-  const horizon=term===0?120:Math.max(term,12)+24;
-  let cum=0,breakevenMonth=null,annualBilled=0;
-  for(let m=1;m<=horizon;m++){
-    const insp=inspectionMonth(m,+a.inspection_frequency||0)?inspCost:0;
-    const sCost=m===1?startup:0,iComm=m===1?initialCommission:0;
-    cum+=(revAt(m)-direct-insp-subMonthly-sCost-iComm);
-    if(breakevenMonth===null&&cum>=0)breakevenMonth=m;
-    if(m<=12)annualBilled+=revAt(m);
-  }
+  const grossMargin=statedAnnual>0?(statedAnnual-annualBasis)/statedAnnual:null;   // info-only readout
+  let annualBilled=0; for(let m=1;m<=12;m++)annualBilled+=revAt(m);
   const firstBill=revAt(1);
-  // quarter mapping
-  let initialQI=null,breakevenQI=null,renewalDate=null,renewalQI=null;
+  // quarter mapping — commissions pay immediately (no hold)
+  let initialQI=null,renewalDate=null,renewalQI=null;
   if(a.activation_date){
     const ad=new Date(a.activation_date+'T00:00:00');
     if(!isNaN(ad)){
-      const baseMI=ad.getFullYear()*12+ad.getMonth();
       initialQI=qIndexFromYM(ad.getFullYear(),ad.getMonth());
-      if(breakevenMonth){const ym=ymFromMonthIndex(baseMI+(breakevenMonth-1));breakevenQI=qIndexFromYM(ym.y,ym.m0);}
       if(term>0){renewalDate=addMonths(ad,term);renewalQI=qIndexFromYM(renewalDate.getFullYear(),renewalDate.getMonth());}
     }
   }
-  const initialHeld=thin&&breakevenQI===null;            // low-margin deal that never breaks even → held
-  const initialPayQI=thin?breakevenQI:initialQI;          // healthy: pay at activation; thin: pay at breakeven
   return {term,rmr,initMult:INIT_MULT(term),renewMult:RENEW_MULT(term),initialCommission,renewalCommission,
-          grossMargin,thin,breakevenMonth,breakevenQI,initialQI,initialPayQI,initialHeld,renewalDate,renewalQI,
-          annualBilled,firstBill,scheduled:!!sched};
+          grossMargin,initialQI,renewalDate,renewalQI,annualBilled,firstBill,scheduled:!!sched};
 }
 function deferredStatus(c,selQI,paid){return 'none';}     // legacy no-op (deferred model removed)
 const STATUS_META={none:{cls:'c-none',label:'Paid upfront'},held:{cls:'c-held',label:'Deferred held'},maturing:{cls:'c-maturing',label:'Maturing'},payable:{cls:'c-payable',label:'Payable'},paid:{cls:'c-paid',label:'Paid'}};
@@ -651,7 +632,7 @@ async function removeRow(id){
 /* ---- quarter options ---- */
 function buildQuarterOptions(){
   const qis=new Set([CUR_QI]);
-  AGREEMENTS.forEach(a=>{const c=compute(a);if(c.initialQI!=null)qis.add(c.initialQI);if(c.initialPayQI!=null)qis.add(c.initialPayQI);if(c.renewalQI!=null)qis.add(c.renewalQI);});
+  AGREEMENTS.forEach(a=>{const c=compute(a);if(c.initialQI!=null)qis.add(c.initialQI);if(c.renewalQI!=null)qis.add(c.renewalQI);});
   let min=Math.min(...qis),max=Math.max(...qis);min=Math.min(min,CUR_QI)-1;max=Math.max(max,CUR_QI)+1;
   const sel=$('qSelect');sel.innerHTML='';
   for(let qi=min;qi<=max;qi++){const o=document.createElement('option');o.value=qi;o.textContent=qLabel(qi);if(qi===selQI)o.selected=true;sel.appendChild(o);}
@@ -666,7 +647,7 @@ function renderQuarter(){
   $('qRangeTxt').textContent=`${['Jan–Mar','Apr–Jun','Jul–Sep','Oct–Dec'][q-1]} ${y}`;
   const lines=[];
   AGREEMENTS.forEach(a=>{const c=compute(a);
-    if(c.initialPayQI===selQI&&c.initialCommission>0&&!c.initialHeld)
+    if(c.initialQI===selQI&&c.initialCommission>0)
       lines.push({a,c,type:'initial',amount:c.initialCommission,paid:!!a.paid_initial,field:'paid_initial'});
     if(c.renewalCommission>0&&c.renewalQI===selQI){
       const renewed=!!a.autorenew||!!a.renewed;            // auto-renew pays automatically; manual needs the Renew action
@@ -677,7 +658,6 @@ function renderQuarter(){
   const initCt=lines.filter(l=>l.type==='initial').length, renCt=lines.filter(l=>l.type==='renewal').length;
   // pending manual renewals coming due (autorenew OFF, not yet renewed, renewal in this quarter or earlier)
   const pendingRenew=AGREEMENTS.filter(a=>{const c=compute(a);return c.renewalCommission>0&&!a.autorenew&&!a.renewed&&c.renewalQI!=null&&c.renewalQI<=selQI;}).length;
-  const heldCt=AGREEMENTS.filter(a=>compute(a).initialHeld).length;
   const newRMR=AGREEMENTS.reduce((s,a)=>{const c=compute(a);return s+(c.initialQI===selQI?(+a.monthly_rmr||0):0);},0);
   $('qCards').innerHTML=`
     <div class="stat accent"><div class="lbl">Due this quarter</div><div class="val">${fmt(total)}</div></div>
@@ -693,7 +673,7 @@ function renderQuarter(){
     const typeTag=l.type==='renewal'?'<span class="type-tag" style="background:#e7f3ee;color:var(--payable)">Renewal</span>':'<span class="type-tag">Initial</span>';
     const dateTxt=l.type==='renewal'
       ? `${l.auto?'auto-renew':'manually renewed'} · ${Math.round(l.c.renewMult*100)}%`
-      : (l.c.thin?`held to breakeven · ${Math.round(l.c.initMult*100)}%`:`at activation · ${Math.round(l.c.initMult*100)}%`);
+      : `at activation · ${Math.round(l.c.initMult*100)}%`;
     const btn=`<button class="paidbtn ${l.paid?'is-paid':''}" data-paid="${l.a.id}" data-field="${l.field}" data-val="${l.paid?0:1}">${l.paid?'✓ Paid':'Mark paid'}</button>`;
     return `<tr>
       <td class="ag-no">#${esc(l.a.agreement_number||'—')}</td>
@@ -708,7 +688,6 @@ function renderQuarter(){
   $('qTableWrap').querySelectorAll('[data-paid]').forEach(b=>b.onclick=()=>patchPaid(b.dataset.paid,b.dataset.field,b.dataset.val==='1'));
 }
 function renderAgreements(){
-  $('agQtrLabel').textContent=qLabel(selQI);
   $('marginFlag').value=marginFlagPct;
   // build the "Activated in" dropdown from agreements' activation quarters
   const qset=new Set();AGREEMENTS.forEach(a=>{const c=compute(a);if(c.initialQI!=null)qset.add(c.initialQI);});
@@ -734,14 +713,13 @@ function renderAgreements(){
     const autoTag=c.renewMult>0?(a.autorenew
       ?'<span class="chip c-payable" style="font-size:10px">auto</span>'
       :(a.renewed?'<span class="chip c-paid" style="font-size:10px">renewed</span>':'<span class="chip c-maturing" style="font-size:10px">manual</span>')):'';
-    const heldTag=c.initialHeld?'<div style="font-size:10px;color:var(--held);font-weight:600">held · low margin</div>':(c.thin&&c.breakevenQI!=null?`<div style="font-size:10px;color:var(--orange);font-weight:600">pays ${qLabel(c.breakevenQI)}</div>`:'');
     return `<tr>
       <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
       <td>${esc(a.customer_name||'—')}</td>
       <td class="mono">${fmt(+a.monthly_rmr||0)}${c.scheduled?'<div style="font-size:10px;color:var(--orange);font-weight:600;letter-spacing:.03em">SCHEDULED</div>':''}</td>
       <td>${termTxt}</td>
       <td>${mCell}</td>
-      <td class="num mono">${fmt(c.initialCommission)} <span style="font-size:10px;color:var(--muted)">(${Math.round(c.initMult*100)}%)</span>${heldTag}</td>
+      <td class="num mono">${fmt(c.initialCommission)} <span style="font-size:10px;color:var(--muted)">(${Math.round(c.initMult*100)}%)</span></td>
       <td class="num mono">${renewTxt}</td>
       <td>${autoTag}</td>
       <td><button class="iconbtn" data-edit="${a.id}">Edit</button></td>
@@ -789,7 +767,7 @@ function renderRenewals(){
   $('renTableWrap').querySelectorAll('[data-renew]').forEach(b=>b.onclick=()=>patchRenew(b.dataset.renew));
 }
 function renderLegend(){
-  const items=[['c-payable','Payable — owed to you'],['c-paid','Paid — collected'],['c-maturing','Manual renewal needed'],['c-held','Held — low margin / overdue']];
+  const items=[['c-payable','Payable — owed to you'],['c-paid','Paid — collected'],['c-maturing','Manual renewal needed'],['c-held','Urgent — renewal due / overdue']];
   $('legend').innerHTML=items.map(([c,t])=>`<span class="chip ${c}">${t}</span>`).join('')+`<span class="chip" style="color:var(--muted);background:#f1f1f1">Initial % by term · 12mo 100% · 24mo 125% · 36/60 200%</span>`;
 }
 
@@ -860,7 +838,7 @@ function updatePreview(){
   const thin=c.grossMargin!=null&&c.grossMargin<thr;
   const mColor=mPct==null?'var(--muted)':(thin?'var(--maturing)':'var(--payable)');
   const mTxt=mPct==null?'—':`${mPct}%${thin?' ⚠':''}`;
-  const initWhen=c.initialHeld?'held — low margin, never breaks even':(thin?(c.breakevenQI!=null?`held to breakeven · ${qLabel(c.breakevenQI)}`:'held'):(c.initialQI!=null?`pays ${qLabel(c.initialQI)}`:'at activation'));
+  const initWhen=c.initialQI!=null?`pays ${qLabel(c.initialQI)}`:'at activation';
   const renWhen=c.renewMult<=0?'no renewal commission':(c.renewalQI!=null?`${qLabel(c.renewalQI)} · ${row.autorenew?'auto':'manual'}`:'set activation date');
   $('mPreview').innerHTML=`<h4>Live calculation</h4><div class="pgrid">
     <div><span>Initial commission <span style="color:var(--none)">(${Math.round(c.initMult*100)}%)</span></span><b style="color:var(--payable);font-size:16px">${fmt(c.initialCommission)}</b></div>
@@ -895,8 +873,8 @@ function exportQuarterPDF(details){
   const initials=[],renewalPays=[];
   AGREEMENTS.forEach(a=>{
     const c=compute(a);
-    if(c.initialPayQI===selQI&&c.initialCommission>0&&!c.initialHeld)
-      initials.push({a,amount:c.initialCommission,paid:!!a.paid_initial,mult:c.initMult,thin:c.thin});
+    if(c.initialQI===selQI&&c.initialCommission>0)
+      initials.push({a,amount:c.initialCommission,paid:!!a.paid_initial,mult:c.initMult});
     if(c.renewalCommission>0&&c.renewalQI===selQI&&(a.autorenew||a.renewed))
       renewalPays.push({a,amount:c.renewalCommission,paid:!!a.renewal_paid,mult:c.renewMult,auto:!!a.autorenew});
   });
@@ -943,7 +921,7 @@ function exportQuarterPDF(details){
     return sub;
   }
 
-  const subInit=section('Initial Commissions',initials,it=>`Initial · ${Math.round(it.mult*100)}%${it.thin?' · held to breakeven':''}`);
+  const subInit=section('Initial Commissions',initials,it=>`Initial · ${Math.round(it.mult*100)}%`);
   const subRnw=section('Renewal Commissions',renewalPays,it=>`Renewal · ${Math.round(it.mult*100)}% · ${it.auto?'auto-renew':'manual'}`);
   const grand=subInit+subRnw;
 
@@ -959,7 +937,7 @@ function exportQuarterPDF(details){
   doc.text(`Prepared by — ${name}`,M,y+5);doc.text('Date: ____________',M,y+10);
   doc.text('Approved by (signature)',M+colW+12,y+5);doc.text('Date: ____________',M+colW+12,y+10);
   doc.setFontSize(7.5);doc.setTextColor(150,150,150);
-  doc.text('Generated by P1 Bonus Tracking Tool. Initial % by term (12mo 100% · 24mo 125% · 36/60 200%); renewal % once at renewal (12mo 150% · 24mo 125%). Low-margin deals hold until breakeven.',M,288,{maxWidth:W-2*M});
+  doc.text('Generated by P1 Bonus Tracking Tool. Initial % by term (12mo 100% · 24mo 125% · 36/60 200%); renewal % once at renewal (12mo 150% · 24mo 125%).',M,288,{maxWidth:W-2*M});
   doc.save(`P1-Bonus-${qr.label.replace(' ','-')}.pdf`);
 }
 
