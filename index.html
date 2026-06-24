@@ -129,6 +129,20 @@
   .empty{padding:48px 20px;text-align:center;color:var(--muted)}
   .empty b{display:block;color:var(--ink);font-size:16px;margin-bottom:5px;font-weight:600}
   #agTableWrap{overflow-x:auto}
+  .rnw-empty{font-size:13px;color:var(--muted);font-style:italic;padding:4px 0 10px}
+  .rnw-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:7px;font-size:13px;background:#fff}
+  .rnw-row .rnw-main{flex:1}
+  .rnw-row .rnw-amt{font-weight:600}
+  .rnw-row .rnw-st{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:2px 7px;border-radius:999px}
+  .rnw-st.done{background:#e7f3ee;color:var(--payable)}
+  .rnw-st.pend{background:#fff7ed;color:var(--orange)}
+  .rnw-del{border:1px solid var(--line);background:#fff;border-radius:7px;width:28px;height:28px;color:var(--held);font-size:15px;line-height:1}
+  .rnw-del:hover{border-color:var(--held);background:var(--held-bg)}
+  .rnw-add{display:grid;grid-template-columns:1.1fr 1fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-top:8px;padding-top:12px;border-top:1px dashed var(--line)}
+  .rnw-add .mini label{display:block;font-size:11px;color:var(--muted);margin-bottom:3px;font-weight:600}
+  .rnw-add .mini input,.rnw-add .mini select{width:100%;border:1px solid var(--line);border-radius:7px;padding:7px 8px;font-size:13px;background:#fff;box-sizing:border-box}
+  .rnw-add button{border:1px solid var(--navy);background:var(--navy);color:#fff;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:600;white-space:nowrap}
+  .rnw-saved{font-size:12px;color:var(--muted);font-style:italic;padding:6px 0}
 
   .scrim{position:fixed;inset:0;background:rgba(16,28,55,.45);display:none;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50}
   .scrim.show{display:flex}
@@ -323,8 +337,11 @@
         <div class="fld"><label>Assume renewal if needed</label>
           <select id="f_renew"><option value="true" selected>Yes</option><option value="false">No</option></select></div>
         <div class="fld"><label>Renewal extension <span class="hint">months modeled past term</span></label><input id="f_ext" type="number" placeholder="12"></div>
+        <div class="fld full"><label>Projected renewal RMR <span class="hint">$ / month — optional; expected RMR at next renewal (forecast only)</span></label><input id="f_projrmr" type="number" step="0.01" placeholder="leave blank for $0 growth"></div>
         <div class="fld full"><label>Notes</label><input id="f_notes" placeholder="Optional"></div>
         <div class="preview" id="mPreview"></div>
+        <div class="fieldset-h">Renewal history</div>
+        <div class="fld full" id="renewalBox"></div>
       </div>
     </div>
     <div class="modal-foot">
@@ -511,6 +528,8 @@ const STATUS_META={none:{cls:'c-none',label:'Paid upfront'},held:{cls:'c-held',l
 
 /* state */
 let sb=null,AGREEMENTS=[],selQI=CUR_QI,view='quarter',editingId=null,signedIn=false;
+let RENEWALS=[];
+function renewalsFor(id){return RENEWALS.filter(r=>r.agreement_id===id);}
 let marginFlagPct=(()=>{const v=parseFloat(LS.get('rmr_margin_flag'));return isNaN(v)?40:v;})();
 let agFilter='all';
 function marginThreshold(a){ return (a.target_margin!=null&&a.target_margin!=='')?(+a.target_margin):(marginFlagPct/100); }
@@ -571,7 +590,24 @@ function resetIdle(){ clearTimeout(idleTimer); if(signedIn) idleTimer=setTimeout
 async function load(){
   const {data,error}=await sb.from('rmr_agreements').select('*').order('activation_date',{ascending:true});
   if(error)throw error;
-  AGREEMENTS=data||[];render();
+  AGREEMENTS=data||[];
+  await loadRenewals();
+  render();
+}
+async function loadRenewals(){
+  // graceful: if the Phase 2 table isn't created yet, the app still works
+  try{ const {data,error}=await sb.from('rmr_renewals').select('*').order('renewal_date',{ascending:true}); RENEWALS=error?[]:(data||[]); }
+  catch(e){ RENEWALS=[]; }
+}
+async function addRenewal(rec){
+  const {error}=await sb.from('rmr_renewals').insert({...rec,updated_at:new Date().toISOString()});
+  if(error){toast(error.message);return false;}
+  await loadRenewals();return true;
+}
+async function removeRenewal(id){
+  const {error}=await sb.from('rmr_renewals').delete().eq('id',id);
+  if(error){toast(error.message);return;}
+  await loadRenewals();
 }
 async function upsert(row){
   const payload={...row,updated_at:new Date().toISOString()};
@@ -670,7 +706,7 @@ function renderAgreements(){
     const commCell=`${fmt(c.total)}${c.accelRate>0?`<div style="font-size:10px;color:var(--payable);font-weight:600">▲ ${fmt(c.adjustedCommission)}</div>`:''}`;
     return `<tr class="${c.renewalRequired&&st!=='paid'?'flag-renewal':''}">
       <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
-      <td>${esc(a.customer_name||'—')}</td>
+      <td>${esc(a.customer_name||'—')}${renewalsFor(a.id).length?` <span title="${renewalsFor(a.id).length} renewal(s) recorded" style="font-size:10px;font-weight:700;color:var(--payable);background:#e7f3ee;border-radius:999px;padding:1px 6px">↻${renewalsFor(a.id).length}</span>`:''}</td>
       <td class="mono">${fmt(+a.monthly_rmr||0)}${c.scheduled?'<div style="font-size:10px;color:var(--orange);font-weight:600;letter-spacing:.03em">SCHEDULED</div>':''}</td>
       <td>${termTxt}</td>
       <td>${mCell}</td>
@@ -737,10 +773,42 @@ function openModal(id){
   $('f_sub').value=v('subcontractor_annual_cost');
   $('f_target').value=(a&&a.target_margin!=null&&a.target_margin!=='')?Math.round(a.target_margin*100):'';
   $('f_renew').value=a?String(a.assume_renewal):'true';$('f_ext').value=v('renewal_extension','12');
+  $('f_projrmr').value=(a&&a.projected_renewal_rmr!=null)?a.projected_renewal_rmr:'';
+  renderRenewalBox(a?a.id:null);
   $('f_notes').value=v('notes');$('mDelete').style.display=a?'inline-block':'none';
   updatePreview();$('scrim').classList.add('show');
 }
 function closeModal(){$('scrim').classList.remove('show');editingId=null;}
+function renderRenewalBox(agreementId){
+  const box=$('renewalBox');
+  if(!agreementId){ box.innerHTML='<div class="rnw-saved">Save this agreement first, then reopen it to record renewals.</div>'; return; }
+  const list=renewalsFor(agreementId);
+  const fmtD=d=>{if(!d)return '—';const x=new Date(d+'T00:00:00');return isNaN(x)?d:x.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'});};
+  const rows=list.length?list.map(r=>{
+    const st=(r.status==='pending')?'pend':'done';
+    const term=(+r.new_term===0)?'M2M':`${r.new_term}mo`;
+    return `<div class="rnw-row">
+      <div class="rnw-main">${fmtD(r.renewal_date)} · <span class="rnw-amt">${fmt(+r.previous_rmr||0)} → ${fmt(+r.renewed_rmr||0)}</span> · ${term}</div>
+      <span class="rnw-st ${st}">${esc(r.status||'completed')}</span>
+      <button type="button" class="rnw-del" data-rnwdel="${r.id}">×</button>
+    </div>`;}).join(''):'<div class="rnw-empty">No renewals recorded yet.</div>';
+  const curRmr=$('f_rmr').value||'';
+  box.innerHTML=rows+`
+    <div class="rnw-add">
+      <div class="mini"><label>Renewal date</label><input id="r_date" type="date" value="${todayISO()}"></div>
+      <div class="mini"><label>Previous RMR</label><input id="r_prev" type="number" step="0.01" value="${curRmr}"></div>
+      <div class="mini"><label>Renewed RMR</label><input id="r_new" type="number" step="0.01" value="${curRmr}"></div>
+      <div class="mini"><label>New term</label><select id="r_term"><option value="12">12 mo</option><option value="24">24 mo</option><option value="36">36 mo</option><option value="60">60 mo</option></select></div>
+      <div class="mini"><label>Status</label><select id="r_status"><option value="completed">Completed</option><option value="pending">Pending</option></select></div>
+      <button type="button" id="r_add">Add renewal</button>
+    </div>`;
+  box.querySelectorAll('[data-rnwdel]').forEach(b=>b.onclick=async()=>{await removeRenewal(b.dataset.rnwdel);renderRenewalBox(agreementId);renderAgreements();});
+  $('r_add').onclick=async()=>{
+    const rec={agreement_id:agreementId,renewal_date:$('r_date').value||null,previous_rmr:+$('r_prev').value||0,renewed_rmr:+$('r_new').value||0,new_term:+$('r_term').value,status:$('r_status').value};
+    const ok=await addRenewal(rec);
+    if(ok){toast('Renewal added');renderRenewalBox(agreementId);renderAgreements();}
+  };
+}
 function readForm(){return{
   id:editingId||undefined,agreement_number:$('f_num').value.trim(),customer_name:$('f_cust').value.trim(),
   activation_date:$('f_date').value||null,contract_term:+$('f_term').value,monthly_rmr:+$('f_rmr').value||0,
@@ -749,6 +817,7 @@ function readForm(){return{
   inspection_frequency:+$('f_freq').value,hours_per_inspection:+$('f_hrs').value||0,startup_labor_hours:+$('f_shrs').value||0,
   other_startup_cost:+$('f_scost').value||0,subcontractor_annual_cost:+$('f_sub').value||0,
   target_margin:($('f_target').value.trim()===''?null:(+$('f_target').value/100)),
+  projected_renewal_rmr:($('f_projrmr').value.trim()===''?null:(+$('f_projrmr').value||0)),
   assume_renewal:$('f_renew').value==='true',renewal_extension:+$('f_ext').value||0,notes:$('f_notes').value.trim()};}
 function updatePreview(){
   const row=readForm();const c=compute(row);
