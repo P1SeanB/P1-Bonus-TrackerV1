@@ -143,6 +143,11 @@
   .rnw-add .mini input,.rnw-add .mini select{width:100%;border:1px solid var(--line);border-radius:7px;padding:7px 8px;font-size:13px;background:#fff;box-sizing:border-box}
   .rnw-add button{border:1px solid var(--navy);background:var(--navy);color:#fff;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:600;white-space:nowrap}
   .rnw-saved{font-size:12px;color:var(--muted);font-style:italic;padding:6px 0}
+  .rnw-bonus{font-size:11.5px;font-weight:600;color:var(--payable);margin-top:3px}
+  .rnw-bonus.pend{color:var(--orange);font-weight:500;font-style:italic}
+  .rnw-sum{margin-top:6px;padding:9px 11px;background:#f7faf8;border:1px solid var(--line);border-radius:8px;font-size:13px;color:var(--ink)}
+  .rnw-sum b{color:var(--payable)}
+  .rnw-sum .note{display:block;font-size:11px;color:var(--muted);font-weight:400;font-style:italic;margin-top:3px}
 
   .scrim{position:fixed;inset:0;background:rgba(16,28,55,.45);display:none;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50}
   .scrim.show{display:flex}
@@ -530,6 +535,22 @@ const STATUS_META={none:{cls:'c-none',label:'Paid upfront'},held:{cls:'c-held',l
 let sb=null,AGREEMENTS=[],selQI=CUR_QI,view='quarter',editingId=null,signedIn=false;
 let RENEWALS=[];
 function renewalsFor(id){return RENEWALS.filter(r=>r.agreement_id===id);}
+// --- Phase 3: renewal + growth bonus calcs (comparison/forecast only; never live payouts) ---
+function renewalBonusTier(term){const t=+term;if(t===12)return 1.25;if(t===24)return 0.75;if(t>=36)return 0.50;return 0;}
+function renewalBonusOf(r,force){ // force=true ignores status (for forecasting potential)
+  if(!force&&(r.status||'completed')!=='completed')return 0;
+  return (+r.previous_rmr||0)*renewalBonusTier(r.new_term);
+}
+function growthBonusOf(r,force){
+  if(!force&&(r.status||'completed')!=='completed')return 0;
+  const g=(+r.renewed_rmr||0)-(+r.previous_rmr||0);
+  return g>0?g*1.00:0;            // positive growth only (shrinkage pays $0, never negative)
+}
+function renewalTotalsFor(agreementId){
+  let renewal=0,growth=0,completed=0;
+  renewalsFor(agreementId).forEach(r=>{renewal+=renewalBonusOf(r);growth+=growthBonusOf(r);if((r.status||'completed')==='completed')completed++;});
+  return {renewal,growth,total:renewal+growth,completed};
+}
 let marginFlagPct=(()=>{const v=parseFloat(LS.get('rmr_margin_flag'));return isNaN(v)?40:v;})();
 let agFilter='all';
 function marginThreshold(a){ return (a.target_margin!=null&&a.target_margin!=='')?(+a.target_margin):(marginFlagPct/100); }
@@ -787,13 +808,19 @@ function renderRenewalBox(agreementId){
   const rows=list.length?list.map(r=>{
     const st=(r.status==='pending')?'pend':'done';
     const term=(+r.new_term===0)?'M2M':`${r.new_term}mo`;
+    const rb=renewalBonusOf(r),gb=growthBonusOf(r);
+    const bonusLine=(r.status||'completed')==='completed'
+      ? `<div class="rnw-bonus">Renewal ${fmt(rb)}${gb>0?` + Growth ${fmt(gb)}`:''} = ${fmt(rb+gb)}</div>`
+      : `<div class="rnw-bonus pend">Pending — counts toward forecast, not yet earned</div>`;
     return `<div class="rnw-row">
-      <div class="rnw-main">${fmtD(r.renewal_date)} · <span class="rnw-amt">${fmt(+r.previous_rmr||0)} → ${fmt(+r.renewed_rmr||0)}</span> · ${term}</div>
+      <div class="rnw-main"><div>${fmtD(r.renewal_date)} · <span class="rnw-amt">${fmt(+r.previous_rmr||0)} → ${fmt(+r.renewed_rmr||0)}</span> · ${term}</div>${bonusLine}</div>
       <span class="rnw-st ${st}">${esc(r.status||'completed')}</span>
       <button type="button" class="rnw-del" data-rnwdel="${r.id}">×</button>
     </div>`;}).join(''):'<div class="rnw-empty">No renewals recorded yet.</div>';
+  const tot=renewalTotalsFor(agreementId);
+  const sumLine=tot.completed?`<div class="rnw-sum">Earned from completed renewals: <b>${fmt(tot.renewal)}</b> renewal + <b>${fmt(tot.growth)}</b> growth = <b>${fmt(tot.total)}</b><span class="note">Comparison/forecast figure — not added to live payouts or the payroll voucher.</span></div>`:'';
   const curRmr=$('f_rmr').value||'';
-  box.innerHTML=rows+`
+  box.innerHTML=rows+sumLine+`
     <div class="rnw-add">
       <div class="mini"><label>Renewal date</label><input id="r_date" type="date" value="${todayISO()}"></div>
       <div class="mini"><label>Previous RMR</label><input id="r_prev" type="number" step="0.01" value="${curRmr}"></div>
