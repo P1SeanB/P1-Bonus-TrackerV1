@@ -55,6 +55,25 @@
   .session .who{color:#555}
   .signout{background:#1c1c1c;border:1px solid #1c1c1c;color:#fff;border-radius:7px;padding:6px 12px;font-size:13px;font-weight:500}
   .signout:hover{background:#333}
+  .hdr-help{background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:6px 12px;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:5px}
+  .hdr-help:hover{border-color:var(--orange);color:var(--orange)}
+  .guide-link{background:none;border:none;color:var(--orange);font-size:13px;font-weight:600;cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:2px}
+  .guide-modal{background:var(--card);border-radius:16px;width:100%;max-width:720px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,.3);margin:auto}
+  .guide-head{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:3px solid var(--orange)}
+  .guide-head h2{margin:0;font-size:18px;font-weight:700}
+  .guide-head .sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+  .guide-body{padding:20px 24px 26px;overflow:auto}
+  .guide-body h3{font-size:14px;font-weight:700;color:var(--ink);margin:22px 0 8px}
+  .guide-body h3:first-child{margin-top:0}
+  .guide-body p{font-size:14px;color:#3d4452;margin:0 0 10px;line-height:1.55}
+  .guide-body b{color:var(--ink)}
+  .guide-callout{background:#fff7ed;border-left:3px solid var(--orange);border-radius:0 8px 8px 0;padding:11px 14px;margin:12px 0;font-size:14px;color:var(--ink);line-height:1.5}
+  .guide-table{width:100%;border-collapse:collapse;margin:8px 0 4px;font-size:13.5px}
+  .guide-table th,.guide-table td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  .guide-table th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .guide-table td b{color:var(--orange)}
+  .guide-legend{display:flex;flex-direction:column;gap:7px;margin:8px 0}
+  .guide-legend .row{display:flex;align-items:center;gap:9px;font-size:13.5px;color:#3d4452}
 
   nav.tabs{display:flex;gap:2px;padding:0 20px;background:#fff;border-bottom:1px solid var(--line)}
   nav.tabs button{background:none;border:none;color:#999;padding:11px 16px;font-size:14px;font-weight:600;border-bottom:3px solid transparent;margin-bottom:-1px}
@@ -199,6 +218,7 @@
   <h1>Bonus Tracking Tool</h1>
   <div class="session">
     <span class="who" id="whoTxt"></span>
+    <button class="hdr-help" id="guideBtn">? Guide</button>
     <button class="signout" id="signoutBtn">Sign out</button>
   </div>
 </header>
@@ -224,7 +244,10 @@
       <div class="panel-head"><h2>Payouts landing this quarter</h2><span class="qctx" id="qRangeTxt"></span></div>
       <div id="qTableWrap"></div>
     </div>
-    <div style="margin-top:20px" class="legend" id="legend"></div>
+    <div style="margin-top:20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div class="legend" id="legend" style="margin:0"></div>
+      <button class="guide-link" id="guideLink">What do these mean? →</button>
+    </div>
   </section>
 
   <section id="view-agreements" style="display:none">
@@ -302,6 +325,67 @@
         <button class="btn-ghost" id="mCancel">Cancel</button>
         <button class="btn-primary" id="mSave">Save agreement</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="guideScrim">
+  <div class="guide-modal">
+    <div class="guide-head">
+      <div>
+        <h2>How bonus maturity works</h2>
+        <div class="sub">A quick guide — no finance background needed.</div>
+      </div>
+      <button class="x" id="guideClose">×</button>
+    </div>
+    <div class="guide-body">
+      <h3>The big idea</h3>
+      <p>When you sell a recurring-revenue (RMR) agreement, you earn a bonus on it. Part is paid right away, and part is <b>held back until the account proves itself</b>. "Maturity" is the moment that held-back part is earned and ready to be paid.</p>
+
+      <h3>Your bonus comes in two parts</h3>
+      <p><b>Initial payout</b> — paid right away when the agreement activates.<br>
+      <b>Deferred balance</b> — held back, released later once the account <i>matures</i>.</p>
+      <p>How big each piece is depends on the contract term:</p>
+      <table class="guide-table">
+        <thead><tr><th>Contract term</th><th>Paid upfront</th><th>Held (deferred)</th></tr></thead>
+        <tbody>
+          <tr><td>Month-to-month</td><td>25%</td><td><b>75%</b></td></tr>
+          <tr><td>12 months</td><td>50%</td><td><b>50%</b></td></tr>
+          <tr><td>24 months</td><td>75%</td><td><b>25%</b></td></tr>
+          <tr><td>36 months</td><td><b>100%</b></td><td>none</td></tr>
+          <tr><td>60 months</td><td><b>100%</b></td><td>none</td></tr>
+        </tbody>
+      </table>
+      <p>A longer commitment pays more upfront and holds back less. 36- and 60-month deals pay the whole bonus at activation — nothing is deferred, so there's no maturity to wait on. Those show as <b>"Paid upfront."</b></p>
+
+      <h3>What "matured" actually means</h3>
+      <div class="guide-callout">The deferred balance matures the first month the account's running cash can cover it — and still stay at or above $0.</div>
+      <p>The tool tracks money in versus money out, month by month, adding it up as it goes. The moment that running total is big enough to pay you the deferred balance without going negative, the bonus is <b>matured</b> and becomes payable. Until then it's <b>held</b>; once you collect it, you mark it <b>paid</b>.</p>
+
+      <h3>What speeds it up or slows it down</h3>
+      <p><b>Money in:</b> what the account is billed that month (a flat monthly amount, or a custom billing schedule).<br>
+      <b>Money out:</b> monthly service cost, inspection labor, any subcontractor cost, one-time startup, and the initial bonus paid at activation.</p>
+      <p>So: a <b>big early bill matures it fast</b> (a prepaid account can mature in month 1). <b>Heavy costs</b> like a subcontractor or thin margins build cash slower, so it matures later. And a <b>bigger deferred balance</b> takes longer for the cash to catch up.</p>
+
+      <h3>The renewal catch</h3>
+      <p>Sometimes an account won't mature until <i>after</i> its initial term ends. Then releasing the deferred balance depends on the <b>customer actually renewing</b>. Those get an <b>orange "renewal required" flag</b> — earned, but conditional.</p>
+
+      <h3>What the colors mean</h3>
+      <div class="guide-legend">
+        <div class="row"><span class="chip c-payable">Payable</span> matured and owed to you</div>
+        <div class="row"><span class="chip c-maturing">Maturing</span> set to release next quarter</div>
+        <div class="row"><span class="chip c-held">Held</span> further out, or won't mature in the modeled window</div>
+        <div class="row"><span class="chip c-paid">Paid</span> you've marked it collected</div>
+        <div class="row"><span class="chip c-none">Paid upfront</span> no deferred balance (36/60-month deals)</div>
+        <div class="row"><span class="badge-renewal">Renewal</span> releases only if the customer renews</div>
+      </div>
+      <p>The colors update based on the quarter you're viewing, so clicking through quarters shows what was due then, now, and next.</p>
+
+      <h3>A quick example</h3>
+      <p>Two identical 12-month agreements, each earning a $528 bonus ($264 upfront, $264 deferred). With <b>standard monthly billing</b>, the account takes about <b>3 months</b> to cover the deferred balance. With a <b>large prepaid first bill</b>, the cash is there immediately and it matures in <b>month 1</b>. Same bonus — only the <i>timing</i> changes, based on when the money arrives.</p>
+
+      <h3>One thing that's easy to misread</h3>
+      <p>The <b>gross margin %</b> tells you how profitable the recurring service is — it's a health signal, not a payout rule. <b>Margin doesn't hold back or shrink your bonus.</b> It only affects maturity indirectly: a thin-margin account builds cash slower, so it matures a little later. Read them separately — margin is account health, maturity is when the deferred bonus is ready.</p>
     </div>
   </div>
 </div>
@@ -655,6 +739,11 @@ $('saveConn').onclick=()=>{
   catch(e){ toast('Could not initialize — check values'); }
 };
 $('signoutBtn').onclick=doSignOut;
+function openGuide(){$('guideScrim').classList.add('show');$('guideScrim').querySelector('.guide-body').scrollTop=0;}
+$('guideBtn').onclick=openGuide;
+$('guideLink').onclick=openGuide;
+$('guideClose').onclick=()=>$('guideScrim').classList.remove('show');
+$('guideScrim').onclick=e=>{if(e.target===$('guideScrim'))$('guideScrim').classList.remove('show');};
 $('qPrev').onclick=()=>{selQI--;renderQuarter();};
 $('qNext').onclick=()=>{selQI++;renderQuarter();};
 $('qToday').onclick=()=>{selQI=CUR_QI;renderQuarter();};
