@@ -125,6 +125,18 @@
   .fld input,.fld select{border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:#fff;outline:none;width:100%}
   .fld input:focus,.fld select:focus{border-color:var(--orange);box-shadow:0 0 0 3px rgba(232,98,10,.15)}
   .fieldset-h{grid-column:1/-1;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--navy);margin-top:6px;padding-top:12px;border-top:1px solid var(--line)}
+  .bill-toggle{grid-column:1/-1;display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink);font-weight:500}
+  .bill-wrap{grid-column:1/-1;display:none}
+  .bill-wrap.show{display:block}
+  .bill-note{font-size:12px;color:var(--muted);margin:2px 0 10px}
+  .sched-row{display:grid;grid-template-columns:1.1fr 1fr auto auto;gap:8px;align-items:center;margin-bottom:7px}
+  .sched-row select,.sched-row input{border:1px solid var(--line);border-radius:8px;padding:8px 9px;font-size:13px;background:#fff;outline:none}
+  .sched-row select:focus,.sched-row input:focus{border-color:var(--orange);box-shadow:0 0 0 3px rgba(232,98,10,.15)}
+  .sched-once{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap}
+  .sched-del{border:1px solid var(--line);background:#fff;border-radius:8px;width:32px;height:32px;color:var(--held);font-size:16px;line-height:1}
+  .sched-del:hover{border-color:var(--held);background:var(--held-bg)}
+  .sched-add{margin-top:4px;border:1px dashed var(--line);background:#fff;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:600;color:var(--navy)}
+  .sched-add:hover{border-color:var(--navy)}
   .preview{grid-column:1/-1;background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:14px 16px;margin-top:4px}
   .preview h4{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
   .pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px 16px}
@@ -218,7 +230,11 @@
   <section id="view-agreements" style="display:none">
     <div class="qbar" style="justify-content:space-between">
       <div><div style="font-size:13px;color:var(--muted)">Maturity status shown relative to <b id="agQtrLabel"></b></div></div>
-      <button class="btn-primary" id="addBtn">+ New agreement</button>
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px">Flag margin under
+          <input id="marginFlag" type="number" step="1" style="width:58px;border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:13px;text-align:right">%</label>
+        <button class="btn-primary" id="addBtn">+ New agreement</button>
+      </div>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>All RMR agreements</h2><span class="qctx" id="agCount"></span></div>
@@ -247,8 +263,16 @@
           </select>
         </div>
         <div class="fieldset-h">Revenue &amp; commission</div>
-        <div class="fld"><label>Monthly RMR <span class="hint">$ / month</span></label><input id="f_rmr" type="number" step="0.01" placeholder="264"></div>
+        <div class="fld"><label>Monthly RMR <span class="hint">$ / month — used for commission</span></label><input id="f_rmr" type="number" step="0.01" placeholder="264"></div>
         <div class="fld"><label>Commission multiple <span class="hint">2.00 = 200% of RMR</span></label><input id="f_mult" type="number" step="0.01" placeholder="2.00"></div>
+
+        <div class="fieldset-h">Billing schedule</div>
+        <label class="bill-toggle"><input type="checkbox" id="f_custom"> Custom billing schedule (uneven / quarterly / prepaid)</label>
+        <div class="bill-wrap" id="billWrap">
+          <div class="bill-note">Enter each payment by the month it bills and the amount. Lines repeat every year of the term unless you check <b>1st&nbsp;yr&nbsp;only</b> (use that for a one-time prepaid lump). Commission still uses the Monthly RMR above; this schedule only drives cash timing &amp; maturity.</div>
+          <div id="schedRows"></div>
+          <button type="button" class="sched-add" id="schedAdd">+ Add payment</button>
+        </div>
         <div class="fieldset-h">Direct &amp; labor costs</div>
         <div class="fld"><label>Monthly direct cost <span class="hint">$ / month</span></label><input id="f_direct" type="number" step="0.01" placeholder="54"></div>
         <div class="fld"><label>Loaded labor rate <span class="hint">$ / hour</span></label><input id="f_rate" type="number" step="0.01" placeholder="117"></div>
@@ -261,6 +285,9 @@
         <div class="fld"><label>Hours per inspection</label><input id="f_hrs" type="number" step="0.25" placeholder="4"></div>
         <div class="fld"><label>Startup / install labor <span class="hint">hours, one-time</span></label><input id="f_shrs" type="number" step="0.25" placeholder="0"></div>
         <div class="fld"><label>Other startup cost <span class="hint">$ one-time</span></label><input id="f_scost" type="number" step="0.01" placeholder="0"></div>
+        <div class="fld full"><label>Subcontractor annual cost <span class="hint">$ / year — e.g. sprinkler contractor, spread monthly</span></label><input id="f_sub" type="number" step="0.01" placeholder="0"></div>
+        <div class="fieldset-h">Margin</div>
+        <div class="fld"><label>Target margin <span class="hint">% — optional, overrides the global flag</span></label><input id="f_target" type="number" step="1" placeholder="(use global)"></div>
         <div class="fieldset-h">Renewal modeling</div>
         <div class="fld"><label>Assume renewal if needed</label>
           <select id="f_renew"><option value="true" selected>Yes</option><option value="false">No</option></select></div>
@@ -313,14 +340,33 @@ function compute(a){
   const renewExt=a.assume_renewal?(+a.renewal_extension||0):0;
   const activeMonths=term===0?120:term+renewExt;
   const direct=+a.monthly_direct_cost||0,inspCost=(+a.hours_per_inspection||0)*(+a.loaded_labor_rate||0);
+  const subMonthly=(+a.subcontractor_annual_cost||0)/12;
   const startup=(+a.startup_labor_hours||0)*(+a.loaded_labor_rate||0)+(+a.other_startup_cost||0);
+  // billing schedule: calendar-month payments, each repeating yearly unless "once" (first year only)
+  const sched=(a.custom_billing&&Array.isArray(a.billing_schedule)&&a.billing_schedule.length)?a.billing_schedule:null;
+  let actMonth0=0;
+  if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad))actMonth0=ad.getMonth();}
+  function revAt(m){ // revenue billed in contract month m (1-indexed)
+    if(!sched) return rmr;
+    const since=m-1, cal=((actMonth0+since)%12)+1;
+    let s=0;
+    for(const r of sched){ if((+r.month)===cal){ if(r.once&&since>=12) continue; s+=(+r.amount||0); } }
+    return s;
+  }
   let cum=0,releaseMonth=null;
   for(let m=1;m<=activeMonths;m++){
     const insp=inspectionMonth(m,+a.inspection_frequency||0)?inspCost:0;
     const sCost=m===1?startup:0,iComm=m===1?initialPayout:0;
-    cum+=(rmr-direct-insp-sCost-iComm);
+    cum+=(revAt(m)-direct-insp-subMonthly-sCost-iComm);
     if(releaseMonth===null&&deferredPayout>0&&(cum-deferredPayout)>=0)releaseMonth=m;
   }
+  // annual billed revenue (first 12 contract months) for margin + display
+  let annualBilled=0; for(let m=1;m<=12;m++) annualBilled+=revAt(m);
+  const firstBill=revAt(1);
+  const inspAnnual=(+a.inspection_frequency||0)*(+a.hours_per_inspection||0)*(+a.loaded_labor_rate||0);
+  const annualBasis=direct*12+inspAnnual+(+a.subcontractor_annual_cost||0);
+  const statedAnnual=rmr*12;                       // margin = recurring profitability on stated RMR
+  const grossMargin=statedAnnual>0?(statedAnnual-annualBasis)/statedAnnual:null;
   const maturesInHorizon=deferredPayout<=0?true:releaseMonth!==null;
   let initialQI=null,releaseQI=null,releaseDate=null,renewalRequired=false;
   if(a.activation_date){
@@ -335,7 +381,7 @@ function compute(a){
       }
     }
   }
-  return{initPct,defPct,total,initialPayout,deferredPayout,releaseMonth,maturesInHorizon,initialQI,releaseQI,releaseDate,renewalRequired,activeMonths};
+  return{initPct,defPct,total,initialPayout,deferredPayout,releaseMonth,maturesInHorizon,initialQI,releaseQI,releaseDate,renewalRequired,activeMonths,grossMargin,annualBilled,firstBill,scheduled:!!sched};
 }
 function deferredStatus(c,selQI,paid){
   if(c.deferredPayout<=0)return'none';
@@ -348,6 +394,8 @@ const STATUS_META={none:{cls:'c-none',label:'Paid upfront'},held:{cls:'c-held',l
 
 /* state */
 let sb=null,AGREEMENTS=[],selQI=CUR_QI,view='quarter',editingId=null,signedIn=false;
+let marginFlagPct=(()=>{const v=parseFloat(LS.get('rmr_margin_flag'));return isNaN(v)?40:v;})();
+function marginThreshold(a){ return (a.target_margin!=null&&a.target_margin!=='')?(+a.target_margin):(marginFlagPct/100); }
 
 /* ---- auth + boot ---- */
 function showLogin(needConn){
@@ -473,6 +521,7 @@ function renderQuarter(){
 }
 function renderAgreements(){
   $('agQtrLabel').textContent=qLabel(selQI);
+  $('marginFlag').value=marginFlagPct;
   $('agCount').textContent=`${AGREEMENTS.length} agreement${AGREEMENTS.length===1?'':'s'}`;
   if(!AGREEMENTS.length){$('agTableWrap').innerHTML=`<div class="empty"><b>No agreements yet</b>Add your first RMR agreement to start tracking maturity.</div>`;return;}
   const rows=AGREEMENTS.map(a=>{
@@ -480,11 +529,18 @@ function renderAgreements(){
     const relTxt=c.deferredPayout<=0?'—':(c.maturesInHorizon?(c.releaseQI!=null?qLabel(c.releaseQI):`mo ${c.releaseMonth}`):'no maturity');
     const renewBadge=c.renewalRequired?'<span class="badge-renewal">Renewal</span>':'';
     const termTxt=(+a.contract_term===0)?'M2M':`${a.contract_term}mo`;
+    const thr=marginThreshold(a);
+    const thin=c.grossMargin!=null&&c.grossMargin<thr;
+    const mPct=c.grossMargin==null?'—':`${Math.round(c.grossMargin*1000)/10}%`;
+    const ownTarget=(a.target_margin!=null&&a.target_margin!=='');
+    const mCell=c.grossMargin==null?'<span style="color:var(--none)">—</span>'
+      :`<span class="chip ${thin?'c-maturing':'c-none'}" title="${ownTarget?'target '+Math.round(a.target_margin*100)+'%':'global '+marginFlagPct+'%'}" style="${thin?'':'background:transparent;color:var(--muted)'}">${mPct}${thin?' ⚠':''}</span>`;
     return `<tr class="${c.renewalRequired&&st!=='paid'?'flag-renewal':''}">
       <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
       <td>${esc(a.customer_name||'—')}</td>
-      <td class="mono">${fmt(+a.monthly_rmr||0)}</td>
+      <td class="mono">${fmt(+a.monthly_rmr||0)}${c.scheduled?'<div style="font-size:10px;color:var(--orange);font-weight:600;letter-spacing:.03em">SCHEDULED</div>':''}</td>
       <td>${termTxt}</td>
+      <td>${mCell}</td>
       <td class="num mono">${fmt(c.total)}</td>
       <td class="num mono">${fmt(c.initialPayout)}</td>
       <td class="num mono">${fmt(c.deferredPayout)}</td>
@@ -492,7 +548,7 @@ function renderAgreements(){
       <td><span class="chip ${meta.cls}">${meta.label}</span></td>
       <td><button class="iconbtn" data-edit="${a.id}">Edit</button></td>
     </tr>`;}).join('');
-  $('agTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>RMR</th><th>Term</th><th class="num">Commission</th><th class="num">Initial</th><th class="num">Deferred</th><th>Releases</th><th>Maturity</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('agTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>RMR</th><th>Term</th><th>Margin</th><th class="num">Commission</th><th class="num">Initial</th><th class="num">Deferred</th><th>Releases</th><th>Maturity</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('agTableWrap').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openModal(b.dataset.edit));
 }
 function renderLegend(){
@@ -501,6 +557,31 @@ function renderLegend(){
 }
 
 /* ---- modal ---- */
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function schedRowHTML(month,amount,once){
+  const opts=MONTHS.map((mo,i)=>`<option value="${i+1}" ${(+month===i+1)?'selected':''}>${mo}</option>`).join('');
+  return `<div class="sched-row">
+    <select class="sched-month">${opts}</select>
+    <input class="sched-amt" type="number" step="0.01" placeholder="amount $" value="${amount!=null&&amount!==''?amount:''}">
+    <label class="sched-once"><input type="checkbox" class="sched-once-cb" ${once?'checked':''}> 1st yr only</label>
+    <button type="button" class="sched-del">×</button>
+  </div>`;
+}
+function addSchedRow(month,amount,once){
+  const wrap=$('schedRows');wrap.insertAdjacentHTML('beforeend',schedRowHTML(month||1,amount,once));
+  const row=wrap.lastElementChild;
+  row.querySelector('.sched-del').onclick=()=>{row.remove();updatePreview();};
+  row.querySelectorAll('select,input').forEach(el=>el.addEventListener('input',updatePreview));
+  updatePreview();
+}
+function readSchedule(){
+  return [...document.querySelectorAll('#schedRows .sched-row')].map(r=>({
+    month:+r.querySelector('.sched-month').value,
+    amount:+r.querySelector('.sched-amt').value||0,
+    once:r.querySelector('.sched-once-cb').checked
+  })).filter(x=>x.amount>0);
+}
+function toggleBilling(){ $('billWrap').classList.toggle('show',$('f_custom').checked); updatePreview(); }
 function todayISO(){return new Date().toISOString().slice(0,10);}
 function openModal(id){
   editingId=id||null;const a=id?AGREEMENTS.find(x=>x.id===id):null;
@@ -510,9 +591,17 @@ function openModal(id){
   $('f_date').value=v('activation_date')||(a?'':todayISO());
   $('f_term').value=a?String(a.contract_term):'12';
   $('f_rmr').value=v('monthly_rmr');$('f_mult').value=v('commission_multiple');
+  $('f_custom').checked=!!(a&&a.custom_billing);
+  $('billWrap').classList.toggle('show',$('f_custom').checked);
+  $('schedRows').innerHTML='';
+  const sch=(a&&Array.isArray(a.billing_schedule))?a.billing_schedule:[];
+  if(sch.length) sch.forEach(r=>addSchedRow(r.month,r.amount,r.once));
+  else if(a&&a.custom_billing) addSchedRow(1,'',false);
   $('f_direct').value=v('monthly_direct_cost');$('f_rate').value=v('loaded_labor_rate');
   $('f_freq').value=a?String(a.inspection_frequency):'2';$('f_hrs').value=v('hours_per_inspection');
   $('f_shrs').value=v('startup_labor_hours');$('f_scost').value=v('other_startup_cost');
+  $('f_sub').value=v('subcontractor_annual_cost');
+  $('f_target').value=(a&&a.target_margin!=null&&a.target_margin!=='')?Math.round(a.target_margin*100):'';
   $('f_renew').value=a?String(a.assume_renewal):'true';$('f_ext').value=v('renewal_extension','12');
   $('f_notes').value=v('notes');$('mDelete').style.display=a?'inline-block':'none';
   updatePreview();$('scrim').classList.add('show');
@@ -522,16 +611,26 @@ function readForm(){return{
   id:editingId||undefined,agreement_number:$('f_num').value.trim(),customer_name:$('f_cust').value.trim(),
   activation_date:$('f_date').value||null,contract_term:+$('f_term').value,monthly_rmr:+$('f_rmr').value||0,
   commission_multiple:+$('f_mult').value||0,monthly_direct_cost:+$('f_direct').value||0,loaded_labor_rate:+$('f_rate').value||0,
+  custom_billing:$('f_custom').checked,billing_schedule:readSchedule(),
   inspection_frequency:+$('f_freq').value,hours_per_inspection:+$('f_hrs').value||0,startup_labor_hours:+$('f_shrs').value||0,
-  other_startup_cost:+$('f_scost').value||0,assume_renewal:$('f_renew').value==='true',renewal_extension:+$('f_ext').value||0,notes:$('f_notes').value.trim()};}
+  other_startup_cost:+$('f_scost').value||0,subcontractor_annual_cost:+$('f_sub').value||0,
+  target_margin:($('f_target').value.trim()===''?null:(+$('f_target').value/100)),
+  assume_renewal:$('f_renew').value==='true',renewal_extension:+$('f_ext').value||0,notes:$('f_notes').value.trim()};}
 function updatePreview(){
-  const c=compute(readForm());
+  const row=readForm();const c=compute(row);
   const relTxt=c.deferredPayout<=0?'— (full upfront)':(c.maturesInHorizon?(c.releaseQI!=null?qLabel(c.releaseQI)+` · mo ${c.releaseMonth}`:`month ${c.releaseMonth}`):'does not mature in horizon');
+  const thr=marginThreshold(row);
+  const mPct=c.grossMargin==null?null:Math.round(c.grossMargin*1000)/10;
+  const thin=c.grossMargin!=null&&c.grossMargin<thr;
+  const mColor=mPct==null?'var(--muted)':(thin?'var(--maturing)':'var(--payable)');
+  const mTxt=mPct==null?'—':`${mPct}%${thin?' ⚠':''}`;
   $('mPreview').innerHTML=`<h4>Live calculation</h4><div class="pgrid">
     <div><span>Total commission</span><b>${fmt(c.total)}</b></div>
     <div><span>Initial (paid now)</span><b style="color:var(--payable)">${fmt(c.initialPayout)}</b></div>
     <div><span>Deferred balance</span><b style="color:var(--maturing)">${fmt(c.deferredPayout)}</b></div>
     <div><span>Split</span><b>${Math.round(c.initPct*100)}% / ${Math.round(c.defPct*100)}%</b></div>
+    <div><span>Gross margin <span style="color:var(--none)">(flag &lt;${Math.round(thr*100)}%)</span></span><b style="color:${mColor};font-size:15px">${mTxt}</b></div>
+    ${c.scheduled?`<div><span>Annual billed</span><b style="font-size:15px">${fmt(c.annualBilled)}</b></div><div><span>First bill</span><b style="font-size:15px">${fmt(c.firstBill)}</b></div>`:''}
     <div><span>Deferred releases</span><b style="font-size:14px">${relTxt}</b></div>
     ${c.renewalRequired?'<div><span>Renewal</span><b style="color:var(--orange);font-size:14px">Required to release</b></div>':''}</div>`;
 }
@@ -563,9 +662,12 @@ $('qSelect').onchange=e=>{selQI=+e.target.value;renderQuarter();};
 $('tabQuarter').onclick=()=>switchView('quarter');
 $('tabAgreements').onclick=()=>switchView('agreements');
 $('addBtn').onclick=()=>{ if(!sb){toast('Sign in first');return;} openModal(null); };
+$('f_custom').onchange=toggleBilling;
+$('schedAdd').onclick=()=>addSchedRow(1,'',false);
+$('marginFlag').onchange=()=>{const v=parseFloat($('marginFlag').value);if(!isNaN(v)&&v>=0&&v<=100){marginFlagPct=v;LS.set('rmr_margin_flag',String(v));renderAgreements();toast('Margin flag set to '+v+'%');}};
 $('mClose').onclick=closeModal;$('mCancel').onclick=closeModal;
 $('scrim').onclick=e=>{if(e.target===$('scrim'))closeModal();};
-['f_num','f_cust','f_date','f_term','f_rmr','f_mult','f_direct','f_rate','f_freq','f_hrs','f_shrs','f_scost','f_renew','f_ext'].forEach(id=>{const el=$(id);el.addEventListener('input',updatePreview);el.addEventListener('change',updatePreview);});
+['f_num','f_cust','f_date','f_term','f_rmr','f_mult','f_direct','f_rate','f_freq','f_hrs','f_shrs','f_scost','f_sub','f_target','f_renew','f_ext'].forEach(id=>{const el=$(id);el.addEventListener('input',updatePreview);el.addEventListener('change',updatePreview);});
 $('mSave').onclick=async()=>{
   if(!sb){toast('Sign in first');return;}
   const row=readForm();
