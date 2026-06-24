@@ -526,6 +526,17 @@ function renewalTotalsFor(agreementId){
 }
 let marginFlagPct=(()=>{const v=parseFloat(LS.get('rmr_margin_flag'));return isNaN(v)?40:v;})();
 let agFilter='all';
+let agSort=null; // {key,dir}
+const AG_SORT={
+  num:a=>{const m=String(a.agreement_number||'').match(/\d+/);return m?+m[0]:Infinity;},
+  cust:a=>String(a.customer_name||'').toLowerCase(),
+  rmr:a=>+a.monthly_rmr||0,
+  term:a=>+a.contract_term||0,
+  margin:a=>{const g=compute(a).grossMargin;return g==null?-Infinity:g;},
+  init:a=>compute(a).initialCommission,
+  renew:a=>compute(a).renewalCommission,
+  rtype:a=>{const c=compute(a);if(c.renewMult<=0)return 2;return a.autorenew?0:1;}
+};
 function marginThreshold(a){ return (a.target_margin!=null&&a.target_margin!=='')?(+a.target_margin):(marginFlagPct/100); }
 
 /* ---- auth + boot ---- */
@@ -694,7 +705,13 @@ function renderAgreements(){
   const qsorted=[...qset].sort((a,b)=>b-a);
   $('agFilter').innerHTML='<option value="all">All time</option>'+qsorted.map(qi=>`<option value="${qi}">${qLabel(qi)}</option>`).join('');
   $('agFilter').value=(agFilter==='all')?'all':String(agFilter);
-  const list=(agFilter==='all')?AGREEMENTS:AGREEMENTS.filter(a=>compute(a).initialQI===agFilter);
+  let list=(agFilter==='all')?AGREEMENTS:AGREEMENTS.filter(a=>compute(a).initialQI===agFilter);
+  if(agSort&&AG_SORT[agSort.key]){
+    const f=AG_SORT[agSort.key],dir=agSort.dir==='asc'?1:-1;
+    list=[...list].sort((x,y)=>{const a=f(x),b=f(y);
+      if(typeof a==='string')return a.localeCompare(b)*dir;
+      return (a<b?-1:a>b?1:0)*dir;});
+  }
   const totalRMR=list.reduce((s,a)=>s+(+a.monthly_rmr||0),0);
   $('agShown').textContent=`${list.length} agreement${list.length===1?'':'s'}`;
   $('agRmrTotal').textContent=fmt(totalRMR);
@@ -724,7 +741,18 @@ function renderAgreements(){
       <td>${autoTag}</td>
       <td><button class="iconbtn" data-edit="${a.id}">Edit</button></td>
     </tr>`;}).join('');
-  $('agTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>RMR</th><th>Term</th><th>Margin</th><th class="num">Initial comm.</th><th class="num">Renewal comm.</th><th>Renewal</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  const th=(key,label,numCls)=>{
+    const active=agSort&&agSort.key===key;
+    const arrow=active?(agSort.dir==='asc'?' ▲':' ▼'):' ↕';
+    return `<th class="${numCls||''} agsort" data-sort="${key}" style="cursor:pointer;user-select:none;white-space:nowrap">${label}<span style="font-size:9px;color:${active?'var(--orange)':'var(--line)'}">${arrow}</span></th>`;
+  };
+  $('agTableWrap').innerHTML=`<table><thead><tr>${th('num','Agr #')}${th('cust','Customer')}${th('rmr','RMR')}${th('term','Term')}${th('margin','Margin')}${th('init','Initial comm.','num')}${th('renew','Renewal comm.','num')}${th('rtype','Renewal')}<th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('agTableWrap').querySelectorAll('[data-sort]').forEach(h=>h.onclick=()=>{
+    const k=h.dataset.sort;
+    if(agSort&&agSort.key===k){agSort={key:k,dir:agSort.dir==='asc'?'desc':'asc'};}
+    else{agSort={key:k,dir:'asc'};}
+    renderAgreements();
+  });
   $('agTableWrap').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openModal(b.dataset.edit));
 }
 /* ---- Pending Renewals (manual-renewal agreements approaching their renewal date) ---- */
