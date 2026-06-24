@@ -128,6 +128,7 @@
   .btn-ghost{background:none;border:1px solid var(--line);border-radius:9px;padding:9px 16px;font-size:14px;font-weight:500;color:var(--ink)}
   .empty{padding:48px 20px;text-align:center;color:var(--muted)}
   .empty b{display:block;color:var(--ink);font-size:16px;margin-bottom:5px;font-weight:600}
+  #agTableWrap{overflow-x:auto}
 
   .scrim{position:fixed;inset:0;background:rgba(16,28,55,.45);display:none;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50}
   .scrim.show{display:flex}
@@ -476,8 +477,13 @@ function compute(a){
   const firstBill=revAt(1);
   const inspAnnual=(+a.inspection_frequency||0)*(+a.hours_per_inspection||0)*(+a.loaded_labor_rate||0);
   const annualBasis=direct*12+inspAnnual+(+a.subcontractor_annual_cost||0);
-  const statedAnnual=rmr*12;                       // margin = recurring profitability on stated RMR
+  const statedAnnual=rmr*12;                       // True margin = recurring profitability on stated RMR
   const grossMargin=statedAnnual>0?(statedAnnual-annualBasis)/statedAnnual:null;
+  // --- Phase 1: Accelerator (display-only, never changes live payouts) ---
+  const accelMargin=rmr>0?(rmr-direct)/rmr:null;   // simple (RMR - Direct) / RMR
+  const accelRate=accelMargin==null?0:(accelMargin>=0.60?0.25:(accelMargin>=0.50?0.10:0));
+  const baseCommission=total;                       // RMR x multiple
+  const adjustedCommission=baseCommission*(1+accelRate);
   const maturesInHorizon=deferredPayout<=0?true:releaseMonth!==null;
   let initialQI=null,releaseQI=null,releaseDate=null,renewalRequired=false;
   if(a.activation_date){
@@ -492,7 +498,7 @@ function compute(a){
       }
     }
   }
-  return{initPct,defPct,total,initialPayout,deferredPayout,releaseMonth,maturesInHorizon,initialQI,releaseQI,releaseDate,renewalRequired,activeMonths,grossMargin,annualBilled,firstBill,scheduled:!!sched};
+  return{initPct,defPct,total,initialPayout,deferredPayout,releaseMonth,maturesInHorizon,initialQI,releaseQI,releaseDate,renewalRequired,activeMonths,grossMargin,annualBilled,firstBill,scheduled:!!sched,accelMargin,accelRate,baseCommission,adjustedCommission};
 }
 function deferredStatus(c,selQI,paid){
   if(c.deferredPayout<=0)return'none';
@@ -658,20 +664,25 @@ function renderAgreements(){
     const ownTarget=(a.target_margin!=null&&a.target_margin!=='');
     const mCell=c.grossMargin==null?'<span style="color:var(--none)">—</span>'
       :`<span class="chip ${thin?'c-maturing':'c-none'}" title="${ownTarget?'target '+Math.round(a.target_margin*100)+'%':'global '+marginFlagPct+'%'}" style="${thin?'':'background:transparent;color:var(--muted)'}">${mPct}${thin?' ⚠':''}</span>`;
+    const accelPct=c.accelMargin==null?'—':`${Math.round(c.accelMargin*1000)/10}%`;
+    const accelColor=c.accelRate>0?'var(--payable)':'var(--none)';
+    const accelCell=`<div style="font-weight:600">${accelPct}</div><div style="font-size:10px;font-weight:700;color:${accelColor}">+${Math.round(c.accelRate*100)}%</div>`;
+    const commCell=`${fmt(c.total)}${c.accelRate>0?`<div style="font-size:10px;color:var(--payable);font-weight:600">▲ ${fmt(c.adjustedCommission)}</div>`:''}`;
     return `<tr class="${c.renewalRequired&&st!=='paid'?'flag-renewal':''}">
       <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
       <td>${esc(a.customer_name||'—')}</td>
       <td class="mono">${fmt(+a.monthly_rmr||0)}${c.scheduled?'<div style="font-size:10px;color:var(--orange);font-weight:600;letter-spacing:.03em">SCHEDULED</div>':''}</td>
       <td>${termTxt}</td>
       <td>${mCell}</td>
-      <td class="num mono">${fmt(c.total)}</td>
+      <td>${accelCell}</td>
+      <td class="num mono">${commCell}</td>
       <td class="num mono">${fmt(c.initialPayout)}</td>
       <td class="num mono">${fmt(c.deferredPayout)}</td>
       <td class="mono" style="color:var(--muted)">${relTxt}${renewBadge}</td>
       <td><span class="chip ${meta.cls}">${meta.label}</span></td>
       <td><button class="iconbtn" data-edit="${a.id}">Edit</button></td>
     </tr>`;}).join('');
-  $('agTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>RMR</th><th>Term</th><th>Margin</th><th class="num">Commission</th><th class="num">Initial</th><th class="num">Deferred</th><th>Releases</th><th>Maturity</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('agTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>RMR</th><th>Term</th><th>Margin</th><th>Accel</th><th class="num">Commission</th><th class="num">Initial</th><th class="num">Deferred</th><th>Releases</th><th>Maturity</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('agTableWrap').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openModal(b.dataset.edit));
 }
 function renderLegend(){
@@ -752,8 +763,11 @@ function updatePreview(){
     <div><span>Initial (paid now)</span><b style="color:var(--payable)">${fmt(c.initialPayout)}</b></div>
     <div><span>Deferred balance</span><b style="color:var(--maturing)">${fmt(c.deferredPayout)}</b></div>
     <div><span>Split</span><b>${Math.round(c.initPct*100)}% / ${Math.round(c.defPct*100)}%</b></div>
-    <div><span>Gross margin <span style="color:var(--none)">(flag &lt;${Math.round(thr*100)}%)</span></span><b style="color:${mColor};font-size:15px">${mTxt}</b></div>
+    <div><span>True margin <span style="color:var(--none)">(flag &lt;${Math.round(thr*100)}%)</span></span><b style="color:${mColor};font-size:15px">${mTxt}</b></div>
     ${c.scheduled?`<div><span>Annual billed</span><b style="font-size:15px">${fmt(c.annualBilled)}</b></div><div><span>First bill</span><b style="font-size:15px">${fmt(c.firstBill)}</b></div>`:''}
+    <div><span>Accelerator margin <span style="color:var(--none)">(RMR−Direct)</span></span><b style="font-size:15px">${c.accelMargin==null?'—':Math.round(c.accelMargin*1000)/10+'%'}</b></div>
+    <div><span>Accelerator</span><b style="color:${c.accelRate>0?'var(--payable)':'var(--muted)'};font-size:15px">+${Math.round(c.accelRate*100)}%</b></div>
+    <div><span>Adjusted commission <span style="color:var(--none)">(compare only)</span></span><b style="font-size:15px">${fmt(c.baseCommission)}${c.accelRate>0?' ▲ '+fmt(c.adjustedCommission):''}</b></div>
     <div><span>Deferred releases</span><b style="font-size:14px">${relTxt}</b></div>
     ${c.renewalRequired?'<div><span>Renewal</span><b style="color:var(--orange);font-size:14px">Required to release</b></div>':''}</div>`;
 }
