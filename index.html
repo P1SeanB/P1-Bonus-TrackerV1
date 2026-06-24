@@ -246,9 +246,7 @@
 <nav class="tabs">
   <button class="active" data-view="quarter" id="tabQuarter">Quarter view</button>
   <button data-view="agreements" id="tabAgreements">Agreements</button>
-  <button data-view="renewals" id="tabRenewals">Renewal Opportunities</button>
-  <button data-view="pipeline" id="tabPipeline">Bonus Pipeline</button>
-  <button data-view="comparison" id="tabComparison">Comparison</button>
+  <button data-view="renewals" id="tabRenewals">Pending Renewals</button>
 </nav>
 
 <main>
@@ -297,36 +295,12 @@
 
   <section id="view-renewals" style="display:none">
     <div class="qbar" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
-      <div style="font-size:13px;color:var(--muted)">Forecasted renewal value for term agreements (M2M excluded). <b style="color:var(--ink)">Potential</b> figures assume renewal at current terms; growth uses your projected renewal RMR.</div>
+      <div style="font-size:13px;color:var(--muted)">Agreements with <b style="color:var(--ink)">autorenewal OFF</b> that need a manual renewal to release the renewal commission. Rows shift <b style="color:var(--ink)">green → amber → red</b> as the renewal date approaches.</div>
     </div>
     <div id="renQuickCards" class="cards" style="margin-bottom:16px"></div>
     <div class="panel">
-      <div class="panel-head"><h2>Renewal opportunities</h2><span class="qctx" id="renCount"></span></div>
+      <div class="panel-head"><h2>Pending manual renewals</h2><span class="qctx" id="renCount"></span></div>
       <div id="renTableWrap"></div>
-    </div>
-  </section>
-
-  <section id="view-pipeline" style="display:none">
-    <div class="qbar" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
-      <div style="font-size:13px;color:var(--muted)">Forward-looking bonus forecast. All figures are <b style="color:var(--ink)">comparison/forecast only</b> — not in live payouts or the voucher.</div>
-    </div>
-    <div id="pipeCards" class="cards" style="margin-bottom:16px"></div>
-    <div class="panel">
-      <div class="panel-head"><h2>Upcoming expiring agreements</h2><span class="qctx" id="pipeCount"></span></div>
-      <div id="pipeTableWrap"></div>
-    </div>
-  </section>
-
-  <section id="view-comparison" style="display:none">
-    <div class="qbar" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
-      <div style="font-size:13px;color:var(--muted)"><b style="color:var(--ink)">Current Plan</b> = RMR × 200%. <b style="color:var(--ink)">Proposed Plan</b> = Current + margin accelerator + earned renewal & growth bonuses.</div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)" title="When on, the accelerator boosts your commission and completed renewals pay out — in the quarter view and the payroll voucher.">
-        <input type="checkbox" id="goLive"> Apply Proposed to live payouts <span id="goLiveState" style="font-size:11px;font-weight:600"></span></label>
-    </div>
-    <div id="cmpCards" class="cards" style="margin-bottom:16px"></div>
-    <div class="panel">
-      <div class="panel-head"><h2>Current vs Proposed — by agreement</h2><span class="qctx" id="cmpCount"></span></div>
-      <div id="cmpTableWrap"></div>
     </div>
   </section>
 </main>
@@ -351,8 +325,9 @@
           </select>
         </div>
         <div class="fieldset-h">Revenue &amp; commission</div>
-        <div class="fld"><label>Monthly RMR <span class="hint">$ / month — used for commission</span></label><input id="f_rmr" type="number" step="0.01" placeholder="264"></div>
-        <div class="fld"><label>Commission multiple <span class="hint">2.00 = 200% of RMR</span></label><input id="f_mult" type="number" step="0.01" placeholder="2.00"></div>
+        <div class="fld full"><label>Monthly RMR <span class="hint">$ / month — commission = RMR × the term rate</span></label><input id="f_rmr" type="number" step="0.01" placeholder="264"></div>
+        <div class="fld full"><label style="color:var(--muted)">Commission rates are set by term — Initial: 12mo 100% · 24mo 125% · 36/60 200%. Renewal: 12mo 150% · 24mo 125% · 36/60 none.</label></div>
+        <label class="bill-toggle" style="margin-top:6px"><input type="checkbox" id="f_auto"> Autorenewal — auto-renews &amp; auto-pays the renewal commission at the renewal date (off = manual renewal needed)</label>
 
         <div class="fieldset-h">Billing schedule</div>
         <label class="bill-toggle"><input type="checkbox" id="f_custom"> Custom billing schedule (uneven / quarterly / prepaid)</label>
@@ -375,16 +350,9 @@
         <div class="fld"><label>Other startup cost <span class="hint">$ one-time</span></label><input id="f_scost" type="number" step="0.01" placeholder="0"></div>
         <div class="fld full"><label>Subcontractor annual cost <span class="hint">$ / year — e.g. sprinkler contractor, spread monthly</span></label><input id="f_sub" type="number" step="0.01" placeholder="0"></div>
         <div class="fieldset-h">Margin</div>
-        <div class="fld"><label>Target margin <span class="hint">% — optional, overrides the global flag</span></label><input id="f_target" type="number" step="1" placeholder="(use global)"></div>
-        <div class="fieldset-h">Renewal modeling</div>
-        <div class="fld"><label>Assume renewal if needed</label>
-          <select id="f_renew"><option value="true" selected>Yes</option><option value="false">No</option></select></div>
-        <div class="fld"><label>Renewal extension <span class="hint">months modeled past term</span></label><input id="f_ext" type="number" placeholder="12"></div>
-        <div class="fld full"><label>Projected renewal RMR <span class="hint">$ / month — optional; expected RMR at next renewal (forecast only)</span></label><input id="f_projrmr" type="number" step="0.01" placeholder="leave blank for $0 growth"></div>
+        <div class="fld"><label>Target margin <span class="hint">% — optional, overrides the global low-margin flag</span></label><input id="f_target" type="number" step="1" placeholder="(use global)"></div>
         <div class="fld full"><label>Notes</label><input id="f_notes" placeholder="Optional"></div>
         <div class="preview" id="mPreview"></div>
-        <div class="fieldset-h">Renewal history</div>
-        <div class="fld full" id="renewalBox"></div>
       </div>
     </div>
     <div class="modal-foot">
@@ -401,68 +369,57 @@
   <div class="guide-modal">
     <div class="guide-head">
       <div>
-        <h2>How bonus maturity works</h2>
+        <h2>How your commission works</h2>
         <div class="sub">A quick guide — no finance background needed.</div>
       </div>
       <button class="x" id="guideClose">×</button>
     </div>
     <div class="guide-body">
       <h3>The big idea</h3>
-      <p>When you sell a recurring-revenue (RMR) agreement, you earn a bonus on it. Part is paid right away, and part is <b>held back until the account proves itself</b>. "Maturity" is the moment that held-back part is earned and ready to be paid.</p>
+      <p>You earn a commission on every recurring-revenue (RMR) agreement you sell. The commission is a <b>percentage of the RMR</b>, and the percentage is set by how long the customer commits for. You earn it again — at the renewal rate — when the agreement renews.</p>
 
-      <h3>Your bonus comes in two parts</h3>
-      <p><b>Initial payout</b> — paid right away when the agreement activates.<br>
-      <b>Deferred balance</b> — held back, released later once the account <i>matures</i>.</p>
-      <p>How big each piece is depends on the contract term:</p>
+      <h3>Initial commission (when you sell it)</h3>
       <table class="guide-table">
-        <thead><tr><th>Contract term</th><th>Paid upfront</th><th>Held (deferred)</th></tr></thead>
+        <thead><tr><th>Contract term</th><th>Initial commission</th></tr></thead>
         <tbody>
-          <tr><td>Month-to-month</td><td>25%</td><td><b>75%</b></td></tr>
-          <tr><td>12 months</td><td>50%</td><td><b>50%</b></td></tr>
-          <tr><td>24 months</td><td>75%</td><td><b>25%</b></td></tr>
-          <tr><td>36 months</td><td><b>100%</b></td><td>none</td></tr>
-          <tr><td>60 months</td><td><b>100%</b></td><td>none</td></tr>
+          <tr><td>12 months</td><td><b>100%</b> of RMR</td></tr>
+          <tr><td>24 months</td><td><b>125%</b> of RMR</td></tr>
+          <tr><td>36 / 60 months / longer</td><td><b>200%</b> of RMR</td></tr>
         </tbody>
       </table>
-      <p>A longer commitment pays more upfront and holds back less. 36- and 60-month deals pay the whole bonus at activation — nothing is deferred, so there's no maturity to wait on. Those show as <b>"Paid upfront."</b></p>
+      <p>Paid the quarter the agreement is sold. So a $6,184 RMR on a 12-month deal pays <b>$6,184</b> (100%); a 36-month deal pays <b>$12,368</b> (200%).</p>
 
-      <h3>What "matured" actually means</h3>
-      <div class="guide-callout">The deferred balance matures the first month the account's running cash can cover it — and still stay at or above $0.</div>
-      <p>The tool tracks money in versus money out, month by month, adding it up as it goes. The moment that running total is big enough to pay you the deferred balance without going negative, the bonus is <b>matured</b> and becomes payable. Until then it's <b>held</b>; once you collect it, you mark it <b>paid</b>.</p>
+      <h3>Renewal commission (once, at the first renewal)</h3>
+      <table class="guide-table">
+        <thead><tr><th>Contract term</th><th>Renewal commission</th></tr></thead>
+        <tbody>
+          <tr><td>12 months</td><td><b>150%</b> of RMR</td></tr>
+          <tr><td>24 months</td><td><b>125%</b> of RMR</td></tr>
+          <tr><td>36 / 60 months</td><td>none</td></tr>
+        </tbody>
+      </table>
+      <p>Earned one time, when the agreement reaches its renewal date. A 12-month $6,184 RMR deal pays <b>$9,276</b> (150%) at renewal.</p>
 
-      <h3>What speeds it up or slows it down</h3>
-      <p><b>Money in:</b> what the account is billed that month (a flat monthly amount, or a custom billing schedule).<br>
-      <b>Money out:</b> monthly service cost, inspection labor, any subcontractor cost, one-time startup, and the initial bonus paid at activation.</p>
-      <p>So: a <b>big early bill matures it fast</b> (a prepaid account can mature in month 1). <b>Heavy costs</b> like a subcontractor or thin margins build cash slower, so it matures later. And a <b>bigger deferred balance</b> takes longer for the cash to catch up.</p>
+      <h3>Autorenewal — on or off</h3>
+      <div class="guide-legend">
+        <div class="row"><b>ON</b> — the agreement auto-renews and the renewal commission pays out automatically in the quarter it renews. Nothing for you to do.</div>
+        <div class="row"><b>OFF</b> — the agreement shows in the <b>Pending Renewals</b> tab and shifts color (green → amber → red) as its renewal date nears. You must <b>manually renew</b> it there to release the renewal commission.</div>
+      </div>
 
-      <h3>The renewal catch</h3>
-      <p>Sometimes an account won't mature until <i>after</i> its initial term ends. Then releasing the deferred balance depends on the <b>customer actually renewing</b>. Those get an <b>orange "renewal required" flag</b> — earned, but conditional.</p>
+      <h3>The low-margin hold</h3>
+      <div class="guide-callout">A thin-margin deal's commission is held until the company breaks even on it.</div>
+      <p>If an account's <b>True margin</b> is below your flag (default 40%), its commission doesn't pay at activation — it's <b>held</b> until the account's running cash covers the commission and costs (breakeven). Healthy-margin deals pay right away. A low-margin deal that never breaks even stays held. This protects the company from paying on a deal that hasn't earned its keep.</p>
 
       <h3>What the colors mean</h3>
       <div class="guide-legend">
-        <div class="row"><span class="chip c-payable">Payable</span> matured and owed to you</div>
-        <div class="row"><span class="chip c-maturing">Maturing</span> set to release next quarter</div>
-        <div class="row"><span class="chip c-held">Held</span> further out, or won't mature in the modeled window</div>
+        <div class="row"><span class="chip c-payable">Payable</span> owed to you this quarter</div>
         <div class="row"><span class="chip c-paid">Paid</span> you've marked it collected</div>
-        <div class="row"><span class="chip c-none">Paid upfront</span> no deferred balance (36/60-month deals)</div>
-        <div class="row"><span class="badge-renewal">Renewal</span> releases only if the customer renews</div>
+        <div class="row"><span class="chip c-maturing">Manual renewal needed</span> renew it to get paid</div>
+        <div class="row"><span class="chip c-held">Held</span> low margin (not yet broken even) or overdue renewal</div>
       </div>
-      <p>The colors update based on the quarter you're viewing, so clicking through quarters shows what was due then, now, and next.</p>
 
-      <h3>A quick example</h3>
-      <p>Two identical 12-month agreements, each earning a $528 bonus ($264 upfront, $264 deferred). With <b>standard monthly billing</b>, the account takes about <b>3 months</b> to cover the deferred balance. With a <b>large prepaid first bill</b>, the cash is there immediately and it matures in <b>month 1</b>. Same bonus — only the <i>timing</i> changes, based on when the money arrives.</p>
-
-      <h3>Extra ways you earn (the proposed plan, when it's live)</h3>
-      <p>When the <b>"Apply Proposed to live payouts"</b> switch is on (Comparison tab), three rewards are added on top of the base bonus:</p>
-      <div class="guide-legend">
-        <div class="row"><b>Margin accelerator</b> — a high-margin account boosts your commission: 50–59.99% margin → <b>+10%</b>, 60%+ → <b>+25%</b>. Under 50% → no change. It can only raise a commission, never lower it. The bigger bonus still splits into upfront/deferred and still respects maturity.</div>
-        <div class="row"><b>Renewal bonus</b> — when you record a <b>Completed</b> renewal: 12-month → previous RMR × 125%, 24-month → × 75%, 36/60-month → × 50%.</div>
-        <div class="row"><b>Growth bonus</b> — if the account grows on renewal: (renewed RMR − previous RMR) × 100%.</div>
-      </div>
-      <p>Renewal and growth bonuses pay <b>in full in the quarter the renewal is completed</b> (no maturity hold — the account already proved itself). The accelerator margin uses (RMR − Direct cost) ÷ RMR. When the switch is <b>off</b>, none of this applies and payouts run on the classic base commission only.</p>
-
-      <h3>Margin: two numbers, two jobs</h3>
-      <p><b>True margin</b> (the flagged one) subtracts labor and subcontractor costs — it's your account-health readout and never gates or shrinks a bonus; it only affects maturity indirectly (a thin account builds cash slower, so it matures later). <b>Accelerator margin</b> = (RMR − Direct) ÷ RMR — this is the one that drives the accelerator boost above. They can differ on the same account, which is why both are shown.</p>
+      <h3>Margin is information only</h3>
+      <p><b>True margin</b> = recurring profit after direct, labor, and subcontractor costs. It's shown as an account-health readout and powers the low-margin hold above — but it never changes the size of your commission. There are no accelerators; the commission is simply the term rate × RMR.</p>
     </div>
   </div>
 </div>
@@ -512,71 +469,58 @@ function qLabel(qi){const y=Math.floor(qi/4),q=(qi%4)+1;return`Q${q} ${y}`;}
 function qIndexFromDate(d){return qIndexFromYM(d.getFullYear(),d.getMonth());}
 const CUR_QI=qIndexFromDate(now);
 
-/* core model */
+/* core model — clean plan: initial % + renewal % by term, low-margin maturity hold */
 function inspectionMonth(m,f){if(!f)return false;const iv=Math.round(12/f);return iv>0&&m%iv===0;}
+function INIT_MULT(t){t=+t;if(t>=36)return 2.00;if(t===24)return 1.25;if(t===12)return 1.00;return 1.00;}   // M2M→1.00
+function RENEW_MULT(t){t=+t;if(t>=36)return 0;if(t===24)return 1.25;if(t===12)return 1.50;return 0;}          // once, at first renewal
 function compute(a){
-  const term=+a.contract_term||0,[initPct,defPct]=tierFor(term);
-  const rmr=+a.monthly_rmr||0,mult=+a.commission_multiple||0;
+  const term=+a.contract_term||0;
+  const rmr=+a.monthly_rmr||0;
   const direct=+a.monthly_direct_cost||0,inspCost=(+a.hours_per_inspection||0)*(+a.loaded_labor_rate||0);
-  // accelerator: margin = (RMR - Direct)/RMR. When LIVE, it boosts the commission that then splits/matures.
-  const accelMargin=rmr>0?(rmr-direct)/rmr:null;
-  const accelRate=accelMargin==null?0:(accelMargin>=0.60?0.25:(accelMargin>=0.50?0.10:0));
-  const baseCommission=rmr*mult;
-  const adjustedCommission=baseCommission*(1+accelRate);
-  const total=LIVE?adjustedCommission:baseCommission;
-  const initialPayout=total*initPct,deferredPayout=total*defPct;
-  const renewExt=a.assume_renewal?(+a.renewal_extension||0):0;
-  const activeMonths=term===0?120:term+renewExt;
   const subMonthly=(+a.subcontractor_annual_cost||0)/12;
   const startup=(+a.startup_labor_hours||0)*(+a.loaded_labor_rate||0)+(+a.other_startup_cost||0);
-  // billing schedule: calendar-month payments, each repeating yearly unless "once" (first year only)
+  const initialCommission=rmr*INIT_MULT(term);
+  const renewalCommission=rmr*RENEW_MULT(term);
+  // billing schedule drives revenue timing for the breakeven (maturity) calc
   const sched=(a.custom_billing&&Array.isArray(a.billing_schedule)&&a.billing_schedule.length)?a.billing_schedule:null;
   let actMonth0=0;
   if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad))actMonth0=ad.getMonth();}
-  function revAt(m){ // revenue billed in contract month m (1-indexed)
-    if(!sched) return rmr;
-    const since=m-1, cal=((actMonth0+since)%12)+1;
-    let s=0;
-    for(const r of sched){ if((+r.month)===cal){ if(r.once&&since>=12) continue; s+=(+r.amount||0); } }
-    return s;
-  }
-  let cum=0,releaseMonth=null;
-  for(let m=1;m<=activeMonths;m++){
-    const insp=inspectionMonth(m,+a.inspection_frequency||0)?inspCost:0;
-    const sCost=m===1?startup:0,iComm=m===1?initialPayout:0;
-    cum+=(revAt(m)-direct-insp-subMonthly-sCost-iComm);
-    if(releaseMonth===null&&deferredPayout>0&&(cum-deferredPayout)>=0)releaseMonth=m;
-  }
-  // annual billed revenue (first 12 contract months) for margin + display
-  let annualBilled=0; for(let m=1;m<=12;m++) annualBilled+=revAt(m);
-  const firstBill=revAt(1);
+  function revAt(m){ if(!sched)return rmr; const since=m-1,cal=((actMonth0+since)%12)+1; let s=0; for(const r of sched){if((+r.month)===cal){if(r.once&&since>=12)continue; s+=(+r.amount||0);}} return s; }
+  // True margin — info readout + low-margin gate
   const inspAnnual=(+a.inspection_frequency||0)*(+a.hours_per_inspection||0)*(+a.loaded_labor_rate||0);
   const annualBasis=direct*12+inspAnnual+(+a.subcontractor_annual_cost||0);
-  const statedAnnual=rmr*12;                       // True margin = recurring profitability on stated RMR
+  const statedAnnual=rmr*12;
   const grossMargin=statedAnnual>0?(statedAnnual-annualBasis)/statedAnnual:null;
-  const maturesInHorizon=deferredPayout<=0?true:releaseMonth!==null;
-  let initialQI=null,releaseQI=null,releaseDate=null,renewalRequired=false;
+  const thin=grossMargin!=null&&grossMargin<marginThreshold(a);
+  // breakeven: first month cumulative gross profit covers the initial commission paid in month 1
+  const horizon=term===0?120:Math.max(term,12)+24;
+  let cum=0,breakevenMonth=null,annualBilled=0;
+  for(let m=1;m<=horizon;m++){
+    const insp=inspectionMonth(m,+a.inspection_frequency||0)?inspCost:0;
+    const sCost=m===1?startup:0,iComm=m===1?initialCommission:0;
+    cum+=(revAt(m)-direct-insp-subMonthly-sCost-iComm);
+    if(breakevenMonth===null&&cum>=0)breakevenMonth=m;
+    if(m<=12)annualBilled+=revAt(m);
+  }
+  const firstBill=revAt(1);
+  // quarter mapping
+  let initialQI=null,breakevenQI=null,renewalDate=null,renewalQI=null;
   if(a.activation_date){
     const ad=new Date(a.activation_date+'T00:00:00');
     if(!isNaN(ad)){
       const baseMI=ad.getFullYear()*12+ad.getMonth();
       initialQI=qIndexFromYM(ad.getFullYear(),ad.getMonth());
-      if(deferredPayout>0&&releaseMonth){
-        const ym=ymFromMonthIndex(baseMI+(releaseMonth-1));
-        releaseQI=qIndexFromYM(ym.y,ym.m0);releaseDate=new Date(ym.y,ym.m0,1);
-        renewalRequired=term>0&&releaseMonth>term;
-      }
+      if(breakevenMonth){const ym=ymFromMonthIndex(baseMI+(breakevenMonth-1));breakevenQI=qIndexFromYM(ym.y,ym.m0);}
+      if(term>0){renewalDate=addMonths(ad,term);renewalQI=qIndexFromYM(renewalDate.getFullYear(),renewalDate.getMonth());}
     }
   }
-  return{initPct,defPct,total,initialPayout,deferredPayout,releaseMonth,maturesInHorizon,initialQI,releaseQI,releaseDate,renewalRequired,activeMonths,grossMargin,annualBilled,firstBill,scheduled:!!sched,accelMargin,accelRate,baseCommission,adjustedCommission};
+  const initialHeld=thin&&breakevenQI===null;            // low-margin deal that never breaks even → held
+  const initialPayQI=thin?breakevenQI:initialQI;          // healthy: pay at activation; thin: pay at breakeven
+  return {term,rmr,initMult:INIT_MULT(term),renewMult:RENEW_MULT(term),initialCommission,renewalCommission,
+          grossMargin,thin,breakevenMonth,breakevenQI,initialQI,initialPayQI,initialHeld,renewalDate,renewalQI,
+          annualBilled,firstBill,scheduled:!!sched};
 }
-function deferredStatus(c,selQI,paid){
-  if(c.deferredPayout<=0)return'none';
-  if(paid)return'paid';
-  if(!c.maturesInHorizon||c.releaseQI===null)return'held';
-  const d=c.releaseQI-selQI;
-  if(d<=0)return'payable';if(d===1)return'maturing';return'held';
-}
+function deferredStatus(c,selQI,paid){return 'none';}     // legacy no-op (deferred model removed)
 const STATUS_META={none:{cls:'c-none',label:'Paid upfront'},held:{cls:'c-held',label:'Deferred held'},maturing:{cls:'c-maturing',label:'Maturing'},payable:{cls:'c-payable',label:'Payable'},paid:{cls:'c-paid',label:'Paid'}};
 
 /* state */
@@ -601,7 +545,6 @@ function renewalTotalsFor(agreementId){
 }
 let marginFlagPct=(()=>{const v=parseFloat(LS.get('rmr_margin_flag'));return isNaN(v)?40:v;})();
 let agFilter='all';
-let LIVE=(LS.get('rmr_live_mode')!=='off');   // proposed comp structure applied to live payouts (default on)
 function marginThreshold(a){ return (a.target_margin!=null&&a.target_margin!=='')?(+a.target_margin):(marginFlagPct/100); }
 
 /* ---- auth + boot ---- */
@@ -689,6 +632,11 @@ async function patchPaid(id,field,val){
   if(error){toast(error.message);return;}
   const a=AGREEMENTS.find(x=>x.id===id);if(a)a[field]=val;render();
 }
+async function patchRenew(id){
+  const {error}=await sb.from('rmr_agreements').update({renewed:true,updated_at:new Date().toISOString()}).eq('id',id);
+  if(error){toast(error.message);return;}
+  const a=AGREEMENTS.find(x=>x.id===id);if(a)a.renewed=true;toast('Renewed — renewal commission now due');render();
+}
 async function patchRenewalPaid(id,val){
   const {error}=await sb.from('rmr_renewals').update({paid:val,updated_at:new Date().toISOString()}).eq('id',id);
   if(error){toast(error.message);return;}
@@ -703,14 +651,14 @@ async function removeRow(id){
 /* ---- quarter options ---- */
 function buildQuarterOptions(){
   const qis=new Set([CUR_QI]);
-  AGREEMENTS.forEach(a=>{const c=compute(a);if(c.initialQI!=null)qis.add(c.initialQI);if(c.releaseQI!=null)qis.add(c.releaseQI);});
+  AGREEMENTS.forEach(a=>{const c=compute(a);if(c.initialQI!=null)qis.add(c.initialQI);if(c.initialPayQI!=null)qis.add(c.initialPayQI);if(c.renewalQI!=null)qis.add(c.renewalQI);});
   let min=Math.min(...qis),max=Math.max(...qis);min=Math.min(min,CUR_QI)-1;max=Math.max(max,CUR_QI)+1;
   const sel=$('qSelect');sel.innerHTML='';
   for(let qi=min;qi<=max;qi++){const o=document.createElement('option');o.value=qi;o.textContent=qLabel(qi);if(qi===selQI)o.selected=true;sel.appendChild(o);}
 }
 
 /* ---- render ---- */
-function render(){ if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='pipeline')renderPipeline(); if(view==='comparison')renderComparison(); renderLegend(); }
+function render(){ if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); renderLegend(); }
 function renderQuarter(){
   buildQuarterOptions();$('qSelect').value=selQI;
   $('qCtx').textContent=selQI===CUR_QI?'Current quarter':(selQI<CUR_QI?'Past quarter':'Upcoming quarter');
@@ -718,50 +666,46 @@ function renderQuarter(){
   $('qRangeTxt').textContent=`${['Jan–Mar','Apr–Jun','Jul–Sep','Oct–Dec'][q-1]} ${y}`;
   const lines=[];
   AGREEMENTS.forEach(a=>{const c=compute(a);
-    if(c.initialQI===selQI&&c.initialPayout>0)lines.push({a,c,type:'initial',amount:c.initialPayout,paid:!!a.paid_initial,field:'paid_initial',renewal:false});
-    if(c.releaseQI===selQI&&c.deferredPayout>0&&c.maturesInHorizon)lines.push({a,c,type:'deferred',amount:c.deferredPayout,paid:!!a.paid_deferred,field:'paid_deferred',renewal:c.renewalRequired});
-  });
-  if(LIVE) RENEWALS.forEach(r=>{
-    if((r.status||'completed')!=='completed'||!r.renewal_date)return;
-    const d=new Date(r.renewal_date+'T00:00:00');if(isNaN(d))return;
-    if(qIndexFromYM(d.getFullYear(),d.getMonth())!==selQI)return;
-    const rb=renewalBonusOf(r),gb=growthBonusOf(r),amt=rb+gb;
-    if(amt<=0)return;
-    const a=AGREEMENTS.find(x=>x.id===r.agreement_id)||{agreement_number:'—',customer_name:'(renewal)'};
-    lines.push({a,type:'renewal',amount:amt,paid:!!r.paid,renewalId:r.id,renewal:false,rb,gb});
+    if(c.initialPayQI===selQI&&c.initialCommission>0&&!c.initialHeld)
+      lines.push({a,c,type:'initial',amount:c.initialCommission,paid:!!a.paid_initial,field:'paid_initial'});
+    if(c.renewalCommission>0&&c.renewalQI===selQI){
+      const renewed=!!a.autorenew||!!a.renewed;            // auto-renew pays automatically; manual needs the Renew action
+      if(renewed) lines.push({a,c,type:'renewal',amount:c.renewalCommission,paid:!!a.renewal_paid,field:'renewal_paid',auto:!!a.autorenew});
+    }
   });
   const total=lines.reduce((s,l)=>s+l.amount,0),paid=lines.filter(l=>l.paid).reduce((s,l)=>s+l.amount,0),owed=total-paid;
-  const matCt=lines.filter(l=>l.type==='deferred').length,renCt=lines.filter(l=>l.renewal&&!l.paid).length;
+  const initCt=lines.filter(l=>l.type==='initial').length, renCt=lines.filter(l=>l.type==='renewal').length;
+  // pending manual renewals coming due (autorenew OFF, not yet renewed, renewal in this quarter or earlier)
+  const pendingRenew=AGREEMENTS.filter(a=>{const c=compute(a);return c.renewalCommission>0&&!a.autorenew&&!a.renewed&&c.renewalQI!=null&&c.renewalQI<=selQI;}).length;
+  const heldCt=AGREEMENTS.filter(a=>compute(a).initialHeld).length;
   const newRMR=AGREEMENTS.reduce((s,a)=>{const c=compute(a);return s+(c.initialQI===selQI?(+a.monthly_rmr||0):0);},0);
   $('qCards').innerHTML=`
     <div class="stat accent"><div class="lbl">Due this quarter</div><div class="val">${fmt(total)}</div></div>
     <div class="stat green"><div class="lbl">Still owed</div><div class="val">${fmt(owed)}</div></div>
     <div class="stat blue"><div class="lbl">Collected</div><div class="val">${fmt(paid)}</div></div>
     <div class="stat orange"><div class="lbl">New RMR sold</div><div class="val">${fmt(newRMR)}<span style="font-size:13px;font-weight:500;color:var(--muted)">/mo</span></div></div>
-    <div class="stat"><div class="lbl">Deferred releases</div><div class="val">${matCt}</div></div>
-    <div class="stat orange"><div class="lbl">Renewal-risk</div><div class="val">${renCt}</div></div>`;
-  if(!lines.length){$('qTableWrap').innerHTML=`<div class="empty"><b>Nothing lands in ${qLabel(selQI)}</b>No initial payouts or deferred releases fall in this quarter.</div>`;return;}
+    <div class="stat"><div class="lbl">Renewals this qtr</div><div class="val">${renCt}</div></div>
+    <div class="stat orange"><div class="lbl">Pending manual renewals</div><div class="val">${pendingRenew}</div></div>`;
+  if(!lines.length){$('qTableWrap').innerHTML=`<div class="empty"><b>Nothing lands in ${qLabel(selQI)}</b>No initial or renewal commissions fall in this quarter.</div>`;return;}
   lines.sort((x,y)=>y.amount-x.amount);
   const rows=lines.map(l=>{
     const st=l.paid?'paid':'payable',meta=STATUS_META[st];
-    const typeTag=l.type==='deferred'?'<span class="type-tag def">Deferred</span>':(l.type==='renewal'?'<span class="type-tag" style="background:#e7f3ee;color:var(--payable)">Renewal</span>':'<span class="type-tag">Initial</span>');
-    const renewBadge=l.renewal?'<span class="badge-renewal">Renewal needed</span>':'';
-    const dateTxt=l.type==='deferred'&&l.c&&l.c.releaseMonth?`month ${l.c.releaseMonth}`:(l.type==='renewal'?`renewal · ${fmt(l.rb)}+${fmt(l.gb)} growth`:'at activation');
-    const btn=l.type==='renewal'
-      ? `<button class="paidbtn ${l.paid?'is-paid':''}" data-rnwpaid="${l.renewalId}" data-val="${l.paid?0:1}">${l.paid?'✓ Paid':'Mark paid'}</button>`
-      : `<button class="paidbtn ${l.paid?'is-paid':''}" data-paid="${l.a.id}" data-field="${l.field}" data-val="${l.paid?0:1}">${l.paid?'✓ Paid':'Mark paid'}</button>`;
-    return `<tr class="${l.renewal&&!l.paid?'flag-renewal':''}">
+    const typeTag=l.type==='renewal'?'<span class="type-tag" style="background:#e7f3ee;color:var(--payable)">Renewal</span>':'<span class="type-tag">Initial</span>';
+    const dateTxt=l.type==='renewal'
+      ? `${l.auto?'auto-renew':'manually renewed'} · ${Math.round(l.c.renewMult*100)}%`
+      : (l.c.thin?`held to breakeven · ${Math.round(l.c.initMult*100)}%`:`at activation · ${Math.round(l.c.initMult*100)}%`);
+    const btn=`<button class="paidbtn ${l.paid?'is-paid':''}" data-paid="${l.a.id}" data-field="${l.field}" data-val="${l.paid?0:1}">${l.paid?'✓ Paid':'Mark paid'}</button>`;
+    return `<tr>
       <td class="ag-no">#${esc(l.a.agreement_number||'—')}</td>
-      <td>${esc(l.a.customer_name||'—')}${renewBadge}</td>
+      <td>${esc(l.a.customer_name||'—')}</td>
       <td>${typeTag}</td>
       <td class="num mono">${fmt2(l.amount)}</td>
       <td class="mono" style="color:var(--muted)">${dateTxt}</td>
       <td><span class="chip ${meta.cls}">${meta.label}</span></td>
       <td>${btn}</td>
     </tr>`;}).join('');
-  $('qTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Type</th><th class="num">Amount</th><th>Releases</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('qTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Type</th><th class="num">Amount</th><th>Detail</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('qTableWrap').querySelectorAll('[data-paid]').forEach(b=>b.onclick=()=>patchPaid(b.dataset.paid,b.dataset.field,b.dataset.val==='1'));
-  $('qTableWrap').querySelectorAll('[data-rnwpaid]').forEach(b=>b.onclick=()=>patchRenewalPaid(b.dataset.rnwpaid,b.dataset.val==='1'));
 }
 function renderAgreements(){
   $('agQtrLabel').textContent=qLabel(selQI);
@@ -778,9 +722,7 @@ function renderAgreements(){
   $('agCount').textContent=`${list.length} of ${AGREEMENTS.length}`;
   if(!list.length){$('agTableWrap').innerHTML=`<div class="empty"><b>No agreements ${agFilter==='all'?'yet':'activated in '+qLabel(agFilter)}</b>${agFilter==='all'?'Add your first RMR agreement to start tracking maturity.':'Try a different quarter or All time.'}</div>`;return;}
   const rows=list.map(a=>{
-    const c=compute(a),st=deferredStatus(c,selQI,!!a.paid_deferred),meta=STATUS_META[st];
-    const relTxt=c.deferredPayout<=0?'—':(c.maturesInHorizon?(c.releaseQI!=null?qLabel(c.releaseQI):`mo ${c.releaseMonth}`):'no maturity');
-    const renewBadge=c.renewalRequired?'<span class="badge-renewal">Renewal</span>':'';
+    const c=compute(a);
     const termTxt=(+a.contract_term===0)?'M2M':`${a.contract_term}mo`;
     const thr=marginThreshold(a);
     const thin=c.grossMargin!=null&&c.grossMargin<thr;
@@ -788,157 +730,67 @@ function renderAgreements(){
     const ownTarget=(a.target_margin!=null&&a.target_margin!=='');
     const mCell=c.grossMargin==null?'<span style="color:var(--none)">—</span>'
       :`<span class="chip ${thin?'c-maturing':'c-none'}" title="${ownTarget?'target '+Math.round(a.target_margin*100)+'%':'global '+marginFlagPct+'%'}" style="${thin?'':'background:transparent;color:var(--muted)'}">${mPct}${thin?' ⚠':''}</span>`;
-    const accelPct=c.accelMargin==null?'—':`${Math.round(c.accelMargin*1000)/10}%`;
-    const accelColor=c.accelRate>0?'var(--payable)':'var(--none)';
-    const accelCell=`<div style="font-weight:600">${accelPct}</div><div style="font-size:10px;font-weight:700;color:${accelColor}">+${Math.round(c.accelRate*100)}%</div>`;
-    const commCell=`${fmt(c.total)}${(!LIVE&&c.accelRate>0)?`<div style="font-size:10px;color:var(--payable);font-weight:600">▲ ${fmt(c.adjustedCommission)}</div>`:''}`;
-    return `<tr class="${c.renewalRequired&&st!=='paid'?'flag-renewal':''}">
+    const renewTxt=c.renewMult>0?`${fmt(c.renewalCommission)} (${Math.round(c.renewMult*100)}%)`:'<span style="color:var(--none)">—</span>';
+    const autoTag=c.renewMult>0?(a.autorenew
+      ?'<span class="chip c-payable" style="font-size:10px">auto</span>'
+      :(a.renewed?'<span class="chip c-paid" style="font-size:10px">renewed</span>':'<span class="chip c-maturing" style="font-size:10px">manual</span>')):'';
+    const heldTag=c.initialHeld?'<div style="font-size:10px;color:var(--held);font-weight:600">held · low margin</div>':(c.thin&&c.breakevenQI!=null?`<div style="font-size:10px;color:var(--orange);font-weight:600">pays ${qLabel(c.breakevenQI)}</div>`:'');
+    return `<tr>
       <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
-      <td>${esc(a.customer_name||'—')}${renewalsFor(a.id).length?` <span title="${renewalsFor(a.id).length} renewal(s) recorded" style="font-size:10px;font-weight:700;color:var(--payable);background:#e7f3ee;border-radius:999px;padding:1px 6px">↻${renewalsFor(a.id).length}</span>`:''}</td>
+      <td>${esc(a.customer_name||'—')}</td>
       <td class="mono">${fmt(+a.monthly_rmr||0)}${c.scheduled?'<div style="font-size:10px;color:var(--orange);font-weight:600;letter-spacing:.03em">SCHEDULED</div>':''}</td>
       <td>${termTxt}</td>
       <td>${mCell}</td>
-      <td>${accelCell}</td>
-      <td class="num mono">${commCell}</td>
-      <td class="num mono">${fmt(c.initialPayout)}</td>
-      <td class="num mono">${fmt(c.deferredPayout)}</td>
-      <td class="mono" style="color:var(--muted)">${relTxt}${renewBadge}</td>
-      <td><span class="chip ${meta.cls}">${meta.label}</span></td>
+      <td class="num mono">${fmt(c.initialCommission)} <span style="font-size:10px;color:var(--muted)">(${Math.round(c.initMult*100)}%)</span>${heldTag}</td>
+      <td class="num mono">${renewTxt}</td>
+      <td>${autoTag}</td>
       <td><button class="iconbtn" data-edit="${a.id}">Edit</button></td>
     </tr>`;}).join('');
-  $('agTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>RMR</th><th>Term</th><th>Margin</th><th>Accel</th><th class="num">Commission</th><th class="num">Initial</th><th class="num">Deferred</th><th>Releases</th><th>Maturity</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('agTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>RMR</th><th>Term</th><th>Margin</th><th class="num">Initial comm.</th><th class="num">Renewal comm.</th><th>Renewal</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('agTableWrap').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openModal(b.dataset.edit));
 }
-/* ---- Phase 4/5/6: forecasting + comparison ---- */
+/* ---- Pending Renewals (manual-renewal agreements approaching their renewal date) ---- */
 function addMonths(d,n){const x=new Date(d.getTime());x.setMonth(x.getMonth()+n);return x;}
-function agreementState(a){
-  const completed=renewalsFor(a.id).filter(r=>(r.status||'completed')==='completed')
-    .sort((x,y)=>new Date(x.renewal_date||0)-new Date(y.renewal_date||0));
-  const last=completed[completed.length-1];
-  let currentRMR=+a.monthly_rmr||0, currentTerm=+a.contract_term||0, anchor=a.activation_date;
-  if(last){ currentRMR=+last.renewed_rmr||currentRMR; currentTerm=+last.new_term||currentTerm; anchor=last.renewal_date||anchor; }
-  const isM2M=currentTerm===0;
-  let expiration=null, daysRemaining=null;
-  if(!isM2M && anchor){ const ad=new Date(anchor+'T00:00:00'); if(!isNaN(ad)){ expiration=addMonths(ad,currentTerm); daysRemaining=Math.ceil((expiration-new Date())/86400000); } }
-  return {currentRMR,currentTerm,anchor,expiration,daysRemaining,isM2M};
-}
-function opportunityFor(a){
-  const s=agreementState(a);
-  if(s.isM2M) return null;                                   // M2M excluded from renewal forecasting
-  const potentialRenewal=s.currentRMR*renewalBonusTier(s.currentTerm);
-  const proj=(a.projected_renewal_rmr!=null&&a.projected_renewal_rmr!=='')?+a.projected_renewal_rmr:null;
-  const potentialGrowth=(proj!=null&&proj>s.currentRMR)?(proj-s.currentRMR)*1.0:0;   // $0 default unless projection entered
-  return {state:s,potentialRenewal,potentialGrowth,totalOpportunity:potentialRenewal+potentialGrowth};
-}
-function comparisonFor(a){
-  const c=compute(a);
-  const current=(+a.monthly_rmr||0)*2.0;                    // decision B: Current = RMR x 200%
-  const accelerated=current*(1+c.accelRate);
-  const rt=renewalTotalsFor(a.id);                          // earned (completed) renewal + growth
-  const proposed=accelerated+rt.total;
-  return {current,accelRate:c.accelRate,accelerated,earnedRenewal:rt.renewal,earnedGrowth:rt.growth,earned:rt.total,proposed,diff:proposed-current};
-}
 function daysCell(d){
   if(d==null) return '<span style="color:var(--none)">—</span>';
-  if(d<0) return `<span style="color:var(--held);font-weight:600">expired ${Math.abs(d)}d ago</span>`;
+  if(d<0) return `<span style="color:var(--held);font-weight:600">overdue ${Math.abs(d)}d</span>`;
+  if(d<=30) return `<span style="color:var(--held);font-weight:700">${d}d</span>`;
   if(d<=90) return `<span style="color:var(--orange);font-weight:600">${d}d</span>`;
-  return `<span style="color:var(--muted)">${d}d</span>`;
+  return `<span style="color:var(--payable)">${d}d</span>`;
 }
 function fmtDate(d){return d?d.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):'—';}
-
+function rowTint(d){ if(d==null)return''; if(d<=30)return 'background:#fbeaea'; if(d<=90)return 'background:#fff4e8'; return 'background:#eaf5ee'; }
 function renderRenewals(){
-  const opps=AGREEMENTS.map(a=>({a,o:opportunityFor(a)})).filter(x=>x.o)
-    .sort((x,y)=>{const dx=x.o.state.daysRemaining,dy=y.o.state.daysRemaining;return (dx==null?1e9:dx)-(dy==null?1e9:dy);});
-  const sumR=opps.reduce((s,x)=>s+x.o.potentialRenewal,0);
-  const sumG=opps.reduce((s,x)=>s+x.o.potentialGrowth,0);
-  const sumT=sumR+sumG;
-  const soon=opps.filter(x=>x.o.state.daysRemaining!=null&&x.o.state.daysRemaining>=0&&x.o.state.daysRemaining<=90).length;
+  // manual (autorenew OFF) agreements with a renewal commission, not yet renewed
+  const items=AGREEMENTS.map(a=>({a,c:compute(a)}))
+    .filter(x=>x.c.renewMult>0 && !x.a.autorenew && !x.a.renewed && x.c.renewalDate)
+    .map(x=>({...x,days:Math.ceil((x.c.renewalDate-new Date())/86400000)}))
+    .sort((p,q)=>p.days-q.days);
+  const due=items.filter(x=>x.days<=90).length;
+  const sumDue=items.filter(x=>x.days<=90).reduce((s,x)=>s+x.c.renewalCommission,0);
+  const autoCt=AGREEMENTS.filter(a=>compute(a).renewMult>0&&a.autorenew&&!a.renewal_paid).length;
   $('renQuickCards').innerHTML=`
-    <div class="stat accent"><div class="lbl">Total opportunity value</div><div class="val">${fmt(sumT)}</div></div>
-    <div class="stat green"><div class="lbl">Potential renewal bonuses</div><div class="val">${fmt(sumR)}</div></div>
-    <div class="stat orange"><div class="lbl">Potential growth bonuses</div><div class="val">${fmt(sumG)}</div></div>
-    <div class="stat"><div class="lbl">Expiring &le; 90 days</div><div class="val">${soon}</div></div>`;
-  $('renCount').textContent=`${opps.length} term agreement${opps.length===1?'':'s'} (M2M excluded)`;
-  if(!opps.length){$('renTableWrap').innerHTML=`<div class="empty"><b>No renewal opportunities</b>Term agreements (12/24/36/60-month) will appear here as renewal forecasts.</div>`;return;}
-  const rows=opps.map(({a,o})=>{
-    const c=compute(a);
-    const mPct=c.grossMargin==null?'—':`${Math.round(c.grossMargin*1000)/10}%`;
-    const proj=(a.projected_renewal_rmr!=null&&a.projected_renewal_rmr!=='')?`<div style="font-size:10px;color:var(--muted)">proj ${fmt(+a.projected_renewal_rmr)}</div>`:'';
-    return `<tr>
+    <div class="stat accent"><div class="lbl">Commission to claim (≤90d)</div><div class="val">${fmt(sumDue)}</div></div>
+    <div class="stat orange"><div class="lbl">Need manual renewal ≤90d</div><div class="val">${due}</div></div>
+    <div class="stat"><div class="lbl">Manual renewals pending</div><div class="val">${items.length}</div></div>
+    <div class="stat green"><div class="lbl">Auto-renewing agreements</div><div class="val">${autoCt}</div></div>`;
+  $('renCount').textContent=`${items.length} awaiting manual renewal`;
+  if(!items.length){$('renTableWrap').innerHTML=`<div class="empty"><b>No manual renewals pending</b>12/24-month agreements with autorenewal OFF show here as their renewal date nears — colored by urgency.</div>`;return;}
+  const rows=items.map(({a,c,days})=>`<tr style="${rowTint(days)}">
       <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
       <td>${esc(a.customer_name||'—')}</td>
-      <td class="mono" style="color:var(--muted)">${fmtDate(o.state.expiration)}</td>
-      <td>${daysCell(o.state.daysRemaining)}</td>
-      <td class="mono">${fmt(o.state.currentRMR)}${proj}</td>
-      <td class="mono" style="color:var(--muted)">${mPct}</td>
-      <td class="num mono">${fmt(o.potentialRenewal)}</td>
-      <td class="num mono">${fmt(o.potentialGrowth)}</td>
-      <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(o.totalOpportunity)}</td>
-    </tr>`;}).join('');
-  $('renTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Expiration</th><th>Days left</th><th>Current RMR</th><th>Margin</th><th class="num">Pot. renewal</th><th class="num">Pot. growth</th><th class="num">Total opportunity</th></tr></thead><tbody>${rows}</tbody></table>`;
-}
-
-function renderPipeline(){
-  const opps=AGREEMENTS.map(a=>({a,o:opportunityFor(a)})).filter(x=>x.o);
-  const pendingRenewal=RENEWALS.filter(r=>(r.status||'completed')==='pending').reduce((s,r)=>s+renewalBonusOf(r,true),0);
-  const pendingGrowth=RENEWALS.filter(r=>(r.status||'completed')==='pending').reduce((s,r)=>s+growthBonusOf(r,true),0);
-  const potGrowth=opps.reduce((s,x)=>s+x.o.potentialGrowth,0)+pendingGrowth;
-  const futureOpp=opps.reduce((s,x)=>s+x.o.totalOpportunity,0)+pendingRenewal+pendingGrowth;
-  const projectedComm=AGREEMENTS.reduce((s,a)=>s+comparisonFor(a).proposed,0);
-  const soonList=opps.filter(x=>x.o.state.daysRemaining!=null).sort((x,y)=>x.o.state.daysRemaining-y.o.state.daysRemaining);
-  const soonCount=soonList.filter(x=>x.o.state.daysRemaining>=0&&x.o.state.daysRemaining<=180).length;
-  $('pipeCards').innerHTML=`
-    <div class="stat accent"><div class="lbl">Total future opportunity</div><div class="val">${fmt(futureOpp)}</div></div>
-    <div class="stat green"><div class="lbl">Pending renewal bonuses</div><div class="val">${fmt(pendingRenewal)}</div></div>
-    <div class="stat orange"><div class="lbl">Potential growth bonuses</div><div class="val">${fmt(potGrowth)}</div></div>
-    <div class="stat blue"><div class="lbl">Projected commissions</div><div class="val">${fmt(projectedComm)}</div></div>
-    <div class="stat"><div class="lbl">Expiring &le; 180 days</div><div class="val">${soonCount}</div></div>`;
-  $('pipeCount').textContent=`${soonList.length} term agreement${soonList.length===1?'':'s'}`;
-  if(!soonList.length){$('pipeTableWrap').innerHTML=`<div class="empty"><b>Nothing in the pipeline yet</b>Term agreements with an expiration date will appear here, soonest first.</div>`;return;}
-  const rows=soonList.map(({a,o})=>`<tr>
-      <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
-      <td>${esc(a.customer_name||'—')}</td>
-      <td class="mono" style="color:var(--muted)">${fmtDate(o.state.expiration)}</td>
-      <td>${daysCell(o.state.daysRemaining)}</td>
-      <td class="mono">${fmt(o.state.currentRMR)}</td>
-      <td class="num mono">${fmt(o.potentialRenewal)}</td>
-      <td class="num mono">${fmt(o.potentialGrowth)}</td>
-      <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(o.totalOpportunity)}</td>
+      <td>${(+a.contract_term)}mo</td>
+      <td class="mono" style="color:var(--muted)">${fmtDate(c.renewalDate)}</td>
+      <td>${daysCell(days)}</td>
+      <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(c.renewalCommission)} <span style="font-size:10px;color:var(--muted)">(${Math.round(c.renewMult*100)}%)</span></td>
+      <td><button class="paidbtn" data-renew="${a.id}">Renew now</button></td>
     </tr>`).join('');
-  $('pipeTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Expiration</th><th>Days left</th><th>Current RMR</th><th class="num">Pot. renewal</th><th class="num">Pot. growth</th><th class="num">Total opportunity</th></tr></thead><tbody>${rows}</tbody></table>`;
-}
-
-function renderComparison(){
-  $('goLive').checked=LIVE;
-  $('goLiveState').textContent=LIVE?'● LIVE — applied to payouts & voucher':'○ comparison only';
-  $('goLiveState').style.color=LIVE?'var(--payable)':'var(--muted)';
-  const rows=AGREEMENTS.map(a=>({a,c:comparisonFor(a)}));
-  const tCur=rows.reduce((s,x)=>s+x.c.current,0);
-  const tProp=rows.reduce((s,x)=>s+x.c.proposed,0);
-  const tDiff=tProp-tCur;
-  const diffColor=tDiff>=0?'var(--payable)':'var(--held)';
-  $('cmpCards').innerHTML=`
-    <div class="stat"><div class="lbl">Current plan total</div><div class="val">${fmt(tCur)}</div></div>
-    <div class="stat accent"><div class="lbl">Proposed plan total</div><div class="val">${fmt(tProp)}</div></div>
-    <div class="stat green"><div class="lbl">Difference</div><div class="val" style="color:${diffColor}">${tDiff>=0?'+':''}${fmt(tDiff)}</div></div>`;
-  $('cmpCount').textContent=`${rows.length} agreement${rows.length===1?'':'s'}`;
-  if(!rows.length){$('cmpTableWrap').innerHTML=`<div class="empty"><b>No agreements to compare</b>Add agreements to see Current vs Proposed.</div>`;return;}
-  const body=rows.map(({a,c})=>{
-    const dc=c.diff>=0?'var(--payable)':'var(--held)';
-    return `<tr>
-      <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
-      <td>${esc(a.customer_name||'—')}</td>
-      <td class="num mono">${fmt(c.current)}</td>
-      <td class="mono" style="color:${c.accelRate>0?'var(--payable)':'var(--none)'}">+${Math.round(c.accelRate*100)}%</td>
-      <td class="num mono">${c.earned>0?fmt(c.earned):'—'}</td>
-      <td class="num mono" style="font-weight:700">${fmt(c.proposed)}</td>
-      <td class="num mono" style="font-weight:700;color:${dc}">${c.diff>=0?'+':''}${fmt(c.diff)}</td>
-    </tr>`;}).join('');
-  $('cmpTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th class="num">Current (×200%)</th><th>Accel</th><th class="num">Renewal+Growth</th><th class="num">Proposed</th><th class="num">Difference</th></tr></thead><tbody>${body}</tbody></table>`;
+  $('renTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Term</th><th>Renews</th><th>Days left</th><th class="num">Renewal comm.</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('renTableWrap').querySelectorAll('[data-renew]').forEach(b=>b.onclick=()=>patchRenew(b.dataset.renew));
 }
 function renderLegend(){
-  const items=[['c-payable','Payable — owed to you'],['c-maturing','Maturing — next quarter'],['c-held','Held — further out'],['c-paid','Paid — collected'],['c-none','Paid upfront — no deferred']];
-  $('legend').innerHTML=items.map(([c,t])=>`<span class="chip ${c}">${t}</span>`).join('')+`<span class="chip" style="color:var(--orange);background:#fff3ea"><span style="width:7px;height:7px;border-radius:50%;background:var(--orange);display:inline-block"></span>Orange edge = renewal required to release deferred</span>`;
+  const items=[['c-payable','Payable — owed to you'],['c-paid','Paid — collected'],['c-maturing','Manual renewal needed'],['c-held','Held — low margin / overdue']];
+  $('legend').innerHTML=items.map(([c,t])=>`<span class="chip ${c}">${t}</span>`).join('')+`<span class="chip" style="color:var(--muted);background:#f1f1f1">Initial % by term · 12mo 100% · 24mo 125% · 36/60 200%</span>`;
 }
 
 /* ---- modal ---- */
@@ -975,7 +827,7 @@ function openModal(id){
   $('f_num').value=v('agreement_number');$('f_cust').value=v('customer_name');
   $('f_date').value=v('activation_date')||(a?'':todayISO());
   $('f_term').value=a?String(a.contract_term):'12';
-  $('f_rmr').value=v('monthly_rmr');$('f_mult').value=v('commission_multiple');
+  $('f_rmr').value=v('monthly_rmr');
   $('f_custom').checked=!!(a&&a.custom_billing);
   $('billWrap').classList.toggle('show',$('f_custom').checked);
   $('schedRows').innerHTML='';
@@ -987,84 +839,41 @@ function openModal(id){
   $('f_shrs').value=v('startup_labor_hours');$('f_scost').value=v('other_startup_cost');
   $('f_sub').value=v('subcontractor_annual_cost');
   $('f_target').value=(a&&a.target_margin!=null&&a.target_margin!=='')?Math.round(a.target_margin*100):'';
-  $('f_renew').value=a?String(a.assume_renewal):'true';$('f_ext').value=v('renewal_extension','12');
-  $('f_projrmr').value=(a&&a.projected_renewal_rmr!=null)?a.projected_renewal_rmr:'';
-  renderRenewalBox(a?a.id:null);
+  $('f_auto').checked=!!(a&&a.autorenew);
   $('f_notes').value=v('notes');$('mDelete').style.display=a?'inline-block':'none';
   updatePreview();$('scrim').classList.add('show');
 }
 function closeModal(){$('scrim').classList.remove('show');editingId=null;}
-function renderRenewalBox(agreementId){
-  const box=$('renewalBox');
-  if(!agreementId){ box.innerHTML='<div class="rnw-saved">Save this agreement first, then reopen it to record renewals.</div>'; return; }
-  const list=renewalsFor(agreementId);
-  const fmtD=d=>{if(!d)return '—';const x=new Date(d+'T00:00:00');return isNaN(x)?d:x.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'});};
-  const rows=list.length?list.map(r=>{
-    const st=(r.status==='pending')?'pend':'done';
-    const term=(+r.new_term===0)?'M2M':`${r.new_term}mo`;
-    const rb=renewalBonusOf(r),gb=growthBonusOf(r);
-    const bonusLine=(r.status||'completed')==='completed'
-      ? `<div class="rnw-bonus">Renewal ${fmt(rb)}${gb>0?` + Growth ${fmt(gb)}`:''} = ${fmt(rb+gb)}</div>`
-      : `<div class="rnw-bonus pend">Pending — counts toward forecast, not yet earned</div>`;
-    return `<div class="rnw-row">
-      <div class="rnw-main"><div>${fmtD(r.renewal_date)} · <span class="rnw-amt">${fmt(+r.previous_rmr||0)} → ${fmt(+r.renewed_rmr||0)}</span> · ${term}</div>${bonusLine}</div>
-      <span class="rnw-st ${st}">${esc(r.status||'completed')}</span>
-      <button type="button" class="rnw-del" data-rnwdel="${r.id}">×</button>
-    </div>`;}).join(''):'<div class="rnw-empty">No renewals recorded yet.</div>';
-  const tot=renewalTotalsFor(agreementId);
-  const sumLine=tot.completed?`<div class="rnw-sum">Earned from completed renewals: <b>${fmt(tot.renewal)}</b> renewal + <b>${fmt(tot.growth)}</b> growth = <b>${fmt(tot.total)}</b><span class="note">Comparison/forecast figure — not added to live payouts or the payroll voucher.</span></div>`:'';
-  const curRmr=$('f_rmr').value||'';
-  box.innerHTML=rows+sumLine+`
-    <div class="rnw-add">
-      <div class="mini"><label>Renewal date</label><input id="r_date" type="date" value="${todayISO()}"></div>
-      <div class="mini"><label>Previous RMR</label><input id="r_prev" type="number" step="0.01" value="${curRmr}"></div>
-      <div class="mini"><label>Renewed RMR</label><input id="r_new" type="number" step="0.01" value="${curRmr}"></div>
-      <div class="mini"><label>New term</label><select id="r_term"><option value="12">12 mo</option><option value="24">24 mo</option><option value="36">36 mo</option><option value="60">60 mo</option></select></div>
-      <div class="mini"><label>Status</label><select id="r_status"><option value="completed">Completed</option><option value="pending">Pending</option></select></div>
-      <button type="button" id="r_add">Add renewal</button>
-    </div>`;
-  box.querySelectorAll('[data-rnwdel]').forEach(b=>b.onclick=async()=>{await removeRenewal(b.dataset.rnwdel);renderRenewalBox(agreementId);renderAgreements();});
-  $('r_add').onclick=async()=>{
-    const rec={agreement_id:agreementId,renewal_date:$('r_date').value||null,previous_rmr:+$('r_prev').value||0,renewed_rmr:+$('r_new').value||0,new_term:+$('r_term').value,status:$('r_status').value};
-    const ok=await addRenewal(rec);
-    if(ok){toast('Renewal added');renderRenewalBox(agreementId);renderAgreements();}
-  };
-}
 function readForm(){return{
   id:editingId||undefined,agreement_number:$('f_num').value.trim(),customer_name:$('f_cust').value.trim(),
   activation_date:$('f_date').value||null,contract_term:+$('f_term').value,monthly_rmr:+$('f_rmr').value||0,
-  commission_multiple:+$('f_mult').value||0,monthly_direct_cost:+$('f_direct').value||0,loaded_labor_rate:+$('f_rate').value||0,
+  monthly_direct_cost:+$('f_direct').value||0,loaded_labor_rate:+$('f_rate').value||0,
   custom_billing:$('f_custom').checked,billing_schedule:readSchedule(),
   inspection_frequency:+$('f_freq').value,hours_per_inspection:+$('f_hrs').value||0,startup_labor_hours:+$('f_shrs').value||0,
   other_startup_cost:+$('f_scost').value||0,subcontractor_annual_cost:+$('f_sub').value||0,
   target_margin:($('f_target').value.trim()===''?null:(+$('f_target').value/100)),
-  projected_renewal_rmr:($('f_projrmr').value.trim()===''?null:(+$('f_projrmr').value||0)),
-  assume_renewal:$('f_renew').value==='true',renewal_extension:+$('f_ext').value||0,notes:$('f_notes').value.trim()};}
+  autorenew:$('f_auto').checked,notes:$('f_notes').value.trim()};}
 function updatePreview(){
   const row=readForm();const c=compute(row);
-  const relTxt=c.deferredPayout<=0?'— (full upfront)':(c.maturesInHorizon?(c.releaseQI!=null?qLabel(c.releaseQI)+` · mo ${c.releaseMonth}`:`month ${c.releaseMonth}`):'does not mature in horizon');
   const thr=marginThreshold(row);
   const mPct=c.grossMargin==null?null:Math.round(c.grossMargin*1000)/10;
   const thin=c.grossMargin!=null&&c.grossMargin<thr;
   const mColor=mPct==null?'var(--muted)':(thin?'var(--maturing)':'var(--payable)');
   const mTxt=mPct==null?'—':`${mPct}%${thin?' ⚠':''}`;
+  const initWhen=c.initialHeld?'held — low margin, never breaks even':(thin?(c.breakevenQI!=null?`held to breakeven · ${qLabel(c.breakevenQI)}`:'held'):(c.initialQI!=null?`pays ${qLabel(c.initialQI)}`:'at activation'));
+  const renWhen=c.renewMult<=0?'no renewal commission':(c.renewalQI!=null?`${qLabel(c.renewalQI)} · ${row.autorenew?'auto':'manual'}`:'set activation date');
   $('mPreview').innerHTML=`<h4>Live calculation</h4><div class="pgrid">
-    <div><span>Total commission</span><b>${fmt(c.total)}</b></div>
-    <div><span>Initial (paid now)</span><b style="color:var(--payable)">${fmt(c.initialPayout)}</b></div>
-    <div><span>Deferred balance</span><b style="color:var(--maturing)">${fmt(c.deferredPayout)}</b></div>
-    <div><span>Split</span><b>${Math.round(c.initPct*100)}% / ${Math.round(c.defPct*100)}%</b></div>
+    <div><span>Initial commission <span style="color:var(--none)">(${Math.round(c.initMult*100)}%)</span></span><b style="color:var(--payable);font-size:16px">${fmt(c.initialCommission)}</b></div>
+    <div><span>When</span><b style="font-size:13px">${initWhen}</b></div>
+    <div><span>Renewal commission <span style="color:var(--none)">(${Math.round(c.renewMult*100)}%)</span></span><b style="font-size:16px">${c.renewMult>0?fmt(c.renewalCommission):'—'}</b></div>
+    <div><span>Renews</span><b style="font-size:13px">${renWhen}</b></div>
     <div><span>True margin <span style="color:var(--none)">(flag &lt;${Math.round(thr*100)}%)</span></span><b style="color:${mColor};font-size:15px">${mTxt}</b></div>
-    ${c.scheduled?`<div><span>Annual billed</span><b style="font-size:15px">${fmt(c.annualBilled)}</b></div><div><span>First bill</span><b style="font-size:15px">${fmt(c.firstBill)}</b></div>`:''}
-    <div><span>Accelerator margin <span style="color:var(--none)">(RMR−Direct)</span></span><b style="font-size:15px">${c.accelMargin==null?'—':Math.round(c.accelMargin*1000)/10+'%'}</b></div>
-    <div><span>Accelerator</span><b style="color:${c.accelRate>0?'var(--payable)':'var(--muted)'};font-size:15px">+${Math.round(c.accelRate*100)}%</b></div>
-    <div><span>Adjusted commission <span style="color:var(--none)">(compare only)</span></span><b style="font-size:15px">${fmt(c.baseCommission)}${c.accelRate>0?' ▲ '+fmt(c.adjustedCommission):''}</b></div>
-    <div><span>Deferred releases</span><b style="font-size:14px">${relTxt}</b></div>
-    ${c.renewalRequired?'<div><span>Renewal</span><b style="color:var(--orange);font-size:14px">Required to release</b></div>':''}</div>`;
+    ${c.scheduled?`<div><span>Annual billed</span><b style="font-size:15px">${fmt(c.annualBilled)}</b></div>`:''}</div>`;
 }
 
 /* ---- view switching ---- */
 function switchView(v){
-  view=v;['quarter','agreements','renewals','pipeline','comparison'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
+  view=v;['quarter','agreements','renewals'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   render();
 }
@@ -1083,24 +892,15 @@ function repName(email){
 function exportQuarterPDF(details){
   details=details||{};
   if(!window.jspdf||!window.jspdf.jsPDF){ toast('PDF library still loading — try again in a moment'); return; }
-  const initials=[],deferred=[],conditional=[],renewalPays=[];
+  const initials=[],renewalPays=[];
   AGREEMENTS.forEach(a=>{
     const c=compute(a);
-    if(c.initialQI===selQI&&c.initialPayout>0) initials.push({a,amount:c.initialPayout,paid:!!a.paid_initial});
-    if(c.releaseQI===selQI&&c.deferredPayout>0&&c.maturesInHorizon){
-      const it={a,amount:c.deferredPayout,paid:!!a.paid_deferred,month:c.releaseMonth};
-      (c.renewalRequired?conditional:deferred).push(it);
-    }
+    if(c.initialPayQI===selQI&&c.initialCommission>0&&!c.initialHeld)
+      initials.push({a,amount:c.initialCommission,paid:!!a.paid_initial,mult:c.initMult,thin:c.thin});
+    if(c.renewalCommission>0&&c.renewalQI===selQI&&(a.autorenew||a.renewed))
+      renewalPays.push({a,amount:c.renewalCommission,paid:!!a.renewal_paid,mult:c.renewMult,auto:!!a.autorenew});
   });
-  if(LIVE) RENEWALS.forEach(r=>{
-    if((r.status||'completed')!=='completed'||!r.renewal_date)return;
-    const d=new Date(r.renewal_date+'T00:00:00');if(isNaN(d))return;
-    if(qIndexFromYM(d.getFullYear(),d.getMonth())!==selQI)return;
-    const rb=renewalBonusOf(r),gb=growthBonusOf(r);if(rb+gb<=0)return;
-    const a=AGREEMENTS.find(x=>x.id===r.agreement_id)||{agreement_number:'—',customer_name:'(renewal)'};
-    renewalPays.push({a,amount:rb+gb,paid:!!r.paid,rb,gb});
-  });
-  if(!initials.length&&!deferred.length&&!conditional.length&&!renewalPays.length){ toast('Nothing to export for '+qLabel(selQI)); return; }
+  if(!initials.length&&!renewalPays.length){ toast('Nothing to export for '+qLabel(selQI)); return; }
 
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({unit:'mm',format:'a4'});
@@ -1143,19 +943,14 @@ function exportQuarterPDF(details){
     return sub;
   }
 
-  const subInit=section('Pay Now — Initial Payouts',initials,()=>'Activated this quarter');
-  const subDef=section('Deferred Releases — Matured This Quarter',deferred,it=>`Matured (month ${it.month})`);
-  const subRnw=renewalPays.length?section('Renewal & Growth Bonuses — Completed This Quarter',renewalPays,it=>`Renewal ${money(it.rb)}${it.gb>0?' + growth '+money(it.gb):''}`):0;
-  const grand=subInit+subDef+subRnw;
+  const subInit=section('Initial Commissions',initials,it=>`Initial · ${Math.round(it.mult*100)}%${it.thin?' · held to breakeven':''}`);
+  const subRnw=section('Renewal Commissions',renewalPays,it=>`Renewal · ${Math.round(it.mult*100)}% · ${it.auto?'auto-renew':'manual'}`);
+  const grand=subInit+subRnw;
 
   if(y>262){doc.addPage();y=20;}
   doc.setFillColor(232,98,10);doc.rect(W-M-72,y,72,13,'F');
   doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(10.5);doc.text('TOTAL TO PAY',W-M-68,y+5.5);
   doc.setFontSize(13);doc.text(money(grand),W-M-3,y+9.5,{align:'right'});doc.setTextColor(28,28,28);y+=19;
-
-  const subCond=section('Renewal-Conditional — Pending Customer Renewal',conditional,it=>`Matured (mo ${it.month}) · renewal required`);
-  if(conditional.length){doc.setFont('helvetica','italic');doc.setFontSize(8.5);doc.setTextColor(120,120,120);
-    doc.text(`Not included in Total to Pay above — releases only after the customer renews (${money(subCond)}).`,M,y+1);doc.setTextColor(28,28,28);y+=8;}
 
   if(y>248){doc.addPage();y=30;} y=Math.max(y+6,255);
   doc.setDrawColor(170,170,170);doc.setLineWidth(0.3);const colW=(W-2*M-12)/2;
@@ -1164,7 +959,7 @@ function exportQuarterPDF(details){
   doc.text(`Prepared by — ${name}`,M,y+5);doc.text('Date: ____________',M,y+10);
   doc.text('Approved by (signature)',M+colW+12,y+5);doc.text('Date: ____________',M+colW+12,y+10);
   doc.setFontSize(7.5);doc.setTextColor(150,150,150);
-  doc.text('Generated by P1 Bonus Tracking Tool. Each deferred amount releases only after the account recovers its upfront bonus, direct, and labor costs.',M,288,{maxWidth:W-2*M});
+  doc.text('Generated by P1 Bonus Tracking Tool. Initial % by term (12mo 100% · 24mo 125% · 36/60 200%); renewal % once at renewal (12mo 150% · 24mo 125%). Low-margin deals hold until breakeven.',M,288,{maxWidth:W-2*M});
   doc.save(`P1-Bonus-${qr.label.replace(' ','-')}.pdf`);
 }
 
@@ -1214,9 +1009,6 @@ $('qSelect').onchange=e=>{selQI=+e.target.value;renderQuarter();};
 $('tabQuarter').onclick=()=>switchView('quarter');
 $('tabAgreements').onclick=()=>switchView('agreements');
 $('tabRenewals').onclick=()=>switchView('renewals');
-$('tabPipeline').onclick=()=>switchView('pipeline');
-$('tabComparison').onclick=()=>switchView('comparison');
-$('goLive').onchange=e=>{LIVE=e.target.checked;LS.set('rmr_live_mode',LIVE?'on':'off');toast(LIVE?'Proposed plan is now LIVE on payouts':'Reverted to classic payouts');render();};
 $('addBtn').onclick=()=>{ if(!sb){toast('Sign in first');return;} openModal(null); };
 $('f_custom').onchange=toggleBilling;
 $('schedAdd').onclick=()=>addSchedRow(1,'',false);
@@ -1224,7 +1016,7 @@ $('marginFlag').onchange=()=>{const v=parseFloat($('marginFlag').value);if(!isNa
 $('agFilter').onchange=e=>{agFilter=(e.target.value==='all')?'all':+e.target.value;renderAgreements();};
 $('mClose').onclick=closeModal;$('mCancel').onclick=closeModal;
 $('scrim').onclick=e=>{if(e.target===$('scrim'))closeModal();};
-['f_num','f_cust','f_date','f_term','f_rmr','f_mult','f_direct','f_rate','f_freq','f_hrs','f_shrs','f_scost','f_sub','f_target','f_renew','f_ext'].forEach(id=>{const el=$(id);el.addEventListener('input',updatePreview);el.addEventListener('change',updatePreview);});
+['f_num','f_cust','f_date','f_term','f_rmr','f_direct','f_rate','f_freq','f_hrs','f_shrs','f_scost','f_sub','f_target','f_auto'].forEach(id=>{const el=$(id);el.addEventListener('input',updatePreview);el.addEventListener('change',updatePreview);});
 $('mSave').onclick=async()=>{
   if(!sb){toast('Sign in first');return;}
   const row=readForm();
