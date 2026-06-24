@@ -253,7 +253,13 @@
 
   <section id="view-agreements" style="display:none">
     <div class="qbar" style="justify-content:space-between">
-      <div><div style="font-size:13px;color:var(--muted)">Maturity status shown relative to <b id="agQtrLabel"></b></div></div>
+    <div class="qbar" style="justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)">Activated in
+          <select id="agFilter" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:13px;background:#fff;font-weight:600;color:var(--ink)"></select>
+        </div>
+        <div style="font-size:13px;color:var(--muted)">Showing <b id="agShown" style="color:var(--ink)">0</b> · <b id="agRmrTotal" style="color:var(--orange)">$0</b>/mo RMR · maturity as of <b id="agQtrLabel"></b></div>
+      </div>
       <div style="display:flex;align-items:center;gap:10px">
         <label style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px">Flag margin under
           <input id="marginFlag" type="number" step="1" style="width:58px;border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:13px;text-align:right">%</label>
@@ -391,6 +397,24 @@
   </div>
 </div>
 
+<div class="scrim" id="vScrim">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-head"><h3 id="vTitle">Voucher details</h3><button class="x" id="vClose">×</button></div>
+    <div class="modal-body">
+      <div class="grid" style="grid-template-columns:1fr">
+        <div class="fld"><label>Employee name</label><input id="v_name"></div>
+        <div class="fld"><label>Employee / payroll number <span class="hint">optional</span></label><input id="v_no" placeholder="e.g. 1042"></div>
+        <div class="fld"><label>Title <span class="hint">optional</span></label><input id="v_title" placeholder="e.g. Security Sales"></div>
+      </div>
+      <p style="font-size:12.5px;color:var(--muted);margin:12px 0 0">These appear in the voucher's "Payable to" block. Saved on this device, so they'll prefill next quarter.</p>
+    </div>
+    <div class="modal-foot"><div style="display:flex;gap:10px;margin-left:auto">
+      <button class="btn-ghost" id="vCancel">Cancel</button>
+      <button class="btn-primary" id="vGen">Generate PDF</button>
+    </div></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -482,6 +506,7 @@ const STATUS_META={none:{cls:'c-none',label:'Paid upfront'},held:{cls:'c-held',l
 /* state */
 let sb=null,AGREEMENTS=[],selQI=CUR_QI,view='quarter',editingId=null,signedIn=false;
 let marginFlagPct=(()=>{const v=parseFloat(LS.get('rmr_margin_flag'));return isNaN(v)?40:v;})();
+let agFilter='all';
 function marginThreshold(a){ return (a.target_margin!=null&&a.target_margin!=='')?(+a.target_margin):(marginFlagPct/100); }
 
 /* ---- auth + boot ---- */
@@ -581,10 +606,12 @@ function renderQuarter(){
   });
   const total=lines.reduce((s,l)=>s+l.amount,0),paid=lines.filter(l=>l.paid).reduce((s,l)=>s+l.amount,0),owed=total-paid;
   const matCt=lines.filter(l=>l.type==='deferred').length,renCt=lines.filter(l=>l.renewal&&!l.paid).length;
+  const newRMR=AGREEMENTS.reduce((s,a)=>{const c=compute(a);return s+(c.initialQI===selQI?(+a.monthly_rmr||0):0);},0);
   $('qCards').innerHTML=`
     <div class="stat accent"><div class="lbl">Due this quarter</div><div class="val">${fmt(total)}</div></div>
     <div class="stat green"><div class="lbl">Still owed</div><div class="val">${fmt(owed)}</div></div>
     <div class="stat blue"><div class="lbl">Collected</div><div class="val">${fmt(paid)}</div></div>
+    <div class="stat orange"><div class="lbl">New RMR sold</div><div class="val">${fmt(newRMR)}<span style="font-size:13px;font-weight:500;color:var(--muted)">/mo</span></div></div>
     <div class="stat"><div class="lbl">Deferred releases</div><div class="val">${matCt}</div></div>
     <div class="stat orange"><div class="lbl">Renewal-risk</div><div class="val">${renCt}</div></div>`;
   if(!lines.length){$('qTableWrap').innerHTML=`<div class="empty"><b>Nothing lands in ${qLabel(selQI)}</b>No initial payouts or deferred releases fall in this quarter.</div>`;return;}
@@ -609,9 +636,18 @@ function renderQuarter(){
 function renderAgreements(){
   $('agQtrLabel').textContent=qLabel(selQI);
   $('marginFlag').value=marginFlagPct;
-  $('agCount').textContent=`${AGREEMENTS.length} agreement${AGREEMENTS.length===1?'':'s'}`;
-  if(!AGREEMENTS.length){$('agTableWrap').innerHTML=`<div class="empty"><b>No agreements yet</b>Add your first RMR agreement to start tracking maturity.</div>`;return;}
-  const rows=AGREEMENTS.map(a=>{
+  // build the "Activated in" dropdown from agreements' activation quarters
+  const qset=new Set();AGREEMENTS.forEach(a=>{const c=compute(a);if(c.initialQI!=null)qset.add(c.initialQI);});
+  const qsorted=[...qset].sort((a,b)=>b-a);
+  $('agFilter').innerHTML='<option value="all">All time</option>'+qsorted.map(qi=>`<option value="${qi}">${qLabel(qi)}</option>`).join('');
+  $('agFilter').value=(agFilter==='all')?'all':String(agFilter);
+  const list=(agFilter==='all')?AGREEMENTS:AGREEMENTS.filter(a=>compute(a).initialQI===agFilter);
+  const totalRMR=list.reduce((s,a)=>s+(+a.monthly_rmr||0),0);
+  $('agShown').textContent=`${list.length} agreement${list.length===1?'':'s'}`;
+  $('agRmrTotal').textContent=fmt(totalRMR);
+  $('agCount').textContent=`${list.length} of ${AGREEMENTS.length}`;
+  if(!list.length){$('agTableWrap').innerHTML=`<div class="empty"><b>No agreements ${agFilter==='all'?'yet':'activated in '+qLabel(agFilter)}</b>${agFilter==='all'?'Add your first RMR agreement to start tracking maturity.':'Try a different quarter or All time.'}</div>`;return;}
+  const rows=list.map(a=>{
     const c=compute(a),st=deferredStatus(c,selQI,!!a.paid_deferred),meta=STATUS_META[st];
     const relTxt=c.deferredPayout<=0?'—':(c.maturesInHorizon?(c.releaseQI!=null?qLabel(c.releaseQI):`mo ${c.releaseMonth}`):'no maturity');
     const renewBadge=c.renewalRequired?'<span class="badge-renewal">Renewal</span>':'';
@@ -740,7 +776,8 @@ function repName(email){
   if(!email) return 'Sales Representative';
   return email.split('@')[0].split(/[._-]/).filter(Boolean).map(s=>s.charAt(0).toUpperCase()+s.slice(1)).join(' ');
 }
-function exportQuarterPDF(){
+function exportQuarterPDF(details){
+  details=details||{};
   if(!window.jspdf||!window.jspdf.jsPDF){ toast('PDF library still loading — try again in a moment'); return; }
   const initials=[],deferred=[],conditional=[];
   AGREEMENTS.forEach(a=>{
@@ -757,7 +794,8 @@ function exportQuarterPDF(){
   const doc=new jsPDF({unit:'mm',format:'a4'});
   const W=doc.internal.pageSize.getWidth(), M=14;
   const qr=quarterRange(selQI);
-  const email=$('whoTxt').textContent||'', name=repName(email);
+  const email=$('whoTxt').textContent||'', name=details.name||repName(email);
+  const empNo=details.no||'', title=details.title||'';
   const prepared=new Date().toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'});
   const voucher=`P1-BV-${Math.floor(selQI/4)}Q${(selQI%4)+1}`;
   const money=n=>'$'+(Math.round(n*100)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -772,9 +810,12 @@ function exportQuarterPDF(){
   y+=24;
   doc.setDrawColor(232,98,10);doc.setLineWidth(0.8);doc.line(M,y,W-M,y);y+=7;
   doc.setFontSize(10);doc.setTextColor(28,28,28);doc.setFont('helvetica','bold');doc.text('Payable to:',M,y);
-  doc.setFont('helvetica','normal');doc.text(`${name}${email?'  ('+email+')':''}`,M+22,y);
+  doc.setFont('helvetica','normal');doc.text(`${name}${title?'   ·   '+title:''}`,M+22,y);
   doc.setFont('helvetica','bold');doc.text('Company:',W/2+12,y);
-  doc.setFont('helvetica','normal');doc.text('Point 1 Electrical Systems',W/2+30,y);y+=4;
+  doc.setFont('helvetica','normal');doc.text('Point 1 Electrical Systems',W/2+30,y);y+=5;
+  doc.setFont('helvetica','bold');doc.text('Employee #:',M,y);
+  doc.setFont('helvetica','normal');doc.text(empNo||'—',M+24,y);
+  if(email){doc.setTextColor(90,90,90);doc.text(email,W/2+12,y);doc.setTextColor(28,28,28);}y+=4;
 
   function section(title,items,basisFn){
     if(y>252){doc.addPage();y=20;}
@@ -815,7 +856,27 @@ function exportQuarterPDF(){
 }
 
 /* ---- events ---- */
-$('exportBtn').onclick=exportQuarterPDF;
+function openVoucher(){
+  if(!AGREEMENTS.length){toast('No agreements to export');return;}
+  const email=$('whoTxt').textContent||'';
+  $('v_name').value=LS.get('rmr_emp_name')||repName(email);
+  $('v_no').value=LS.get('rmr_emp_no')||'';
+  $('v_title').value=LS.get('rmr_emp_title')||'';
+  $('vTitle').textContent=`Voucher details — ${qLabel(selQI)}`;
+  $('vScrim').classList.add('show');
+  setTimeout(()=>$('v_name').focus(),50);
+}
+$('exportBtn').onclick=openVoucher;
+$('vClose').onclick=()=>$('vScrim').classList.remove('show');
+$('vCancel').onclick=()=>$('vScrim').classList.remove('show');
+$('vScrim').onclick=e=>{if(e.target===$('vScrim'))$('vScrim').classList.remove('show');};
+$('vGen').onclick=()=>{
+  const name=$('v_name').value.trim()||repName($('whoTxt').textContent||'');
+  const no=$('v_no').value.trim(),title=$('v_title').value.trim();
+  LS.set('rmr_emp_name',name);LS.set('rmr_emp_no',no);LS.set('rmr_emp_title',title);
+  $('vScrim').classList.remove('show');
+  exportQuarterPDF({name,no,title});
+};
 $('loginBtn').onclick=doSignIn;
 $('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')doSignIn();});
 $('loginEmail').addEventListener('keydown',e=>{if(e.key==='Enter')$('loginPass').focus();});
@@ -843,6 +904,7 @@ $('addBtn').onclick=()=>{ if(!sb){toast('Sign in first');return;} openModal(null
 $('f_custom').onchange=toggleBilling;
 $('schedAdd').onclick=()=>addSchedRow(1,'',false);
 $('marginFlag').onchange=()=>{const v=parseFloat($('marginFlag').value);if(!isNaN(v)&&v>=0&&v<=100){marginFlagPct=v;LS.set('rmr_margin_flag',String(v));renderAgreements();toast('Margin flag set to '+v+'%');}};
+$('agFilter').onchange=e=>{agFilter=(e.target.value==='all')?'all':+e.target.value;renderAgreements();};
 $('mClose').onclick=closeModal;$('mCancel').onclick=closeModal;
 $('scrim').onclick=e=>{if(e.target===$('scrim'))closeModal();};
 ['f_num','f_cust','f_date','f_term','f_rmr','f_mult','f_direct','f_rate','f_freq','f_hrs','f_shrs','f_scost','f_sub','f_target','f_renew','f_ext'].forEach(id=>{const el=$(id);el.addEventListener('input',updatePreview);el.addEventListener('change',updatePreview);});
