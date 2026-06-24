@@ -128,7 +128,7 @@
   .btn-ghost{background:none;border:1px solid var(--line);border-radius:9px;padding:9px 16px;font-size:14px;font-weight:500;color:var(--ink)}
   .empty{padding:48px 20px;text-align:center;color:var(--muted)}
   .empty b{display:block;color:var(--ink);font-size:16px;margin-bottom:5px;font-weight:600}
-  #agTableWrap{overflow-x:auto}
+  #agTableWrap,#renTableWrap,#pipeTableWrap,#cmpTableWrap{overflow-x:auto}
   .rnw-empty{font-size:13px;color:var(--muted);font-style:italic;padding:4px 0 10px}
   .rnw-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:7px;font-size:13px;background:#fff}
   .rnw-row .rnw-main{flex:1}
@@ -246,6 +246,9 @@
 <nav class="tabs">
   <button class="active" data-view="quarter" id="tabQuarter">Quarter view</button>
   <button data-view="agreements" id="tabAgreements">Agreements</button>
+  <button data-view="renewals" id="tabRenewals">Renewal Opportunities</button>
+  <button data-view="pipeline" id="tabPipeline">Bonus Pipeline</button>
+  <button data-view="comparison" id="tabComparison">Comparison</button>
 </nav>
 
 <main>
@@ -289,6 +292,41 @@
     <div class="panel">
       <div class="panel-head"><h2>All RMR agreements</h2><span class="qctx" id="agCount"></span></div>
       <div id="agTableWrap"></div>
+    </div>
+  </section>
+
+  <section id="view-renewals" style="display:none">
+    <div class="qbar" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <div style="font-size:13px;color:var(--muted)">Forecasted renewal value for term agreements (M2M excluded). <b style="color:var(--ink)">Potential</b> figures assume renewal at current terms; growth uses your projected renewal RMR.</div>
+    </div>
+    <div id="renQuickCards" class="cards" style="margin-bottom:16px"></div>
+    <div class="panel">
+      <div class="panel-head"><h2>Renewal opportunities</h2><span class="qctx" id="renCount"></span></div>
+      <div id="renTableWrap"></div>
+    </div>
+  </section>
+
+  <section id="view-pipeline" style="display:none">
+    <div class="qbar" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <div style="font-size:13px;color:var(--muted)">Forward-looking bonus forecast. All figures are <b style="color:var(--ink)">comparison/forecast only</b> — not in live payouts or the voucher.</div>
+    </div>
+    <div id="pipeCards" class="cards" style="margin-bottom:16px"></div>
+    <div class="panel">
+      <div class="panel-head"><h2>Upcoming expiring agreements</h2><span class="qctx" id="pipeCount"></span></div>
+      <div id="pipeTableWrap"></div>
+    </div>
+  </section>
+
+  <section id="view-comparison" style="display:none">
+    <div class="qbar" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <div style="font-size:13px;color:var(--muted)"><b style="color:var(--ink)">Current Plan</b> = RMR × 200%. <b style="color:var(--ink)">Proposed Plan</b> = Current + margin accelerator + earned renewal & growth bonuses.</div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)" title="Enabling live application is a future step pending approval.">
+        <input type="checkbox" id="goLive" disabled> Apply Proposed to live payouts <span style="font-size:11px;color:var(--orange);font-weight:600">(comparison only — not active)</span></label>
+    </div>
+    <div id="cmpCards" class="cards" style="margin-bottom:16px"></div>
+    <div class="panel">
+      <div class="panel-head"><h2>Current vs Proposed — by agreement</h2><span class="qctx" id="cmpCount"></span></div>
+      <div id="cmpTableWrap"></div>
     </div>
   </section>
 </main>
@@ -656,7 +694,7 @@ function buildQuarterOptions(){
 }
 
 /* ---- render ---- */
-function render(){ if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); renderLegend(); }
+function render(){ if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='pipeline')renderPipeline(); if(view==='comparison')renderComparison(); renderLegend(); }
 function renderQuarter(){
   buildQuarterOptions();$('qSelect').value=selQI;
   $('qCtx').textContent=selQI===CUR_QI?'Current quarter':(selQI<CUR_QI?'Past quarter':'Upcoming quarter');
@@ -741,6 +779,130 @@ function renderAgreements(){
     </tr>`;}).join('');
   $('agTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>RMR</th><th>Term</th><th>Margin</th><th>Accel</th><th class="num">Commission</th><th class="num">Initial</th><th class="num">Deferred</th><th>Releases</th><th>Maturity</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('agTableWrap').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openModal(b.dataset.edit));
+}
+/* ---- Phase 4/5/6: forecasting + comparison ---- */
+function addMonths(d,n){const x=new Date(d.getTime());x.setMonth(x.getMonth()+n);return x;}
+function agreementState(a){
+  const completed=renewalsFor(a.id).filter(r=>(r.status||'completed')==='completed')
+    .sort((x,y)=>new Date(x.renewal_date||0)-new Date(y.renewal_date||0));
+  const last=completed[completed.length-1];
+  let currentRMR=+a.monthly_rmr||0, currentTerm=+a.contract_term||0, anchor=a.activation_date;
+  if(last){ currentRMR=+last.renewed_rmr||currentRMR; currentTerm=+last.new_term||currentTerm; anchor=last.renewal_date||anchor; }
+  const isM2M=currentTerm===0;
+  let expiration=null, daysRemaining=null;
+  if(!isM2M && anchor){ const ad=new Date(anchor+'T00:00:00'); if(!isNaN(ad)){ expiration=addMonths(ad,currentTerm); daysRemaining=Math.ceil((expiration-new Date())/86400000); } }
+  return {currentRMR,currentTerm,anchor,expiration,daysRemaining,isM2M};
+}
+function opportunityFor(a){
+  const s=agreementState(a);
+  if(s.isM2M) return null;                                   // M2M excluded from renewal forecasting
+  const potentialRenewal=s.currentRMR*renewalBonusTier(s.currentTerm);
+  const proj=(a.projected_renewal_rmr!=null&&a.projected_renewal_rmr!=='')?+a.projected_renewal_rmr:null;
+  const potentialGrowth=(proj!=null&&proj>s.currentRMR)?(proj-s.currentRMR)*1.0:0;   // $0 default unless projection entered
+  return {state:s,potentialRenewal,potentialGrowth,totalOpportunity:potentialRenewal+potentialGrowth};
+}
+function comparisonFor(a){
+  const c=compute(a);
+  const current=(+a.monthly_rmr||0)*2.0;                    // decision B: Current = RMR x 200%
+  const accelerated=current*(1+c.accelRate);
+  const rt=renewalTotalsFor(a.id);                          // earned (completed) renewal + growth
+  const proposed=accelerated+rt.total;
+  return {current,accelRate:c.accelRate,accelerated,earnedRenewal:rt.renewal,earnedGrowth:rt.growth,earned:rt.total,proposed,diff:proposed-current};
+}
+function daysCell(d){
+  if(d==null) return '<span style="color:var(--none)">—</span>';
+  if(d<0) return `<span style="color:var(--held);font-weight:600">expired ${Math.abs(d)}d ago</span>`;
+  if(d<=90) return `<span style="color:var(--orange);font-weight:600">${d}d</span>`;
+  return `<span style="color:var(--muted)">${d}d</span>`;
+}
+function fmtDate(d){return d?d.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):'—';}
+
+function renderRenewals(){
+  const opps=AGREEMENTS.map(a=>({a,o:opportunityFor(a)})).filter(x=>x.o)
+    .sort((x,y)=>{const dx=x.o.state.daysRemaining,dy=y.o.state.daysRemaining;return (dx==null?1e9:dx)-(dy==null?1e9:dy);});
+  const sumR=opps.reduce((s,x)=>s+x.o.potentialRenewal,0);
+  const sumG=opps.reduce((s,x)=>s+x.o.potentialGrowth,0);
+  const sumT=sumR+sumG;
+  const soon=opps.filter(x=>x.o.state.daysRemaining!=null&&x.o.state.daysRemaining>=0&&x.o.state.daysRemaining<=90).length;
+  $('renQuickCards').innerHTML=`
+    <div class="stat accent"><div class="lbl">Total opportunity value</div><div class="val">${fmt(sumT)}</div></div>
+    <div class="stat green"><div class="lbl">Potential renewal bonuses</div><div class="val">${fmt(sumR)}</div></div>
+    <div class="stat orange"><div class="lbl">Potential growth bonuses</div><div class="val">${fmt(sumG)}</div></div>
+    <div class="stat"><div class="lbl">Expiring &le; 90 days</div><div class="val">${soon}</div></div>`;
+  $('renCount').textContent=`${opps.length} term agreement${opps.length===1?'':'s'} (M2M excluded)`;
+  if(!opps.length){$('renTableWrap').innerHTML=`<div class="empty"><b>No renewal opportunities</b>Term agreements (12/24/36/60-month) will appear here as renewal forecasts.</div>`;return;}
+  const rows=opps.map(({a,o})=>{
+    const c=compute(a);
+    const mPct=c.grossMargin==null?'—':`${Math.round(c.grossMargin*1000)/10}%`;
+    const proj=(a.projected_renewal_rmr!=null&&a.projected_renewal_rmr!=='')?`<div style="font-size:10px;color:var(--muted)">proj ${fmt(+a.projected_renewal_rmr)}</div>`:'';
+    return `<tr>
+      <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
+      <td>${esc(a.customer_name||'—')}</td>
+      <td class="mono" style="color:var(--muted)">${fmtDate(o.state.expiration)}</td>
+      <td>${daysCell(o.state.daysRemaining)}</td>
+      <td class="mono">${fmt(o.state.currentRMR)}${proj}</td>
+      <td class="mono" style="color:var(--muted)">${mPct}</td>
+      <td class="num mono">${fmt(o.potentialRenewal)}</td>
+      <td class="num mono">${fmt(o.potentialGrowth)}</td>
+      <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(o.totalOpportunity)}</td>
+    </tr>`;}).join('');
+  $('renTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Expiration</th><th>Days left</th><th>Current RMR</th><th>Margin</th><th class="num">Pot. renewal</th><th class="num">Pot. growth</th><th class="num">Total opportunity</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderPipeline(){
+  const opps=AGREEMENTS.map(a=>({a,o:opportunityFor(a)})).filter(x=>x.o);
+  const pendingRenewal=RENEWALS.filter(r=>(r.status||'completed')==='pending').reduce((s,r)=>s+renewalBonusOf(r,true),0);
+  const pendingGrowth=RENEWALS.filter(r=>(r.status||'completed')==='pending').reduce((s,r)=>s+growthBonusOf(r,true),0);
+  const potGrowth=opps.reduce((s,x)=>s+x.o.potentialGrowth,0)+pendingGrowth;
+  const futureOpp=opps.reduce((s,x)=>s+x.o.totalOpportunity,0)+pendingRenewal+pendingGrowth;
+  const projectedComm=AGREEMENTS.reduce((s,a)=>s+comparisonFor(a).proposed,0);
+  const soonList=opps.filter(x=>x.o.state.daysRemaining!=null).sort((x,y)=>x.o.state.daysRemaining-y.o.state.daysRemaining);
+  const soonCount=soonList.filter(x=>x.o.state.daysRemaining>=0&&x.o.state.daysRemaining<=180).length;
+  $('pipeCards').innerHTML=`
+    <div class="stat accent"><div class="lbl">Total future opportunity</div><div class="val">${fmt(futureOpp)}</div></div>
+    <div class="stat green"><div class="lbl">Pending renewal bonuses</div><div class="val">${fmt(pendingRenewal)}</div></div>
+    <div class="stat orange"><div class="lbl">Potential growth bonuses</div><div class="val">${fmt(potGrowth)}</div></div>
+    <div class="stat blue"><div class="lbl">Projected commissions</div><div class="val">${fmt(projectedComm)}</div></div>
+    <div class="stat"><div class="lbl">Expiring &le; 180 days</div><div class="val">${soonCount}</div></div>`;
+  $('pipeCount').textContent=`${soonList.length} term agreement${soonList.length===1?'':'s'}`;
+  if(!soonList.length){$('pipeTableWrap').innerHTML=`<div class="empty"><b>Nothing in the pipeline yet</b>Term agreements with an expiration date will appear here, soonest first.</div>`;return;}
+  const rows=soonList.map(({a,o})=>`<tr>
+      <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
+      <td>${esc(a.customer_name||'—')}</td>
+      <td class="mono" style="color:var(--muted)">${fmtDate(o.state.expiration)}</td>
+      <td>${daysCell(o.state.daysRemaining)}</td>
+      <td class="mono">${fmt(o.state.currentRMR)}</td>
+      <td class="num mono">${fmt(o.potentialRenewal)}</td>
+      <td class="num mono">${fmt(o.potentialGrowth)}</td>
+      <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(o.totalOpportunity)}</td>
+    </tr>`).join('');
+  $('pipeTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Expiration</th><th>Days left</th><th>Current RMR</th><th class="num">Pot. renewal</th><th class="num">Pot. growth</th><th class="num">Total opportunity</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderComparison(){
+  const rows=AGREEMENTS.map(a=>({a,c:comparisonFor(a)}));
+  const tCur=rows.reduce((s,x)=>s+x.c.current,0);
+  const tProp=rows.reduce((s,x)=>s+x.c.proposed,0);
+  const tDiff=tProp-tCur;
+  const diffColor=tDiff>=0?'var(--payable)':'var(--held)';
+  $('cmpCards').innerHTML=`
+    <div class="stat"><div class="lbl">Current plan total</div><div class="val">${fmt(tCur)}</div></div>
+    <div class="stat accent"><div class="lbl">Proposed plan total</div><div class="val">${fmt(tProp)}</div></div>
+    <div class="stat green"><div class="lbl">Difference</div><div class="val" style="color:${diffColor}">${tDiff>=0?'+':''}${fmt(tDiff)}</div></div>`;
+  $('cmpCount').textContent=`${rows.length} agreement${rows.length===1?'':'s'}`;
+  if(!rows.length){$('cmpTableWrap').innerHTML=`<div class="empty"><b>No agreements to compare</b>Add agreements to see Current vs Proposed.</div>`;return;}
+  const body=rows.map(({a,c})=>{
+    const dc=c.diff>=0?'var(--payable)':'var(--held)';
+    return `<tr>
+      <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
+      <td>${esc(a.customer_name||'—')}</td>
+      <td class="num mono">${fmt(c.current)}</td>
+      <td class="mono" style="color:${c.accelRate>0?'var(--payable)':'var(--none)'}">+${Math.round(c.accelRate*100)}%</td>
+      <td class="num mono">${c.earned>0?fmt(c.earned):'—'}</td>
+      <td class="num mono" style="font-weight:700">${fmt(c.proposed)}</td>
+      <td class="num mono" style="font-weight:700;color:${dc}">${c.diff>=0?'+':''}${fmt(c.diff)}</td>
+    </tr>`;}).join('');
+  $('cmpTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th class="num">Current (×200%)</th><th>Accel</th><th class="num">Renewal+Growth</th><th class="num">Proposed</th><th class="num">Difference</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 function renderLegend(){
   const items=[['c-payable','Payable — owed to you'],['c-maturing','Maturing — next quarter'],['c-held','Held — further out'],['c-paid','Paid — collected'],['c-none','Paid upfront — no deferred']];
@@ -870,7 +1032,7 @@ function updatePreview(){
 
 /* ---- view switching ---- */
 function switchView(v){
-  view=v;['quarter','agreements'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
+  view=v;['quarter','agreements','renewals','pipeline','comparison'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   render();
 }
@@ -1010,6 +1172,9 @@ $('qToday').onclick=()=>{selQI=CUR_QI;renderQuarter();};
 $('qSelect').onchange=e=>{selQI=+e.target.value;renderQuarter();};
 $('tabQuarter').onclick=()=>switchView('quarter');
 $('tabAgreements').onclick=()=>switchView('agreements');
+$('tabRenewals').onclick=()=>switchView('renewals');
+$('tabPipeline').onclick=()=>switchView('pipeline');
+$('tabComparison').onclick=()=>switchView('comparison');
 $('addBtn').onclick=()=>{ if(!sb){toast('Sign in first');return;} openModal(null); };
 $('f_custom').onchange=toggleBilling;
 $('schedAdd').onclick=()=>addSchedRow(1,'',false);
