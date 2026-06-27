@@ -414,6 +414,7 @@
         <div class="preview" id="mPreview"></div>
       </div>
     </div>
+    <div id="mErr" style="display:none;margin:0 24px 4px;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#9a2a2a"></div>
     <div class="modal-foot">
       <button class="btn-ghost" id="mDelete" style="color:var(--held);border-color:#f3c4c4;display:none">Delete</button>
       <div style="display:flex;gap:10px;margin-left:auto">
@@ -1200,7 +1201,7 @@ function openModal(id){
   $('f_target').value=(a&&a.target_margin!=null&&a.target_margin!=='')?Math.round(a.target_margin*100):'';
   $('f_auto').checked=!!(a&&a.autorenew);
   $('f_notes').value=v('notes');$('mDelete').style.display=a?'inline-block':'none';
-  updatePreview();$('scrim').classList.add('show');
+  $('mErr').style.display='none';updatePreview();$('scrim').classList.add('show');
 }
 function closeModal(){$('scrim').classList.remove('show');editingId=null;}
 function readForm(){return{
@@ -1409,12 +1410,30 @@ $('agFilter').onchange=e=>{agFilter=(e.target.value==='all')?'all':+e.target.val
 $('mClose').onclick=closeModal;$('mCancel').onclick=closeModal;
 $('scrim').onclick=e=>{if(e.target===$('scrim'))closeModal();};
 ['f_num','f_cust','f_date','f_term','f_rmr','f_rate','f_freq','f_hrs','f_mat','f_mon','f_soft','f_sub','f_other','f_target','f_auto'].forEach(id=>{const el=$(id);el.addEventListener('input',updatePreview);el.addEventListener('change',updatePreview);});
+function validateForm(row){
+  const e=[];
+  if(!row.agreement_number) e.push('Agreement # is required.');
+  if(!row.customer_name) e.push('Customer is required.');
+  if(!row.activation_date) e.push('Activation / sale date is required (it sets when the commission lands).');
+  if(!(row.monthly_rmr>0) && !(row.custom_billing && (row.billing_schedule||[]).some(r=>+r.amount>0))) e.push('Monthly Recurring Revenue must be greater than 0.');
+  if(row.monthly_rmr<0) e.push('Recurring revenue cannot be negative.');
+  const costs={'Loaded labor rate':row.loaded_labor_rate,'Materials':row.material_cost_annual,'Monitoring':row.monitoring_cost_annual,'Software licensing':row.software_cost_annual,'Subcontractors':row.subcontractor_annual_cost,'Other direct':row.other_direct_annual};
+  Object.keys(costs).forEach(k=>{ if(costs[k]<0) e.push(`${k} cannot be negative.`); });
+  if(row.target_margin!=null && (row.target_margin<0||row.target_margin>1)) e.push('Target margin must be between 0 and 100%.');
+  return e;
+}
 $('mSave').onclick=async()=>{
   if(!sb){toast('Sign in first');return;}
   const row=readForm();
-  if(!row.agreement_number&&!row.customer_name){toast('Add an agreement # or customer');return;}
+  const errs=validateForm(row);
+  const box=$('mErr');
+  if(errs.length){ box.style.display='block'; box.innerHTML='<b>Please fix the following:</b><br>• '+errs.map(esc).join('<br>• '); box.scrollIntoView({block:'nearest'}); return; }
+  // §9.15 duplicate prevention — warn, allow only if confirmed
+  const dup=AGREEMENTS.find(a=>a.id!==editingId && String(a.agreement_number||'').trim().toLowerCase()===String(row.agreement_number).trim().toLowerCase());
+  if(dup && !confirm(`Agreement #${row.agreement_number} already exists for "${dup.customer_name||'—'}". Save another with the same number?`)){ return; }
+  box.style.display='none';
   try{await upsert(row);await load();closeModal();toast(editingId?'Agreement updated':'Agreement added');}
-  catch(e){toast(e.message||'Save failed');}
+  catch(e){ box.style.display='block'; box.textContent=e.message||'Save failed'; }
 };
 $('mDelete').onclick=async()=>{if(editingId&&confirm('Delete this agreement?')){await removeRow(editingId);closeModal();toast('Deleted');}};
 
