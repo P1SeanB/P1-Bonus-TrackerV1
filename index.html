@@ -255,6 +255,7 @@
   <h1>Bonus Tracking Tool</h1>
   <div class="session">
     <span class="who" id="whoTxt"></span>
+    <span id="roleBadge" class="chip c-paid" style="display:none;font-size:10px;font-weight:700;margin-left:6px"></span>
     <button class="hdr-help" id="guideBtn">? Guide</button>
     <button class="signout" id="signoutBtn">Sign out</button>
   </div>
@@ -651,9 +652,42 @@ function showLogin(needConn){
   if(needConn){$('connBox').classList.add('show');}
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
+/* ===== Security & governance (PRD Ch.10) ===== */
+const APP_VERSION='P1RMR-10';
+const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
+let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
+async function resolveRole(email){
+  CURRENT_EMAIL=email||''; const lc=(email||'').toLowerCase();
+  if(ADMIN_EMAILS.includes(lc)){ CURRENT_ROLE='Administrator'; return; }   // guaranteed admin
+  try{ const {data,error}=await sb.from('rmr_users').select('role').eq('email',lc).limit(1); if(error)throw error; CURRENT_ROLE=(data&&data[0]&&data[0].role)||'Sales Representative'; }
+  catch(e){ CURRENT_ROLE='Sales Representative'; }   // table missing → least privilege (Sean still admin via list above)
+}
+const PERMISSIONS={
+  editConfig:['Administrator'],
+  viewAudit:['Administrator','Executive'],
+  override:['Administrator','Executive','Sales Manager'],
+  calculate:['Administrator','Executive','Sales Manager','Sales Representative'],
+  export:['Administrator','Executive','Sales Manager','Sales Representative','Read Only']
+};
+function can(fn){ return (PERMISSIONS[fn]||[]).includes(CURRENT_ROLE); }
+function applyPermissions(){
+  const adm=can('editConfig');
+  const at=$('tabAdmin'); if(at) at.style.display=(adm||can('viewAudit'))?'':'none';
+  const badge=$('roleBadge'); if(badge){ badge.textContent=CURRENT_ROLE; badge.style.display=CURRENT_ROLE?'inline-block':'none'; }
+  const add=$('addBtn'); if(add) add.style.display=can('calculate')?'':'none';
+}
+async function audit(action,module,recordId,oldVal,newVal,reason){
+  try{ await sb.from('rmr_audit_log').insert({ts:new Date().toISOString(),user_email:CURRENT_EMAIL,user_role:CURRENT_ROLE,action,module,
+    record_id:recordId?String(recordId):null,
+    old_value:oldVal!=null?JSON.stringify(oldVal).slice(0,4000):null,
+    new_value:newVal!=null?JSON.stringify(newVal).slice(0,4000):null,
+    reason:reason||null,app_version:APP_VERSION,plan_version:CONFIG.planVersion}); }
+  catch(e){ /* audit table not migrated yet → skip silently */ }
+}
 function enterApp(email){
   signedIn=true;$('login').classList.remove('show');$('app').classList.add('show');
   $('whoTxt').textContent=email||'';
+  resolveRole(email).then(applyPermissions);
   switchView('quarter');resetIdle();
 }
 async function boot(){
@@ -701,7 +735,7 @@ function resetIdle(){ clearTimeout(idleTimer); if(signedIn) idleTimer=setTimeout
 async function load(){
   const {data,error}=await sb.from('rmr_agreements').select('*').order('activation_date',{ascending:true});
   if(error)throw error;
-  AGREEMENTS=data||[];
+  AGREEMENTS=(data||[]).filter(a=>!a.deleted_at);
   await loadPlan();
   await loadRenewals();
   render();
@@ -772,8 +806,12 @@ async function patchRenewalPaid(id,val){
   const r=RENEWALS.find(x=>x.id===id);if(r)r.paid=val;render();
 }
 async function removeRow(id){
-  const {error}=await sb.from('rmr_agreements').delete().eq('id',id);
+  const a=AGREEMENTS.find(x=>x.id===id);
+  // §10.11 soft delete — preserve the financial record; fall back to hard delete only if column not migrated
+  let {error}=await sb.from('rmr_agreements').update({deleted_at:new Date().toISOString()}).eq('id',id);
+  if(error && /deleted_at|column/i.test(error.message||'')){ ({error}=await sb.from('rmr_agreements').delete().eq('id',id)); }
   if(error){toast(error.message);return;}
+  audit('Agreement deleted','Agreements',id,{agreement_number:a&&a.agreement_number,customer:a&&a.customer_name},null);
   AGREEMENTS=AGREEMENTS.filter(x=>x.id!==id);render();
 }
 
@@ -1115,15 +1153,35 @@ function renderAdmin(){
       <button class="iconbtn" id="cfgImport">Import JSON</button>
       <input type="file" id="cfgFile" accept="application/json" style="display:none">
       <span id="cfgMsg" style="font-size:12px;color:var(--muted)"></span>
-    </div>`;
+    </div>
+    ${can('viewAudit')?`<div class="panel"><div class="panel-head"><h2>Audit log</h2><span class="qctx">immutable · most recent first</span></div><div id="auditWrap"><div class="admin-body" style="color:var(--muted);font-size:13px">Loading…</div></div></div>`:''}`;
   $('cfgSave').onclick=saveAdmin;
   $('cfgReset').onclick=()=>{ if(confirm('Reset the commission plan to PRD defaults? This affects all unpaid calculations.')){CONFIG=JSON.parse(JSON.stringify(DEFAULT_CONFIG));saveConfig();savePlan();toast('Reset to defaults');renderAdmin();} };
   $('cfgExport').onclick=()=>{ const blob=new Blob([JSON.stringify(CONFIG,null,2)],{type:'application/json'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=`commission-plan-${String(CONFIG.planVersion||'plan').replace(/[^a-z0-9]+/gi,'-')}.json`; a.click(); URL.revokeObjectURL(u); };
   $('cfgImport').onclick=()=>$('cfgFile').click();
   $('cfgFile').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ try{ const j=JSON.parse(r.result); if(!j.newPct||!j.marginTiers)throw 0; CONFIG=normalizeConfig(j); saveConfig(); savePlan(); toast('Plan imported'); renderAdmin(); }catch(err){ toast('Invalid plan file'); } }; r.readAsText(f); };
+  if(!can('editConfig')){ ['cfgSave','cfgReset','cfgImport'].forEach(id=>{const b=$(id); if(b){b.disabled=true;b.style.opacity=.5;b.title='Administrator only';}}); $('cfgMsg').textContent='Read-only — your role cannot modify the plan.'; }
+  if(can('viewAudit')) renderAudit();
+}
+async function renderAudit(){
+  const w=$('auditWrap'); if(!w)return;
+  let rows=[];
+  try{ const {data,error}=await sb.from('rmr_audit_log').select('*').order('ts',{ascending:false}).limit(100); if(error)throw error; rows=data||[]; }
+  catch(e){ w.innerHTML=`<div class="admin-body" style="color:var(--muted);font-size:13px">No audit records yet. Run migration_v7_security to enable the audit trail; afterward every plan change, agreement edit, and delete is logged here.</div>`; return; }
+  if(!rows.length){ w.innerHTML=`<div class="admin-body" style="color:var(--muted);font-size:13px">No audit records yet.</div>`; return; }
+  const body=rows.map(r=>`<tr>
+    <td class="mono" style="color:var(--muted);white-space:nowrap">${esc(String(r.ts||'').replace('T',' ').slice(0,16))}</td>
+    <td>${esc(r.user_email||'—')}<div style="font-size:10px;color:var(--muted)">${esc(r.user_role||'')}</div></td>
+    <td>${esc(r.action||'—')}</td>
+    <td>${esc(r.module||'—')}</td>
+    <td class="mono">${esc(r.record_id||'—')}</td>
+    <td class="mono" style="font-size:11px;color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.new_value||'')}">${esc(r.new_value||'')}</td>
+  </tr>`).join('');
+  w.innerHTML=`<table><thead><tr><th>When</th><th>User</th><th>Action</th><th>Module</th><th>Record</th><th>New value</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 function saveAdmin(){
   const msg=$('cfgMsg'), errs=[];
+  if(!can('editConfig')){ msg.style.color='var(--held)'; msg.textContent='Only Administrators can modify the commission plan.'; return; }
   const plan=$('cfg_plan').value.trim()||'unnamed';
   const basis=(document.querySelector('input[name=cfg_basis]:checked')||{}).value||'TCV';
   const target=(+$('cfg_target').value)/100, min=(+$('cfg_min').value)/100;
@@ -1142,10 +1200,13 @@ function saveAdmin(){
   tiers.forEach(t=>{ if(isNaN(t.min)||t.min<0||t.min>1)errs.push('A tier margin is out of range.'); if(isNaN(t.mult)||t.mult<0)errs.push('A tier multiplier is invalid.'); });
   if(errs.length){ msg.style.color='var(--held)'; msg.textContent=errs[0]; return; }
   tiers.sort((a,b)=>b.min-a.min);
+  if(!confirm('Save changes to the active commission plan? This applies to all unpaid calculations.')) return;
+  const before={planVersion:CONFIG.planVersion,basis:CONFIG.basis,newPct:CONFIG.newPct,renewalPct:CONFIG.renewalPct};
   CONFIG={planVersion:plan,basis,targetMargin:target,minMargin:min,newPct,renewalPct,marginTiers:tiers};
   saveConfig();
   msg.style.color='var(--muted)'; msg.textContent='Saving…';
   savePlan().then(ok=>{ msg.style.color=ok?'var(--payable)':'var(--orange)'; msg.textContent=ok?'✓ Saved to shared plan — applies to all users & unpaid calculations.':'✓ Saved locally. Run migration_v6 to share across users.'; });
+  audit('Commission plan modified','Admin',null,before,{planVersion:plan,basis,newPct,renewalPct},null);
   toast('Commission plan saved');
 }
 function renderLegend(){
@@ -1432,7 +1493,9 @@ $('mSave').onclick=async()=>{
   const dup=AGREEMENTS.find(a=>a.id!==editingId && String(a.agreement_number||'').trim().toLowerCase()===String(row.agreement_number).trim().toLowerCase());
   if(dup && !confirm(`Agreement #${row.agreement_number} already exists for "${dup.customer_name||'—'}". Save another with the same number?`)){ return; }
   box.style.display='none';
-  try{await upsert(row);await load();closeModal();toast(editingId?'Agreement updated':'Agreement added');}
+  const isEdit=!!editingId;
+  try{await upsert(row);await load();closeModal();toast(isEdit?'Agreement updated':'Agreement added');
+    audit(isEdit?'Agreement edited':'Agreement created','Agreements',row.agreement_number,null,{agreement_number:row.agreement_number,customer:row.customer_name,mrr:row.monthly_rmr,term:row.contract_term},null);}
   catch(e){ box.style.display='block'; box.textContent=e.message||'Save failed'; }
 };
 $('mDelete').onclick=async()=>{if(editingId&&confirm('Delete this agreement?')){await removeRow(editingId);closeModal();toast('Deleted');}};
