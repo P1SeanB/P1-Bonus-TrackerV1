@@ -203,6 +203,10 @@
   .bartrack{flex:1;background:#f1f1f1;border-radius:6px;height:18px;overflow:hidden}
   .barfill{height:100%;border-radius:6px;background:var(--orange);transition:width .3s}
   .barval{width:96px;flex:none;font-weight:700;color:var(--ink);text-align:right}
+  .scopebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 24px;background:#fff;border-bottom:1px solid var(--line)}
+  .scopelbl{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .scopechip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:4px 12px;font-size:12px;font-weight:600;color:var(--ink);cursor:pointer}
+  .scopechip.on{background:var(--orange);color:#fff;border-color:var(--orange)}
 </style>
 </head>
 <body>
@@ -270,6 +274,7 @@
   <button data-view="reports" id="tabReports">Reports</button>
   <button data-view="admin" id="tabAdmin">⚙ Admin</button>
 </nav>
+<div id="scopeBar" class="scopebar" style="display:none"></div>
 
 <main>
   <section id="view-quarter">
@@ -561,7 +566,7 @@ const DEFAULT_CONFIG={
 let CONFIG=(()=>{try{const j=JSON.parse(LS.get('rmr_commission_config'));if(j&&j.newPct&&j.marginTiers){if(j.targetMargin==null)j.targetMargin=0.50;if(j.minMargin==null)j.minMargin=0.45;if(!j.planVersion)j.planVersion='2026 v1.0';return j;}return JSON.parse(JSON.stringify(DEFAULT_CONFIG));}catch(e){return JSON.parse(JSON.stringify(DEFAULT_CONFIG));}})();
 function saveConfig(){LS.set('rmr_commission_config',JSON.stringify(CONFIG));}
 function pctFor(map,term){if(map[term]!=null)return map[term];const ks=Object.keys(map).map(Number).sort((a,b)=>a-b);let v=map[ks[0]];for(const k of ks){if(term>=k)v=map[k];}return v;}
-function marginMult(gm){if(gm==null)return {mult:1.0,label:'—',status:'—'};for(const t of CONFIG.marginTiers){if(gm>=t.min)return {mult:t.mult,label:t.label,status:t.status||t.label};}return {mult:0,label:'Not eligible',status:'Not profitable'};}
+function marginMult(gm){if(gm==null)return {mult:1.0,label:'—',status:'—'};for(const t of CONFIG.marginTiers){if(gm>=t.min-1e-9)return {mult:t.mult,label:t.label,status:t.status||t.label};}return {mult:0,label:'Not eligible',status:'Not profitable'};}
 function buildSnapshot(a,type){
   const c=compute(a),isInit=type==='initial';
   return {plan_version:CONFIG.planVersion,paid_date:new Date().toISOString().slice(0,10),
@@ -604,7 +609,7 @@ function compute(a){
   const grossMargin=acv>0?grossProfit/acv:null;
   const laborPctRevenue=acv>0?laborCost/acv:null;
   const mm=marginMult(grossMargin);
-  const eligible=grossMargin==null?true:grossMargin>=(CONFIG.minMargin||0.45);
+  const eligible=grossMargin==null?true:grossMargin>=(CONFIG.minMargin||0.45)-1e-9;
   const newPct=pctFor(CONFIG.newPct,term),renewalPct=pctFor(CONFIG.renewalPct,term);
   const baseCommissionNew=commissionableValue*newPct;
   const baseCommissionRenewal=commissionableValue*renewalPct;
@@ -684,6 +689,16 @@ const PERMISSIONS={
   export:['Administrator','Executive','Sales Manager','Sales Representative','Read Only']
 };
 function can(fn){ return (PERMISSIONS[fn]||[]).includes(CURRENT_ROLE); }
+let USER_FILTER=null;   // null = all visible; else array of owner keys to include
+function canViewAll(){ return ['Administrator','Executive','Sales Manager'].includes(CURRENT_ROLE); }
+function ownerKey(a){ return (a&&a.owner_email)?a.owner_email:'(unassigned)'; }
+function scopedAgreements(){
+  let list=AGREEMENTS;
+  if(!canViewAll()){ const me=(CURRENT_EMAIL||'').toLowerCase(); return list.filter(a=>(a.owner_email||'').toLowerCase()===me); }
+  if(USER_FILTER&&USER_FILTER.length) list=list.filter(a=>USER_FILTER.includes(ownerKey(a)));
+  return list;
+}
+function distinctOwners(){ return [...new Set(AGREEMENTS.map(ownerKey))].sort(); }
 function applyPermissions(){
   const adm=can('editConfig');
   const at=$('tabAdmin'); if(at) at.style.display=(adm||can('viewAudit'))?'':'none';
@@ -701,7 +716,7 @@ async function audit(action,module,recordId,oldVal,newVal,reason){
 function enterApp(email){
   signedIn=true;$('login').classList.remove('show');$('app').classList.add('show');
   $('whoTxt').textContent=email||'';
-  resolveRole(email).then(applyPermissions);
+  resolveRole(email).then(()=>{ applyPermissions(); render(); });
   switchView('quarter');resetIdle();
 }
 async function boot(){
@@ -792,7 +807,7 @@ async function upsert(row){
   async function go(p){ if(p.id){const {error}=await sb.from('rmr_agreements').update(p).eq('id',p.id);if(error)throw error;} else {const {error}=await sb.from('rmr_agreements').insert(p);if(error)throw error;} }
   try{ await go(payload); }
   catch(e){ // ref columns not migrated yet → retry without them so saving still works
-    if(/customer_number|site_number|column/i.test(e.message||'')){ const {customer_number,site_number,...rest}=payload; await go(rest); }
+    if(/customer_number|site_number|owner_email|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,...rest}=payload; await go(rest); }
     else throw e;
   }
 }
@@ -839,14 +854,30 @@ function buildQuarterOptions(){
 }
 
 /* ---- render ---- */
-function render(){ if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='forecast')renderForecast(); if(view==='history')renderHistory(); if(view==='reports')renderReports(); if(view==='admin')renderAdmin(); renderLegend(); }
+function renderScopeBar(){
+  const bar=$('scopeBar'); if(!bar)return;
+  const owners=distinctOwners();
+  if(!canViewAll()||owners.length<=1){ bar.style.display='none'; return; }
+  bar.style.display='flex';
+  const sel=USER_FILTER||[], allOn=!sel.length;
+  const chip=(key,label,on)=>`<button class="scopechip${on?' on':''}" data-owner="${esc(key)}">${esc(label)}</button>`;
+  bar.innerHTML=`<span class="scopelbl">Viewing</span>`+chip('__all','All users',allOn)+
+    owners.map(o=>chip(o,o,sel.includes(o))).join('');
+  bar.querySelectorAll('.scopechip').forEach(b=>b.onclick=()=>{
+    const o=b.dataset.owner;
+    if(o==='__all'){ USER_FILTER=null; }
+    else { const s=new Set(USER_FILTER||[]); s.has(o)?s.delete(o):s.add(o); USER_FILTER=s.size?[...s]:null; }
+    renderScopeBar(); render();
+  });
+}
+function render(){ renderScopeBar(); if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='forecast')renderForecast(); if(view==='history')renderHistory(); if(view==='reports')renderReports(); if(view==='admin')renderAdmin(); renderLegend(); }
 function renderQuarter(){
   buildQuarterOptions();$('qSelect').value=selQI;
   $('qCtx').textContent=selQI===CUR_QI?'Current quarter':(selQI<CUR_QI?'Past quarter':'Upcoming quarter');
   const q=(selQI%4)+1,y=Math.floor(selQI/4);
   $('qRangeTxt').textContent=`${['Jan–Mar','Apr–Jun','Jul–Sep','Oct–Dec'][q-1]} ${y}`;
   const lines=[];
-  AGREEMENTS.forEach(a=>{const c=compute(a);
+  scopedAgreements().forEach(a=>{const c=compute(a);
     const fi=frozenAmount(a,'initial');
     if(c.initialQI===selQI&&fi.amount>0)
       lines.push({a,c,type:'initial',amount:fi.amount,paid:!!a.paid_initial,field:'paid_initial',frozen:fi.frozen,snap:fi.snap});
@@ -859,8 +890,8 @@ function renderQuarter(){
   const total=lines.reduce((s,l)=>s+l.amount,0),paid=lines.filter(l=>l.paid).reduce((s,l)=>s+l.amount,0),owed=total-paid;
   const initCt=lines.filter(l=>l.type==='initial').length, renCt=lines.filter(l=>l.type==='renewal').length;
   // pending manual renewals coming due (autorenew OFF, not yet renewed, renewal in this quarter or earlier)
-  const pendingRenew=AGREEMENTS.filter(a=>{const c=compute(a);return c.renewalCommission>0&&!a.autorenew&&!a.renewed&&c.renewalQI!=null&&c.renewalQI<=selQI;}).length;
-  const newRMR=AGREEMENTS.reduce((s,a)=>{const c=compute(a);return s+(c.initialQI===selQI?c.mrr:0);},0);
+  const pendingRenew=scopedAgreements().filter(a=>{const c=compute(a);return c.renewalCommission>0&&!a.autorenew&&!a.renewed&&c.renewalQI!=null&&c.renewalQI<=selQI;}).length;
+  const newRMR=scopedAgreements().reduce((s,a)=>{const c=compute(a);return s+(c.initialQI===selQI?c.mrr:0);},0);
   $('qCards').innerHTML=`
     <div class="stat accent"><div class="lbl">Due this quarter</div><div class="val">${fmt(total)}</div></div>
     <div class="stat green"><div class="lbl">Still owed</div><div class="val">${fmt(owed)}</div></div>
@@ -893,11 +924,11 @@ function renderQuarter(){
 function renderAgreements(){
   $('marginFlag').value=marginFlagPct;
   // build the "Activated in" dropdown from agreements' activation quarters
-  const qset=new Set();AGREEMENTS.forEach(a=>{const c=compute(a);if(c.initialQI!=null)qset.add(c.initialQI);});
+  const qset=new Set();scopedAgreements().forEach(a=>{const c=compute(a);if(c.initialQI!=null)qset.add(c.initialQI);});
   const qsorted=[...qset].sort((a,b)=>b-a);
   $('agFilter').innerHTML='<option value="all">All time</option>'+qsorted.map(qi=>`<option value="${qi}">${qLabel(qi)}</option>`).join('');
   $('agFilter').value=(agFilter==='all')?'all':String(agFilter);
-  let list=(agFilter==='all')?AGREEMENTS:AGREEMENTS.filter(a=>compute(a).initialQI===agFilter);
+  const _sa=scopedAgreements(); let list=(agFilter==='all')?_sa:_sa.filter(a=>compute(a).initialQI===agFilter);
   if(agSort&&AG_SORT[agSort.key]){
     const f=AG_SORT[agSort.key],dir=agSort.dir==='asc'?1:-1;
     list=[...list].sort((x,y)=>{const a=f(x),b=f(y);
@@ -907,7 +938,7 @@ function renderAgreements(){
   const totalRMR=list.reduce((s,a)=>s+compute(a).mrr,0);
   $('agShown').textContent=`${list.length} agreement${list.length===1?'':'s'}`;
   $('agRmrTotal').textContent=fmt(totalRMR);
-  $('agCount').textContent=`${list.length} of ${AGREEMENTS.length}`;
+  $('agCount').textContent=`${list.length} of ${_sa.length}`;
   if(!list.length){$('agTableWrap').innerHTML=`<div class="empty"><b>No agreements ${agFilter==='all'?'yet':'activated in '+qLabel(agFilter)}</b>${agFilter==='all'?'Add your first RMR agreement to start tracking maturity.':'Try a different quarter or All time.'}</div>`;return;}
   const rows=list.map(a=>{
     const c=compute(a);
@@ -960,13 +991,13 @@ function fmtDate(d){return d?d.toLocaleDateString('en-US',{year:'numeric',month:
 function rowTint(d){ if(d==null)return''; if(d<=30)return 'background:#fbeaea'; if(d<=90)return 'background:#fff4e8'; return 'background:#eaf5ee'; }
 function renderRenewals(){
   // manual (autorenew OFF) agreements with a renewal commission, not yet renewed
-  const items=AGREEMENTS.map(a=>({a,c:compute(a)}))
+  const items=scopedAgreements().map(a=>({a,c:compute(a)}))
     .filter(x=>x.c.renewMult>0 && !x.a.autorenew && !x.a.renewed && x.c.renewalDate)
     .map(x=>({...x,days:Math.ceil((x.c.renewalDate-new Date())/86400000)}))
     .sort((p,q)=>p.days-q.days);
   const due=items.filter(x=>x.days<=90).length;
   const sumDue=items.filter(x=>x.days<=90).reduce((s,x)=>s+x.c.renewalCommission,0);
-  const autoCt=AGREEMENTS.filter(a=>compute(a).renewMult>0&&a.autorenew&&!a.renewal_paid).length;
+  const autoCt=scopedAgreements().filter(a=>compute(a).renewMult>0&&a.autorenew&&!a.renewal_paid).length;
   $('renQuickCards').innerHTML=`
     <div class="stat accent"><div class="lbl">Commission to claim (≤90d)</div><div class="val">${fmt(sumDue)}</div></div>
     <div class="stat orange"><div class="lbl">Need manual renewal ≤90d</div><div class="val">${due}</div></div>
@@ -989,7 +1020,7 @@ function renderRenewals(){
 function forecastList(){
   const today=new Date(); const only12=$('fcTerm')&&$('fcTerm').value==='12';
   const REMIND=[180,120,90,60,30,14,7];
-  return AGREEMENTS.map(a=>({a,c:compute(a)}))
+  return scopedAgreements().map(a=>({a,c:compute(a)}))
     .filter(x=>x.c.term>0 && x.c.renewalDate && x.c.renewMult>0 && !x.a.renewal_paid && (!only12||x.c.term===12))
     .map(x=>{
       const days=Math.ceil((x.c.renewalDate-today)/86400000);
@@ -1040,7 +1071,7 @@ function exportForecastCSV(){
 }
 function customerProfitability(){
   const map={};
-  AGREEMENTS.forEach(a=>{const c=compute(a);const k=a.customer_name||'—';
+  scopedAgreements().forEach(a=>{const c=compute(a);const k=a.customer_name||'—';
     const o=map[k]||(map[k]={name:k,n:0,mrr:0,gp:0,mSum:0,mN:0,comm:0,paid:0});
     o.n++; o.mrr+=c.mrr; o.gp+=c.grossProfit; if(c.grossMargin!=null){o.mSum+=c.grossMargin;o.mN++;}
   });
@@ -1052,7 +1083,7 @@ function bars(rows,fmtVal,color){
   return rows.map(r=>`<div class="barrow"><div class="blab">${esc(r.label)}</div><div class="bartrack"><div class="barfill" style="width:${Math.max(2,Math.round(r.v/max*100))}%${color?';background:'+color:''}"></div></div><div class="barval">${fmtVal(r.v)}</div></div>`).join('');
 }
 function renderReports(){
-  const ags=AGREEMENTS, n=ags.length;
+  const ags=scopedAgreements(), n=ags.length;
   let totMRR=0,sumMargin=0,marginN=0,sumPct=0,belowTarget=0;
   const byTerm={}, tiers={}, byQ={};
   CONFIG.marginTiers.forEach(t=>tiers[t.status||t.label]=0);
@@ -1113,7 +1144,7 @@ function exportProfitabilityCSV(){
 }
 function historyLedger(){
   const rows=[];
-  AGREEMENTS.forEach(a=>{
+  scopedAgreements().forEach(a=>{
     const c=compute(a);
     // Initial event
     if(c.initialCommission>0 || a.paid_initial){
@@ -1220,6 +1251,7 @@ function renderAdmin(){
       <input type="file" id="cfgFile" accept="application/json" style="display:none">
       <span id="cfgMsg" style="font-size:12px;color:var(--muted)"></span>
     </div>
+    ${can('editConfig')?`<div class="panel"><div class="panel-head"><h2>User permissions</h2><span class="qctx">roles for employees who sign in</span></div><div id="usersWrap"><div class="admin-body" style="color:var(--muted);font-size:13px">Loading…</div></div></div>`:''}
     ${can('viewAudit')?`<div class="panel"><div class="panel-head"><h2>Audit log</h2><span class="qctx">immutable · most recent first</span></div><div id="auditWrap"><div class="admin-body" style="color:var(--muted);font-size:13px">Loading…</div></div></div>`:''}`;
   $('cfgSave').onclick=saveAdmin;
   $('cfgReset').onclick=()=>{ if(confirm('Reset the commission plan to PRD defaults? This affects all unpaid calculations.')){CONFIG=JSON.parse(JSON.stringify(DEFAULT_CONFIG));saveConfig();savePlan();toast('Reset to defaults');renderAdmin();} };
@@ -1228,6 +1260,54 @@ function renderAdmin(){
   $('cfgFile').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ try{ const j=JSON.parse(r.result); if(!j.newPct||!j.marginTiers)throw 0; CONFIG=normalizeConfig(j); saveConfig(); savePlan(); toast('Plan imported'); renderAdmin(); }catch(err){ toast('Invalid plan file'); } }; r.readAsText(f); };
   if(!can('editConfig')){ ['cfgSave','cfgReset','cfgImport'].forEach(id=>{const b=$(id); if(b){b.disabled=true;b.style.opacity=.5;b.title='Administrator only';}}); $('cfgMsg').textContent='Read-only — your role cannot modify the plan.'; }
   if(can('viewAudit')) renderAudit();
+  if(can('editConfig')) renderUsers();
+}
+const ROLE_LIST=['Administrator','Executive','Sales Manager','Sales Representative','Read Only'];
+async function renderUsers(){
+  const w=$('usersWrap'); if(!w)return;
+  let rows=[];
+  try{ const {data,error}=await sb.from('rmr_users').select('*').order('email'); if(error)throw error; rows=data||[]; }
+  catch(e){ w.innerHTML=`<div class="admin-body" style="color:var(--muted);font-size:13px">Run <b>migration_v7_security.sql</b> in Supabase to enable in-app role management.</div>`; return; }
+  const opt=(r,sel)=>`<option ${r===sel?'selected':''}>${r}</option>`;
+  const body=rows.map(u=>{const self=(u.email||'').toLowerCase()===(CURRENT_EMAIL||'').toLowerCase();
+    return `<tr>
+      <td>${esc(u.email)}${self?' <span class="qctx">(you)</span>':''}</td>
+      <td><select class="cfg-in wide" style="width:190px" data-role-email="${esc(u.email)}">${ROLE_LIST.map(r=>opt(r,u.role)).join('')}</select></td>
+      <td>${self?'':`<button class="iconbtn" data-del-user="${esc(u.email)}">Remove</button>`}</td>
+    </tr>`;}).join('');
+  w.innerHTML=`<div class="admin-body">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+      <input id="nuEmail" class="cfg-in wide" placeholder="employee@point1.com" style="width:240px">
+      <select id="nuRole" class="cfg-in wide" style="width:190px">${ROLE_LIST.map(r=>opt(r,'Sales Representative')).join('')}</select>
+      <button class="btn-primary" id="nuAdd">Add / update role</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">
+      This sets a person's <b>role</b>. Their actual <b>login</b> is created in Supabase ▸ Authentication ▸ Users.
+      Anyone who can sign in but isn't listed here defaults to <b>Sales Representative</b>.
+    </div>
+    <table class="cfg-table"><thead><tr><th>Email</th><th>Role</th><th></th></tr></thead><tbody>${body||'<tr><td colspan="3" style="color:var(--muted)">No roles set yet — you are admin by default.</td></tr>'}</tbody></table>
+  </div>`;
+  $('nuAdd').onclick=async()=>{
+    const em=($('nuEmail').value||'').trim().toLowerCase(), role=$('nuRole').value;
+    if(!/^.+@.+\..+$/.test(em)){ toast('Enter a valid email'); return; }
+    try{ const {error}=await sb.from('rmr_users').upsert({email:em,role},{onConflict:'email'}); if(error)throw error;
+      audit('User role set','Admin',em,null,{email:em,role}); toast('Saved '+em+' → '+role); $('nuEmail').value=''; renderUsers(); }
+    catch(e){ toast(e.message||'Failed to save'); }
+  };
+  w.querySelectorAll('[data-role-email]').forEach(s=>s.onchange=async()=>{
+    const em=s.dataset.roleEmail;
+    try{ const {error}=await sb.from('rmr_users').update({role:s.value}).eq('email',em); if(error)throw error;
+      audit('User role changed','Admin',em,null,{email:em,role:s.value}); toast('Role updated'); }
+    catch(e){ toast(e.message||'Failed'); }
+  });
+  w.querySelectorAll('[data-del-user]').forEach(b=>b.onclick=async()=>{
+    const em=b.dataset.delUser;
+    if((em||'').toLowerCase()===(CURRENT_EMAIL||'').toLowerCase()){ toast("You can't remove your own access"); return; }
+    if(!confirm(`Remove ${em}? They keep their Supabase login but revert to the default Sales Representative role.`)) return;
+    try{ const {error}=await sb.from('rmr_users').delete().eq('email',em); if(error)throw error;
+      audit('User role removed','Admin',em,null,null); toast('Removed'); renderUsers(); }
+    catch(e){ toast(e.message||'Failed'); }
+  });
 }
 async function renderAudit(){
   const w=$('auditWrap'); if(!w)return;
@@ -1403,7 +1483,7 @@ function exportQuarterPDF(details){
   details=details||{};
   if(!window.jspdf||!window.jspdf.jsPDF){ toast('PDF library still loading — try again in a moment'); return; }
   const initials=[],renewalPays=[];
-  AGREEMENTS.forEach(a=>{
+  scopedAgreements().forEach(a=>{
     const c=compute(a);
     const fi=frozenAmount(a,'initial');
     if(c.initialQI===selQI&&fi.amount>0)
@@ -1560,6 +1640,8 @@ $('mSave').onclick=async()=>{
   if(dup && !confirm(`Agreement #${row.agreement_number} already exists for "${dup.customer_name||'—'}". Save another with the same number?`)){ return; }
   box.style.display='none';
   const isEdit=!!editingId;
+  if(isEdit){ const orig=AGREEMENTS.find(a=>a.id===editingId); row.owner_email=orig?(orig.owner_email||null):null; }
+  else { row.owner_email=CURRENT_EMAIL||null; }
   try{await upsert(row);await load();closeModal();toast(isEdit?'Agreement updated':'Agreement added');
     audit(isEdit?'Agreement edited':'Agreement created','Agreements',row.agreement_number,null,{agreement_number:row.agreement_number,customer:row.customer_name,mrr:row.monthly_rmr,term:row.contract_term},null);}
   catch(e){ box.style.display='block'; box.textContent=e.message||'Save failed'; }
