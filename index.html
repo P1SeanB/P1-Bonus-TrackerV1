@@ -186,6 +186,18 @@
   .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
   .legend{display:flex;flex-wrap:wrap;gap:8px}
   @media(max-width:640px){.grid{grid-template-columns:1fr}.session .who{display:none}main{padding:16px 12px 50px}th,td{padding:10px 9px}}
+  .admin-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+  @media(max-width:760px){.admin-grid{grid-template-columns:1fr}}
+  .admin-body{padding:14px 16px}
+  .cfg-lbl{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:10px 0 4px}
+  .cfg-in{border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:13px;font-weight:600;color:var(--ink);width:84px}
+  .cfg-in.wide{width:100%}
+  .cfg-radios{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink)}
+  .cfg-two{display:flex;gap:18px;margin-top:4px;flex-wrap:wrap}
+  .cfg-table{width:100%;border-collapse:collapse;font-size:13px}
+  .cfg-table th{text-align:left;font-size:11px;color:var(--muted);font-weight:700;padding:4px 6px;border-bottom:1px solid var(--line)}
+  .cfg-table td{padding:4px 6px;color:var(--ink)}
+  .admin-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:24px}
 </style>
 </head>
 <body>
@@ -247,6 +259,7 @@
   <button class="active" data-view="quarter" id="tabQuarter">Quarter view</button>
   <button data-view="agreements" id="tabAgreements">Agreements</button>
   <button data-view="renewals" id="tabRenewals">Pending Renewals</button>
+  <button data-view="admin" id="tabAdmin">⚙ Admin</button>
 </nav>
 
 <main>
@@ -302,6 +315,13 @@
       <div class="panel-head"><h2>Pending manual renewals</h2><span class="qctx" id="renCount"></span></div>
       <div id="renTableWrap"></div>
     </div>
+  </section>
+
+  <section id="view-admin" style="display:none">
+    <div class="qbar" style="flex-wrap:wrap;gap:10px">
+      <div style="font-size:13px;color:var(--muted)">Edit the active commission plan. Changes apply <b style="color:var(--ink)">immediately</b> to unpaid calculations. Paid commissions are frozen and never recalculated (§5.6).</div>
+    </div>
+    <div id="adminWrap"></div>
   </section>
 </main>
 </div>
@@ -471,6 +491,7 @@ const CUR_QI=qIndexFromDate(now);
 function inspectionMonth(m,f){if(!f)return false;const iv=Math.round(12/f);return iv>0&&m%iv===0;}
 /* ===== Commission engine config (PRD Ch.3 — admin-configurable, persisted) ===== */
 const DEFAULT_CONFIG={
+  planVersion:'2026 v1.0',
   basis:'TCV',                                              // 'TCV' (MRR×months) or 'ACV' (MRR×12)
   targetMargin:0.50,                                        // §4.3 program target
   minMargin:0.45,                                           // §4.4 floor for eligibility
@@ -484,14 +505,13 @@ const DEFAULT_CONFIG={
     {min:0.00,mult:0.00,label:'Not eligible',status:'Not profitable'}
   ]
 };
-let CONFIG=(()=>{try{const j=JSON.parse(LS.get('rmr_commission_config'));if(j&&j.newPct&&j.marginTiers){if(j.targetMargin==null)j.targetMargin=0.50;if(j.minMargin==null)j.minMargin=0.45;return j;}return JSON.parse(JSON.stringify(DEFAULT_CONFIG));}catch(e){return JSON.parse(JSON.stringify(DEFAULT_CONFIG));}})();
+let CONFIG=(()=>{try{const j=JSON.parse(LS.get('rmr_commission_config'));if(j&&j.newPct&&j.marginTiers){if(j.targetMargin==null)j.targetMargin=0.50;if(j.minMargin==null)j.minMargin=0.45;if(!j.planVersion)j.planVersion='2026 v1.0';return j;}return JSON.parse(JSON.stringify(DEFAULT_CONFIG));}catch(e){return JSON.parse(JSON.stringify(DEFAULT_CONFIG));}})();
 function saveConfig(){LS.set('rmr_commission_config',JSON.stringify(CONFIG));}
 function pctFor(map,term){if(map[term]!=null)return map[term];const ks=Object.keys(map).map(Number).sort((a,b)=>a-b);let v=map[ks[0]];for(const k of ks){if(term>=k)v=map[k];}return v;}
 function marginMult(gm){if(gm==null)return {mult:1.0,label:'—',status:'—'};for(const t of CONFIG.marginTiers){if(gm>=t.min)return {mult:t.mult,label:t.label,status:t.status||t.label};}return {mult:0,label:'Not eligible',status:'Not profitable'};}
-const PLAN_VERSION='2026 v1.0';   // §3.15 commission plan version stamped on every paid snapshot
 function buildSnapshot(a,type){
   const c=compute(a),isInit=type==='initial';
-  return {plan_version:PLAN_VERSION,paid_date:new Date().toISOString().slice(0,10),
+  return {plan_version:CONFIG.planVersion,paid_date:new Date().toISOString().slice(0,10),
           rmr:c.mrr,term:+a.contract_term||0,basis:c.basis,commissionable:c.commissionableValue,
           rate:isInit?c.newPct:c.renewalPct,multiplier:c.marginMultiplier,margin:c.grossMargin,
           amount:isInit?c.initialCommission:c.renewalCommission};
@@ -706,7 +726,7 @@ function buildQuarterOptions(){
 }
 
 /* ---- render ---- */
-function render(){ if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); renderLegend(); }
+function render(){ if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='admin')renderAdmin(); renderLegend(); }
 function renderQuarter(){
   buildQuarterOptions();$('qSelect').value=selQI;
   $('qCtx').textContent=selQI===CUR_QI?'Current quarter':(selQI<CUR_QI?'Past quarter':'Upcoming quarter');
@@ -853,9 +873,82 @@ function renderRenewals(){
   $('renTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Term</th><th>Renews</th><th>Days left</th><th class="num">Renewal comm.</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('renTableWrap').querySelectorAll('[data-renew]').forEach(b=>b.onclick=()=>patchRenew(b.dataset.renew));
 }
+function renderAdmin(){
+  const c=CONFIG, terms=[12,24,36,48,60];
+  const pctRows=(map,attr)=>terms.map(t=>`<tr><td>${t} months</td><td><input class="cfg-in" data-${attr}="${t}" type="number" step="0.01" value="${Math.round((map[t]!=null?map[t]:pctFor(map,t))*10000)/100}"> %</td></tr>`).join('');
+  const tierRows=c.marginTiers.map((t,i)=>`<tr>
+      <td><input class="cfg-in" data-tiermin="${i}" type="number" step="0.01" value="${Math.round(t.min*10000)/100}"> %+</td>
+      <td><input class="cfg-in" data-tiermult="${i}" type="number" step="0.01" value="${t.mult}"> ×</td>
+      <td><input class="cfg-in wide" data-tierlabel="${i}" value="${esc(t.label||'')}"></td>
+      <td><input class="cfg-in wide" data-tierstatus="${i}" value="${esc(t.status||'')}"></td>
+    </tr>`).join('');
+  $('adminWrap').innerHTML=`
+    <div class="admin-grid">
+      <div class="panel"><div class="panel-head"><h2>Plan &amp; basis</h2></div><div class="admin-body">
+        <label class="cfg-lbl">Plan name / version <span style="color:var(--none)">(stamped on every paid snapshot)</span></label>
+        <input class="cfg-in wide" id="cfg_plan" value="${esc(c.planVersion||'')}">
+        <label class="cfg-lbl">Commission basis</label>
+        <div class="cfg-radios">
+          <label><input type="radio" name="cfg_basis" value="TCV" ${c.basis==='TCV'?'checked':''}> TCV — MRR × contract months</label>
+          <label><input type="radio" name="cfg_basis" value="ACV" ${c.basis==='ACV'?'checked':''}> ACV — MRR × 12</label>
+        </div>
+        <div class="cfg-two">
+          <div><label class="cfg-lbl">Target margin</label><input class="cfg-in" id="cfg_target" type="number" step="0.5" value="${Math.round(c.targetMargin*10000)/100}"> %</div>
+          <div><label class="cfg-lbl">Minimum margin (floor)</label><input class="cfg-in" id="cfg_min" type="number" step="0.5" value="${Math.round(c.minMargin*10000)/100}"> %</div>
+        </div>
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Margin multipliers</h2></div><div class="admin-body">
+        <table class="cfg-table"><thead><tr><th>Margin ≥</th><th>Multiplier</th><th>Tier</th><th>Status</th></tr></thead><tbody>${tierRows}</tbody></table>
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>New-agreement commission</h2></div><div class="admin-body">
+        <table class="cfg-table"><thead><tr><th>Term</th><th>Commission</th></tr></thead><tbody>${pctRows(c.newPct,'newpct')}</tbody></table>
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Renewal commission</h2></div><div class="admin-body">
+        <table class="cfg-table"><thead><tr><th>Term</th><th>Commission</th></tr></thead><tbody>${pctRows(c.renewalPct,'renpct')}</tbody></table>
+      </div></div>
+    </div>
+    <div class="admin-actions">
+      <button class="btn-primary" id="cfgSave">Save plan</button>
+      <button class="iconbtn" id="cfgReset">Reset to PRD defaults</button>
+      <button class="iconbtn" id="cfgExport">Export JSON</button>
+      <button class="iconbtn" id="cfgImport">Import JSON</button>
+      <input type="file" id="cfgFile" accept="application/json" style="display:none">
+      <span id="cfgMsg" style="font-size:12px;color:var(--muted)"></span>
+    </div>`;
+  $('cfgSave').onclick=saveAdmin;
+  $('cfgReset').onclick=()=>{ if(confirm('Reset the commission plan to PRD defaults? This affects all unpaid calculations.')){CONFIG=JSON.parse(JSON.stringify(DEFAULT_CONFIG));saveConfig();toast('Reset to defaults');renderAdmin();} };
+  $('cfgExport').onclick=()=>{ const blob=new Blob([JSON.stringify(CONFIG,null,2)],{type:'application/json'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=`commission-plan-${String(CONFIG.planVersion||'plan').replace(/[^a-z0-9]+/gi,'-')}.json`; a.click(); URL.revokeObjectURL(u); };
+  $('cfgImport').onclick=()=>$('cfgFile').click();
+  $('cfgFile').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ try{ const j=JSON.parse(r.result); if(!j.newPct||!j.marginTiers)throw 0; if(j.targetMargin==null)j.targetMargin=0.5; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='imported'; CONFIG=j; saveConfig(); toast('Plan imported'); renderAdmin(); }catch(err){ toast('Invalid plan file'); } }; r.readAsText(f); };
+}
+function saveAdmin(){
+  const msg=$('cfgMsg'), errs=[];
+  const plan=$('cfg_plan').value.trim()||'unnamed';
+  const basis=(document.querySelector('input[name=cfg_basis]:checked')||{}).value||'TCV';
+  const target=(+$('cfg_target').value)/100, min=(+$('cfg_min').value)/100;
+  if(isNaN(target)||target<=0||target>1) errs.push('Target margin must be between 0 and 100%.');
+  if(isNaN(min)||min<0||min>1) errs.push('Minimum margin must be between 0 and 100%.');
+  if(!errs.length && min>target) errs.push('Minimum margin cannot exceed target margin.');
+  const newPct={}, renewalPct={};
+  document.querySelectorAll('[data-newpct]').forEach(i=>{const t=+i.dataset.newpct,v=+i.value/100; if(isNaN(v)||v<0)errs.push(`New ${t}-mo % is invalid.`); newPct[t]=v;});
+  document.querySelectorAll('[data-renpct]').forEach(i=>{const t=+i.dataset.renpct,v=+i.value/100; if(isNaN(v)||v<0)errs.push(`Renewal ${t}-mo % is invalid.`); renewalPct[t]=v;});
+  const tiers=CONFIG.marginTiers.map((t,i)=>({
+    min:(+document.querySelector(`[data-tiermin="${i}"]`).value)/100,
+    mult:+document.querySelector(`[data-tiermult="${i}"]`).value,
+    label:document.querySelector(`[data-tierlabel="${i}"]`).value.trim(),
+    status:document.querySelector(`[data-tierstatus="${i}"]`).value.trim()
+  }));
+  tiers.forEach(t=>{ if(isNaN(t.min)||t.min<0||t.min>1)errs.push('A tier margin is out of range.'); if(isNaN(t.mult)||t.mult<0)errs.push('A tier multiplier is invalid.'); });
+  if(errs.length){ msg.style.color='var(--held)'; msg.textContent=errs[0]; return; }
+  tiers.sort((a,b)=>b.min-a.min);
+  CONFIG={planVersion:plan,basis,targetMargin:target,minMargin:min,newPct,renewalPct,marginTiers:tiers};
+  saveConfig();
+  msg.style.color='var(--payable)'; msg.textContent='✓ Saved — applied to all unpaid calculations.';
+  toast('Commission plan saved');
+}
 function renderLegend(){
   const items=[['c-payable','Payable — owed to you'],['c-paid','Paid — collected'],['c-maturing','Manual renewal needed'],['c-held','Urgent — renewal due / overdue']];
-  $('legend').innerHTML=items.map(([c,t])=>`<span class="chip ${c}">${t}</span>`).join('')+`<span class="chip" style="color:var(--muted);background:#f1f1f1">Initial % by term · 12mo 100% · 24mo 125% · 36/60 200%</span>`;
+  $('legend').innerHTML=items.map(([c,t])=>`<span class="chip ${c}">${t}</span>`).join('')+`<span class="chip" style="color:var(--muted);background:#f1f1f1">Plan ${esc(CONFIG.planVersion)} · ${CONFIG.basis} basis · margin-multiplied</span>`;
 }
 
 /* ---- modal ---- */
@@ -936,7 +1029,7 @@ function updatePreview(){
   let alert='';
   if(gm!=null&&gm<minM) alert=`<div style="grid-column:1/-1;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:7px 10px;font-size:12px;color:#9a2a2a"><b>⚠ Does not meet minimum profitability (${Math.round(minM*100)}%).</b> Increase recurring revenue or reduce direct costs. Management approval required to pay.</div>`;
   else if(gm!=null&&gm<target) alert=`<div style="grid-column:1/-1;background:#fff4e8;border:1px solid #f3d4ad;border-radius:8px;padding:7px 10px;font-size:12px;color:#8a5a17">Below the ${Math.round(target*100)}% target — commission is reduced. Consider raising RMR or trimming costs.</div>`;
-  $('mPreview').innerHTML=`<h4>Live calculation <span style="font-weight:500;color:var(--none);font-size:11px">plan ${PLAN_VERSION} · ${c.basis} basis</span></h4>
+  $('mPreview').innerHTML=`<h4>Live calculation <span style="font-weight:500;color:var(--none);font-size:11px">plan ${esc(CONFIG.planVersion)} · ${c.basis} basis</span></h4>
   <div class="pgrid">
     <div><span>MRR <span style="color:var(--none)">(annual billing ÷ 12)</span></span><b style="font-size:15px">${fmt2(c.mrr)}</b></div>
     <div><span>${c.basis==='ACV'?'ACV (×12)':'TCV (×'+c.months+'mo)'} <span style="color:var(--none)">commissionable</span></span><b style="font-size:15px">${fmt(c.commissionableValue)}</b></div>
@@ -961,7 +1054,7 @@ function updatePreview(){
 
 /* ---- view switching ---- */
 function switchView(v){
-  view=v;['quarter','agreements','renewals'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
+  view=v;['quarter','agreements','renewals','admin'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   render();
 }
@@ -1099,6 +1192,7 @@ $('qSelect').onchange=e=>{selQI=+e.target.value;renderQuarter();};
 $('tabQuarter').onclick=()=>switchView('quarter');
 $('tabAgreements').onclick=()=>switchView('agreements');
 $('tabRenewals').onclick=()=>switchView('renewals');
+$('tabAdmin').onclick=()=>switchView('admin');
 $('addBtn').onclick=()=>{ if(!sb){toast('Sign in first');return;} openModal(null); };
 $('f_custom').onchange=toggleBilling;
 $('schedAdd').onclick=()=>addSchedRow(1,'',false);
