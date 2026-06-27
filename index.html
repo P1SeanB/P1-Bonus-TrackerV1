@@ -198,6 +198,11 @@
   .cfg-table th{text-align:left;font-size:11px;color:var(--muted);font-weight:700;padding:4px 6px;border-bottom:1px solid var(--line)}
   .cfg-table td{padding:4px 6px;color:var(--ink)}
   .admin-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:24px}
+  .barrow{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:12px}
+  .barrow .blab{width:110px;color:var(--muted);text-align:right;flex:none;font-weight:600}
+  .bartrack{flex:1;background:#f1f1f1;border-radius:6px;height:18px;overflow:hidden}
+  .barfill{height:100%;border-radius:6px;background:var(--orange);transition:width .3s}
+  .barval{width:96px;flex:none;font-weight:700;color:var(--ink);text-align:right}
 </style>
 </head>
 <body>
@@ -259,6 +264,8 @@
   <button class="active" data-view="quarter" id="tabQuarter">Quarter view</button>
   <button data-view="agreements" id="tabAgreements">Agreements</button>
   <button data-view="renewals" id="tabRenewals">Pending Renewals</button>
+  <button data-view="history" id="tabHistory">Commission History</button>
+  <button data-view="reports" id="tabReports">Reports</button>
   <button data-view="admin" id="tabAdmin">⚙ Admin</button>
 </nav>
 
@@ -315,6 +322,34 @@
       <div class="panel-head"><h2>Pending manual renewals</h2><span class="qctx" id="renCount"></span></div>
       <div id="renTableWrap"></div>
     </div>
+  </section>
+
+  <section id="view-history" style="display:none">
+    <div class="qbar" style="flex-wrap:wrap;gap:10px">
+      <input id="histSearch" placeholder="Search customer or agreement #" style="border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:13px;min-width:220px">
+      <select id="histType" style="border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:13px;background:#fff;font-weight:600;color:var(--ink)"><option value="all">All types</option><option value="Initial">Initial</option><option value="Renewal">Renewal</option></select>
+      <select id="histStatus" style="border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:13px;background:#fff;font-weight:600;color:var(--ink)"><option value="all">All statuses</option><option value="Paid">Paid</option><option value="Pending">Pending</option><option value="Forecast">Forecast</option><option value="Not eligible">Not eligible</option></select>
+      <button class="iconbtn" id="histExport">Export CSV</button>
+    </div>
+    <div id="histCards" class="cards" style="margin-bottom:16px"></div>
+    <div class="panel">
+      <div class="panel-head"><h2>Commission ledger</h2><span class="qctx" id="histCount"></span></div>
+      <div id="histTableWrap"></div>
+    </div>
+  </section>
+
+  <section id="view-reports" style="display:none">
+    <div class="qbar" style="flex-wrap:wrap;gap:10px">
+      <div style="font-size:13px;color:var(--muted)">Live KPIs and analytics across every agreement. Updates automatically as data changes.</div>
+      <button class="iconbtn" id="repExport" style="margin-left:auto">Export customer profitability (CSV)</button>
+    </div>
+    <div id="repKpis" class="cards" style="margin-bottom:16px"></div>
+    <div class="admin-grid">
+      <div class="panel"><div class="panel-head"><h2>Recurring revenue by contract length</h2></div><div class="admin-body" id="repTermChart"></div></div>
+      <div class="panel"><div class="panel-head"><h2>Margin distribution</h2></div><div class="admin-body" id="repMarginChart"></div></div>
+    </div>
+    <div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Commission by quarter</h2><span class="qctx">paid + scheduled</span></div><div class="admin-body" id="repQuarterChart"></div></div>
+    <div class="panel"><div class="panel-head"><h2>Customer profitability</h2><span class="qctx" id="repCustCount"></span></div><div id="repCustWrap"></div></div>
   </section>
 
   <section id="view-admin" style="display:none">
@@ -751,7 +786,7 @@ function buildQuarterOptions(){
 }
 
 /* ---- render ---- */
-function render(){ if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='admin')renderAdmin(); renderLegend(); }
+function render(){ if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='history')renderHistory(); if(view==='reports')renderReports(); if(view==='admin')renderAdmin(); renderLegend(); }
 function renderQuarter(){
   buildQuarterOptions();$('qSelect').value=selQI;
   $('qCtx').textContent=selQI===CUR_QI?'Current quarter':(selQI<CUR_QI?'Past quarter':'Upcoming quarter');
@@ -897,6 +932,146 @@ function renderRenewals(){
     </tr>`).join('');
   $('renTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Term</th><th>Renews</th><th>Days left</th><th class="num">Renewal comm.</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('renTableWrap').querySelectorAll('[data-renew]').forEach(b=>b.onclick=()=>patchRenew(b.dataset.renew));
+}
+function customerProfitability(){
+  const map={};
+  AGREEMENTS.forEach(a=>{const c=compute(a);const k=a.customer_name||'—';
+    const o=map[k]||(map[k]={name:k,n:0,mrr:0,gp:0,mSum:0,mN:0,comm:0,paid:0});
+    o.n++; o.mrr+=c.mrr; o.gp+=c.grossProfit; if(c.grossMargin!=null){o.mSum+=c.grossMargin;o.mN++;}
+  });
+  historyLedger().forEach(r=>{const o=map[r.a.customer_name||'—']; if(!o)return; o.comm+=r.amount; if(r.status==='Paid')o.paid+=r.amount;});
+  return Object.values(map).map(o=>({...o,avgMargin:o.mN?o.mSum/o.mN:null})).sort((a,b)=>b.mrr-a.mrr);
+}
+function bars(rows,fmtVal,color){
+  const max=Math.max(1,...rows.map(r=>r.v));
+  return rows.map(r=>`<div class="barrow"><div class="blab">${esc(r.label)}</div><div class="bartrack"><div class="barfill" style="width:${Math.max(2,Math.round(r.v/max*100))}%${color?';background:'+color:''}"></div></div><div class="barval">${fmtVal(r.v)}</div></div>`).join('');
+}
+function renderReports(){
+  const ags=AGREEMENTS, n=ags.length;
+  let totMRR=0,sumMargin=0,marginN=0,sumPct=0,belowTarget=0;
+  const byTerm={}, tiers={}, byQ={};
+  CONFIG.marginTiers.forEach(t=>tiers[t.status||t.label]=0);
+  ags.forEach(a=>{const c=compute(a);
+    totMRR+=c.mrr; sumPct+=c.newPct;
+    if(c.grossMargin!=null){sumMargin+=c.grossMargin;marginN++; if(c.grossMargin<CONFIG.targetMargin)belowTarget++; tiers[c.marginStatus]=(tiers[c.marginStatus]||0)+1;}
+    const tk=c.term>0?c.term+'mo':'M2M'; byTerm[tk]=(byTerm[tk]||0)+c.mrr;
+    if(c.initialQI!=null&&c.initialCommission>0) byQ[c.initialQI]=(byQ[c.initialQI]||0)+(a.paid_initial&&a.initial_snapshot?+a.initial_snapshot.amount:c.initialCommission);
+    if(c.renewalQI!=null&&c.renewalCommission>0&&(a.autorenew||a.renewed||a.renewal_paid)) byQ[c.renewalQI]=(byQ[c.renewalQI]||0)+(a.renewal_paid&&a.renewal_snapshot?+a.renewal_snapshot.amount:c.renewalCommission);
+  });
+  const ledger=historyLedger();
+  const paidComm=ledger.filter(r=>r.status==='Paid').reduce((s,r)=>s+r.amount,0);
+  const pendComm=ledger.filter(r=>r.status==='Pending'||r.status==='Forecast').reduce((s,r)=>s+r.amount,0);
+  const avgMargin=marginN?sumMargin/marginN:null, avgPct=n?sumPct/n:0;
+  const upcoming=ags.filter(a=>{const c=compute(a); if(!c.renewalDate)return false; const d=Math.ceil((c.renewalDate-new Date())/86400000); return d>=0&&d<=90;}).length;
+  $('repKpis').innerHTML=`
+    <div class="stat accent"><div class="lbl">Total MRR</div><div class="val">${fmt(totMRR)}<span style="font-size:12px;color:var(--muted)">/mo</span></div></div>
+    <div class="stat orange"><div class="lbl">ARR</div><div class="val">${fmt(totMRR*12)}</div></div>
+    <div class="stat"><div class="lbl">Active agreements</div><div class="val">${n}</div></div>
+    <div class="stat green"><div class="lbl">Avg gross margin</div><div class="val">${avgMargin==null?'—':Math.round(avgMargin*1000)/10+'%'}</div></div>
+    <div class="stat blue"><div class="lbl">Commission paid</div><div class="val">${fmt(paidComm)}</div></div>
+    <div class="stat accent"><div class="lbl">Pending / forecast</div><div class="val">${fmt(pendComm)}</div></div>
+    <div class="stat orange"><div class="lbl">Below target margin</div><div class="val">${belowTarget}</div></div>
+    <div class="stat"><div class="lbl">Renewals ≤90 days</div><div class="val">${upcoming}</div></div>`;
+  // charts
+  const termOrder=['M2M','12mo','24mo','36mo','48mo','60mo'];
+  const termRows=termOrder.filter(t=>byTerm[t]).map(t=>({label:t,v:byTerm[t]}));
+  $('repTermChart').innerHTML=termRows.length?bars(termRows,v=>fmt(v)+'/mo'):'<div style="color:var(--muted);font-size:13px">No data yet.</div>';
+  const tierColor={'Exceptional':'var(--paid)','Excellent':'var(--payable)','Target':'var(--payable)','Acceptable':'var(--orange)','Not profitable':'var(--held)'};
+  const tierRows=Object.keys(tiers).map(k=>({label:k,v:tiers[k],c:tierColor[k]}));
+  $('repMarginChart').innerHTML=tierRows.some(r=>r.v)?tierRows.map(r=>`<div class="barrow"><div class="blab">${esc(r.label)}</div><div class="bartrack"><div class="barfill" style="width:${Math.max(2,Math.round(r.v/Math.max(1,...tierRows.map(x=>x.v))*100))}%;background:${r.c||'var(--orange)'}"></div></div><div class="barval">${r.v}</div></div>`).join(''):'<div style="color:var(--muted);font-size:13px">No margin data yet.</div>';
+  const qis=Object.keys(byQ).map(Number).sort((a,b)=>a-b);
+  const qRows=qis.map(qi=>({label:qLabel(qi),v:byQ[qi]}));
+  $('repQuarterChart').innerHTML=qRows.length?bars(qRows,v=>fmt(v)):'<div style="color:var(--muted);font-size:13px">No commission events yet.</div>';
+  // customer profitability
+  const cust=customerProfitability();
+  $('repCustCount').textContent=`${cust.length} customer${cust.length===1?'':'s'}`;
+  if(!cust.length){$('repCustWrap').innerHTML=`<div class="empty"><b>No customers yet</b>Add agreements to see per-customer profitability.</div>`;return;}
+  const body=cust.map(o=>`<tr>
+    <td>${esc(o.name)}</td>
+    <td class="num mono">${o.n}</td>
+    <td class="num mono">${fmt(o.mrr)}</td>
+    <td class="num mono">${fmt(o.mrr*12)}</td>
+    <td class="num mono">${fmt(o.gp)}</td>
+    <td class="mono">${o.avgMargin==null?'—':Math.round(o.avgMargin*1000)/10+'%'}</td>
+    <td class="num mono">${fmt(o.comm)}</td>
+    <td class="num mono" style="font-weight:700">${fmt(o.paid)}</td>
+  </tr>`).join('');
+  $('repCustWrap').innerHTML=`<table><thead><tr><th>Customer</th><th class="num">Agmts</th><th class="num">MRR</th><th class="num">ARR</th><th class="num">Gross profit</th><th>Avg margin</th><th class="num">Commission</th><th class="num">Paid</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+function exportProfitabilityCSV(){
+  const cust=customerProfitability();
+  const head=['Customer','Agreements','MRR','ARR','Annual Gross Profit','Avg Margin %','Total Commission','Commission Paid'];
+  const lines=[head.join(',')];
+  cust.forEach(o=>{const cells=[o.name,o.n,Math.round(o.mrr),Math.round(o.mrr*12),Math.round(o.gp),o.avgMargin==null?'':Math.round(o.avgMargin*1000)/10,Math.round(o.comm),Math.round(o.paid)];
+    lines.push(cells.map(v=>{v=String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(','));});
+  const blob=new Blob([lines.join('\n')],{type:'text/csv'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=`customer-profitability-${todayISO()}.csv`; a.click(); URL.revokeObjectURL(u);
+}
+function historyLedger(){
+  const rows=[];
+  AGREEMENTS.forEach(a=>{
+    const c=compute(a);
+    // Initial event
+    if(c.initialCommission>0 || a.paid_initial){
+      const s=(a.paid_initial&&a.initial_snapshot)?a.initial_snapshot:null;
+      rows.push({a,type:'Initial',paid:!!a.paid_initial,frozen:!!s,pending:false,
+        date:s&&s.paid_date?s.paid_date:a.activation_date,
+        term:s?s.term:c.term, commissionable:(s&&s.commissionable!=null)?+s.commissionable:c.commissionableValue,
+        margin:s?s.margin:c.grossMargin, rate:s?s.rate:c.newPct, mult:s?s.multiplier:c.marginMultiplier,
+        amount:s?+s.amount:c.initialCommission, plan:s?s.plan_version:CONFIG.planVersion});
+    }
+    // Renewal event (term agreements with a renewal rate)
+    if(c.term>0 && c.renewMult>0 && (c.renewalCommission>0 || a.renewal_paid)){
+      const s=(a.renewal_paid&&a.renewal_snapshot)?a.renewal_snapshot:null;
+      const due=a.autorenew||a.renewed;
+      rows.push({a,type:'Renewal',paid:!!a.renewal_paid,frozen:!!s,pending:!due,
+        date:s&&s.paid_date?s.paid_date:(c.renewalDate?c.renewalDate.toISOString().slice(0,10):null),
+        term:s?s.term:c.term, commissionable:(s&&s.commissionable!=null)?+s.commissionable:c.commissionableValue,
+        margin:s?s.margin:c.grossMargin, rate:s?s.rate:c.renewalPct, mult:s?s.multiplier:c.marginMultiplier,
+        amount:s?+s.amount:c.renewalCommission, plan:s?s.plan_version:CONFIG.planVersion});
+    }
+  });
+  rows.forEach(r=>{ r.status = r.paid?'Paid' : (r.mult===0?'Not eligible' : (r.pending?'Forecast':'Pending')); });
+  return rows.sort((x,y)=>String(y.date||'').localeCompare(String(x.date||'')));
+}
+function renderHistory(){
+  const q=($('histSearch').value||'').toLowerCase(), ft=$('histType').value, fs=$('histStatus').value;
+  let rows=historyLedger();
+  if(q) rows=rows.filter(r=>String(r.a.customer_name||'').toLowerCase().includes(q)||String(r.a.agreement_number||'').toLowerCase().includes(q)||String(r.a.customer_number||'').toLowerCase().includes(q));
+  if(ft!=='all') rows=rows.filter(r=>r.type===ft);
+  if(fs!=='all') rows=rows.filter(r=>r.status===fs);
+  const paidSum=rows.filter(r=>r.status==='Paid').reduce((s,r)=>s+r.amount,0);
+  const pendSum=rows.filter(r=>r.status==='Pending'||r.status==='Forecast').reduce((s,r)=>s+r.amount,0);
+  $('histCards').innerHTML=`
+    <div class="stat blue"><div class="lbl">Commission paid</div><div class="val">${fmt(paidSum)}</div></div>
+    <div class="stat accent"><div class="lbl">Pending / forecast</div><div class="val">${fmt(pendSum)}</div></div>
+    <div class="stat"><div class="lbl">Ledger entries</div><div class="val">${rows.length}</div></div>`;
+  $('histCount').textContent=`${rows.length} commission event${rows.length===1?'':'s'}`;
+  const badge=st=>{const m={'Paid':'c-paid','Pending':'c-payable','Forecast':'c-maturing','Not eligible':'c-held'};return `<span class="chip ${m[st]||''}">${st}</span>`;};
+  if(!rows.length){$('histTableWrap').innerHTML=`<div class="empty"><b>No commission events</b>As agreements are added and paid, every initial and renewal commission is logged here with the plan it was calculated under.</div>`;return;}
+  const body=rows.map(r=>{
+    const mPct=r.margin==null?'—':`${Math.round(r.margin*1000)/10}%`;
+    return `<tr>
+      <td class="mono" style="color:var(--muted)">${r.date||'—'}</td>
+      <td>${esc(r.a.customer_name||'—')}${r.a.site_number?`<div style="font-size:10px;color:var(--muted)">Site #${esc(r.a.site_number)}</div>`:''}</td>
+      <td class="ag-no">#${esc(r.a.agreement_number||'—')}</td>
+      <td>${r.type==='Renewal'?'<span class="chip" style="background:#e7f3ee;color:var(--payable);font-size:10px">Renewal</span>':'<span class="type-tag">Initial</span>'}</td>
+      <td>${r.term?r.term+'mo':'—'}</td>
+      <td class="num mono">${fmt(r.commissionable)}</td>
+      <td class="mono">${mPct}</td>
+      <td class="mono">${Math.round(r.rate*1000)/10}% ×${(+r.mult).toFixed(2)}</td>
+      <td class="num mono" style="font-weight:700">${fmt2(r.amount)}</td>
+      <td>${r.frozen?`<span title="frozen ${esc(r.plan)}">🔒 ${esc(r.plan)}</span>`:`<span style="color:var(--muted)">${esc(r.plan)}</span>`}</td>
+      <td>${badge(r.status)}</td>
+    </tr>`;}).join('');
+  $('histTableWrap').innerHTML=`<table><thead><tr><th>Date</th><th>Customer</th><th>Agr #</th><th>Type</th><th>Term</th><th class="num">Commissionable</th><th>Margin</th><th>Rate</th><th class="num">Final</th><th>Plan</th><th>Status</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+function exportHistoryCSV(){
+  const rows=historyLedger();
+  const head=['Date','Customer','Customer #','Site #','Agreement #','Type','Term','Commissionable','Margin %','Rate %','Multiplier','Final Commission','Plan','Status'];
+  const lines=[head.join(',')];
+  rows.forEach(r=>{ const cells=[r.date||'',r.a.customer_name||'',r.a.customer_number||'',r.a.site_number||'',r.a.agreement_number||'',r.type,r.term||'',Math.round(r.commissionable),r.margin==null?'':Math.round(r.margin*1000)/10,Math.round(r.rate*1000)/10,(+r.mult).toFixed(2),Math.round(r.amount),r.plan||'',r.status];
+    lines.push(cells.map(v=>{v=String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')); });
+  const blob=new Blob([lines.join('\n')],{type:'text/csv'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=`commission-history-${todayISO()}.csv`; a.click(); URL.revokeObjectURL(u);
 }
 function renderAdmin(){
   const c=CONFIG, terms=[12,24,36,48,60];
@@ -1080,7 +1255,7 @@ function updatePreview(){
 
 /* ---- view switching ---- */
 function switchView(v){
-  view=v;['quarter','agreements','renewals','admin'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
+  view=v;['quarter','agreements','renewals','history','reports','admin'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   render();
 }
@@ -1218,6 +1393,13 @@ $('qSelect').onchange=e=>{selQI=+e.target.value;renderQuarter();};
 $('tabQuarter').onclick=()=>switchView('quarter');
 $('tabAgreements').onclick=()=>switchView('agreements');
 $('tabRenewals').onclick=()=>switchView('renewals');
+$('tabHistory').onclick=()=>switchView('history');
+$('tabReports').onclick=()=>switchView('reports');
+$('repExport').onclick=exportProfitabilityCSV;
+$('histSearch').addEventListener('input',renderHistory);
+$('histType').addEventListener('change',renderHistory);
+$('histStatus').addEventListener('change',renderHistory);
+$('histExport').onclick=exportHistoryCSV;
 $('tabAdmin').onclick=()=>switchView('admin');
 $('addBtn').onclick=()=>{ if(!sb){toast('Sign in first');return;} openModal(null); };
 $('f_custom').onchange=toggleBilling;
