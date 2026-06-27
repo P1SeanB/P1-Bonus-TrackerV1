@@ -317,16 +317,17 @@
         <div class="fld"><label>Activation / sale date</label><input id="f_date" type="date"></div>
         <div class="fld"><label>Contract term</label>
           <select id="f_term">
-            <option value="0">Month-to-month (100% initial · no renewal)</option>
-            <option value="12" selected>12 months (100% initial · 150% renewal)</option>
-            <option value="24">24 months (125% initial · 125% renewal)</option>
-            <option value="36">36 months (200% initial · no renewal)</option>
-            <option value="60">60 months (200% initial · no renewal)</option>
+            <option value="0">Month-to-month</option>
+            <option value="12" selected>12 months (6% new · 4% renewal)</option>
+            <option value="24">24 months (7% new · 5% renewal)</option>
+            <option value="36">36 months (8% new · 5.5% renewal)</option>
+            <option value="48">48 months (8.5% new · 5.75% renewal)</option>
+            <option value="60">60 months (9% new · 6% renewal)</option>
           </select>
         </div>
         <div class="fieldset-h">Revenue &amp; commission</div>
-        <div class="fld full"><label>Monthly RMR <span class="hint">$ / month — commission = RMR × the term rate</span></label><input id="f_rmr" type="number" step="0.01" placeholder="264"></div>
-        <div class="fld full"><label style="color:var(--muted)">Commission rates are set by term — Initial: 12mo 100% · 24mo 125% · 36/60 200%. Renewal: 12mo 150% · 24mo 125% · 36/60 none.</label></div>
+        <div class="fld full"><label>Monthly RMR <span class="hint">$ / month — sets MRR; for custom billing, MRR = annual invoicing ÷ 12</span></label><input id="f_rmr" type="number" step="0.01" placeholder="264"></div>
+        <div class="fld full"><label style="color:var(--muted)">Commission = commissionable value (TCV = MRR × term months) × the term rate × the margin multiplier. New: 6 / 7 / 8 / 8.5 / 9%. Renewal: 4 / 5 / 5.5 / 5.75 / 6%.</label></div>
         <label class="bill-toggle" style="margin-top:6px"><input type="checkbox" id="f_auto"> Autorenewal — auto-renews &amp; auto-pays the renewal commission at the renewal date (off = manual renewal needed)</label>
 
         <div class="fieldset-h">Billing schedule</div>
@@ -336,21 +337,22 @@
           <div id="schedRows"></div>
           <button type="button" class="sched-add" id="schedAdd">+ Add payment</button>
         </div>
-        <div class="fieldset-h">Direct &amp; labor costs</div>
-        <div class="fld"><label>Monthly direct cost <span class="hint">$ / month</span></label><input id="f_direct" type="number" step="0.01" placeholder="54"></div>
-        <div class="fld"><label>Loaded labor rate <span class="hint">$ / hour</span></label><input id="f_rate" type="number" step="0.01" placeholder="117"></div>
+        <div class="fieldset-h">Direct costs — annual recurring (Margin Engine)</div>
+        <div class="fld"><label>Loaded labor rate <span class="hint">$ / hour, fully burdened</span></label><input id="f_rate" type="number" step="0.01" placeholder="117"></div>
         <div class="fld"><label>Inspection frequency <span class="hint">per year</span></label>
           <select id="f_freq">
             <option value="0">None</option><option value="1">1 — annual</option>
             <option value="2" selected>2 — semi-annual</option><option value="4">4 — quarterly</option><option value="12">12 — monthly</option>
           </select>
         </div>
-        <div class="fld"><label>Hours per inspection</label><input id="f_hrs" type="number" step="0.25" placeholder="4"></div>
-        <div class="fld"><label>Startup / install labor <span class="hint">hours, one-time</span></label><input id="f_shrs" type="number" step="0.25" placeholder="0"></div>
-        <div class="fld"><label>Other startup cost <span class="hint">$ one-time</span></label><input id="f_scost" type="number" step="0.01" placeholder="0"></div>
-        <div class="fld full"><label>Subcontractor annual cost <span class="hint">$ / year — e.g. sprinkler contractor, spread monthly</span></label><input id="f_sub" type="number" step="0.01" placeholder="0"></div>
+        <div class="fld"><label>Hours per inspection <span class="hint">→ labor cost</span></label><input id="f_hrs" type="number" step="0.25" placeholder="4"></div>
+        <div class="fld"><label>Materials <span class="hint">$ / yr — batteries, devices</span></label><input id="f_mat" type="number" step="0.01" placeholder="0"></div>
+        <div class="fld"><label>Monitoring <span class="hint">$ / yr — central station, Alarm.com</span></label><input id="f_mon" type="number" step="0.01" placeholder="0"></div>
+        <div class="fld"><label>Software licensing <span class="hint">$ / yr — licenses, hosted</span></label><input id="f_soft" type="number" step="0.01" placeholder="0"></div>
+        <div class="fld"><label>Subcontractors <span class="hint">$ / yr — sprinkler, elevator</span></label><input id="f_sub" type="number" step="0.01" placeholder="0"></div>
+        <div class="fld"><label>Other direct <span class="hint">$ / yr</span></label><input id="f_other" type="number" step="0.01" placeholder="0"></div>
         <div class="fieldset-h">Margin</div>
-        <div class="fld"><label>Target margin <span class="hint">% — optional, overrides the global margin-flag threshold</span></label><input id="f_target" type="number" step="1" placeholder="(use global)"></div>
+        <div class="fld"><label>Target margin <span class="hint">% — optional, overrides the program target on this deal</span></label><input id="f_target" type="number" step="1" placeholder="(use program target)"></div>
         <div class="fld full"><label>Notes</label><input id="f_notes" placeholder="Optional"></div>
         <div class="preview" id="mPreview"></div>
       </div>
@@ -467,39 +469,85 @@ const CUR_QI=qIndexFromDate(now);
 
 /* core model — clean plan: initial % + renewal % by term (paid immediately, no holds) */
 function inspectionMonth(m,f){if(!f)return false;const iv=Math.round(12/f);return iv>0&&m%iv===0;}
-function INIT_MULT(t){t=+t;if(t>=36)return 2.00;if(t===24)return 1.25;if(t===12)return 1.00;return 1.00;}   // M2M→1.00
-function RENEW_MULT(t){t=+t;if(t>=36)return 0;if(t===24)return 1.25;if(t===12)return 1.50;return 0;}          // once, at first renewal
+/* ===== Commission engine config (PRD Ch.3 — admin-configurable, persisted) ===== */
+const DEFAULT_CONFIG={
+  basis:'TCV',                                              // 'TCV' (MRR×months) or 'ACV' (MRR×12)
+  targetMargin:0.50,                                        // §4.3 program target
+  minMargin:0.45,                                           // §4.4 floor for eligibility
+  newPct:{12:0.06,24:0.07,36:0.08,48:0.085,60:0.09},        // §3.6 new-agreement matrix
+  renewalPct:{12:0.04,24:0.05,36:0.055,48:0.0575,60:0.06},  // §3.6 renewal matrix
+  marginTiers:[                                             // §4.4/§4.13 (first match wins, descending)
+    {min:0.60,mult:1.25,label:'Maximum',status:'Exceptional'},
+    {min:0.55,mult:1.10,label:'Accelerated',status:'Excellent'},
+    {min:0.50,mult:1.00,label:'Standard',status:'Target'},
+    {min:0.45,mult:0.75,label:'Reduced',status:'Acceptable'},
+    {min:0.00,mult:0.00,label:'Not eligible',status:'Not profitable'}
+  ]
+};
+let CONFIG=(()=>{try{const j=JSON.parse(LS.get('rmr_commission_config'));if(j&&j.newPct&&j.marginTiers){if(j.targetMargin==null)j.targetMargin=0.50;if(j.minMargin==null)j.minMargin=0.45;return j;}return JSON.parse(JSON.stringify(DEFAULT_CONFIG));}catch(e){return JSON.parse(JSON.stringify(DEFAULT_CONFIG));}})();
+function saveConfig(){LS.set('rmr_commission_config',JSON.stringify(CONFIG));}
+function pctFor(map,term){if(map[term]!=null)return map[term];const ks=Object.keys(map).map(Number).sort((a,b)=>a-b);let v=map[ks[0]];for(const k of ks){if(term>=k)v=map[k];}return v;}
+function marginMult(gm){if(gm==null)return {mult:1.0,label:'—',status:'—'};for(const t of CONFIG.marginTiers){if(gm>=t.min)return {mult:t.mult,label:t.label,status:t.status||t.label};}return {mult:0,label:'Not eligible',status:'Not profitable'};}
+const PLAN_VERSION='2026 v1.0';   // §3.15 commission plan version stamped on every paid snapshot
+function buildSnapshot(a,type){
+  const c=compute(a),isInit=type==='initial';
+  return {plan_version:PLAN_VERSION,paid_date:new Date().toISOString().slice(0,10),
+          rmr:c.mrr,term:+a.contract_term||0,basis:c.basis,commissionable:c.commissionableValue,
+          rate:isInit?c.newPct:c.renewalPct,multiplier:c.marginMultiplier,margin:c.grossMargin,
+          amount:isInit?c.initialCommission:c.renewalCommission};
+}
+// frozen amount if this payout is paid + has a snapshot, else the live figure
+function frozenAmount(a,type){
+  const snap=type==='initial'?a.initial_snapshot:a.renewal_snapshot;
+  const paid=type==='initial'?a.paid_initial:a.renewal_paid;
+  const c=compute(a),live=type==='initial'?c.initialCommission:c.renewalCommission;
+  const frozen=paid&&snap&&snap.amount!=null;
+  return {amount:frozen?+snap.amount:live,frozen,snap:frozen?snap:null};
+}
 function compute(a){
   const term=+a.contract_term||0;
-  const rmr=+a.monthly_rmr||0;
-  const direct=+a.monthly_direct_cost||0,inspCost=(+a.hours_per_inspection||0)*(+a.loaded_labor_rate||0);
-  const subMonthly=(+a.subcontractor_annual_cost||0)/12;
-  const startup=(+a.startup_labor_hours||0)*(+a.loaded_labor_rate||0)+(+a.other_startup_cost||0);
-  const initialCommission=rmr*INIT_MULT(term);
-  const renewalCommission=rmr*RENEW_MULT(term);
-  // billing schedule (kept for the annual-billed readout on custom-billed accounts)
+  const rate=+a.loaded_labor_rate||0;
+  // billing schedule → annual billed → MRR (handles custom / uneven invoicing through the year)
   const sched=(a.custom_billing&&Array.isArray(a.billing_schedule)&&a.billing_schedule.length)?a.billing_schedule:null;
-  let actMonth0=0;
-  if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad))actMonth0=ad.getMonth();}
-  function revAt(m){ if(!sched)return rmr; const since=m-1,cal=((actMonth0+since)%12)+1; let s=0; for(const r of sched){if((+r.month)===cal){if(r.once&&since>=12)continue; s+=(+r.amount||0);}} return s; }
-  // True margin — info-only readout
-  const inspAnnual=(+a.inspection_frequency||0)*(+a.hours_per_inspection||0)*(+a.loaded_labor_rate||0);
-  const annualBasis=direct*12+inspAnnual+(+a.subcontractor_annual_cost||0);
-  const statedAnnual=rmr*12;
-  const grossMargin=statedAnnual>0?(statedAnnual-annualBasis)/statedAnnual:null;   // info-only readout
+  let actMonth0=0; if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad))actMonth0=ad.getMonth();}
+  const flatRmr=+a.monthly_rmr||0;
+  function revAt(m){ if(!sched)return flatRmr; const since=m-1,cal=((actMonth0+since)%12)+1; let s=0; for(const r of sched){if((+r.month)===cal){if(r.once&&since>=12)continue; s+=(+r.amount||0);}} return s; }
   let annualBilled=0; for(let m=1;m<=12;m++)annualBilled+=revAt(m);
   const firstBill=revAt(1);
-  // quarter mapping — commissions pay immediately (no hold)
+  const mrr=annualBilled/12;                                 // MRR = annual invoicing ÷ 12
+  const acv=mrr*12;
+  const months=term>0?term:12;                               // M2M/custom → 12 for value basis
+  const tcv=mrr*months;
+  const commissionableValue=(CONFIG.basis==='ACV')?acv:tcv;
+  // ── Margin Engine §4.5–4.10: annual recurring direct costs ──
+  const laborHours=(+a.inspection_frequency||0)*(+a.hours_per_inspection||0);
+  const laborCost=laborHours*rate;
+  const materialCost=+a.material_cost_annual||0,monitoringCost=+a.monitoring_cost_annual||0;
+  const softwareCost=+a.software_cost_annual||0,subCost=+a.subcontractor_annual_cost||0,otherCost=+a.other_direct_annual||0;
+  let directCosts=laborCost+materialCost+monitoringCost+softwareCost+subCost+otherCost;
+  const legacyDirect=(+a.monthly_direct_cost||0)*12;         // pre-Ch.4 generic field
+  if((materialCost+monitoringCost+softwareCost+otherCost)===0 && legacyDirect>0) directCosts+=legacyDirect;
+  const grossProfit=acv-directCosts;
+  const grossMargin=acv>0?grossProfit/acv:null;
+  const laborPctRevenue=acv>0?laborCost/acv:null;
+  const mm=marginMult(grossMargin);
+  const eligible=grossMargin==null?true:grossMargin>=(CONFIG.minMargin||0.45);
+  const newPct=pctFor(CONFIG.newPct,term),renewalPct=pctFor(CONFIG.renewalPct,term);
+  const baseCommissionNew=commissionableValue*newPct;
+  const baseCommissionRenewal=commissionableValue*renewalPct;
+  const initialCommission=baseCommissionNew*mm.mult;          // Final = Base × Margin Multiplier (§3.11)
+  const renewalCommission=baseCommissionRenewal*mm.mult;
+  const netProfit=grossProfit-initialCommission;             // §4.14 annual gross profit less the commission
+  // timing
   let initialQI=null,renewalDate=null,renewalQI=null;
-  if(a.activation_date){
-    const ad=new Date(a.activation_date+'T00:00:00');
-    if(!isNaN(ad)){
-      initialQI=qIndexFromYM(ad.getFullYear(),ad.getMonth());
-      if(term>0){renewalDate=addMonths(ad,term);renewalQI=qIndexFromYM(renewalDate.getFullYear(),renewalDate.getMonth());}
-    }
-  }
-  return {term,rmr,initMult:INIT_MULT(term),renewMult:RENEW_MULT(term),initialCommission,renewalCommission,
-          grossMargin,initialQI,renewalDate,renewalQI,annualBilled,firstBill,scheduled:!!sched};
+  if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad)){initialQI=qIndexFromYM(ad.getFullYear(),ad.getMonth());if(term>0){renewalDate=addMonths(ad,term);renewalQI=qIndexFromYM(renewalDate.getFullYear(),renewalDate.getMonth());}}}
+  return {term,rmr:mrr,mrr,acv,tcv,months,commissionableValue,basis:CONFIG.basis,
+          laborHours,laborCost,materialCost,monitoringCost,softwareCost,subCost,otherCost,directCosts,
+          grossProfit,grossMargin,laborPctRevenue,netProfit,
+          marginMultiplier:mm.mult,marginLabel:mm.label,marginStatus:mm.status,eligible,
+          newPct,renewalPct,initMult:newPct,renewMult:renewalPct,
+          baseCommissionNew,baseCommissionRenewal,initialCommission,renewalCommission,
+          initialQI,renewalDate,renewalQI,annualBilled,firstBill,scheduled:!!sched};
 }
 function deferredStatus(c,selQI,paid){return 'none';}     // legacy no-op (deferred model removed)
 const STATUS_META={none:{cls:'c-none',label:'Paid upfront'},held:{cls:'c-held',label:'Deferred held'},maturing:{cls:'c-maturing',label:'Maturing'},payable:{cls:'c-payable',label:'Payable'},paid:{cls:'c-paid',label:'Paid'}};
@@ -620,9 +668,17 @@ async function upsert(row){
   else{const {error}=await sb.from('rmr_agreements').insert(payload);if(error)throw error;}
 }
 async function patchPaid(id,field,val){
-  const {error}=await sb.from('rmr_agreements').update({[field]:val,updated_at:new Date().toISOString()}).eq('id',id);
+  const a=AGREEMENTS.find(x=>x.id===id);
+  const snapCol=field==='paid_initial'?'initial_snapshot':(field==='renewal_paid'?'renewal_snapshot':null);
+  const update={[field]:val,updated_at:new Date().toISOString()};
+  if(snapCol) update[snapCol]= (val&&a) ? buildSnapshot(a,field==='paid_initial'?'initial':'renewal') : null;  // freeze on pay, clear on un-pay
+  let {error}=await sb.from('rmr_agreements').update(update).eq('id',id);
+  if(error&&snapCol&&/snapshot|column/i.test(error.message||'')){   // snapshot columns not migrated yet → still record the paid flag
+    delete update[snapCol];
+    ({error}=await sb.from('rmr_agreements').update(update).eq('id',id));
+  }
   if(error){toast(error.message);return;}
-  const a=AGREEMENTS.find(x=>x.id===id);if(a)a[field]=val;render();
+  if(a){a[field]=val;if(snapCol&&snapCol in update)a[snapCol]=update[snapCol];}render();
 }
 async function patchRenew(id){
   const {error}=await sb.from('rmr_agreements').update({renewed:true,updated_at:new Date().toISOString()}).eq('id',id);
@@ -658,18 +714,20 @@ function renderQuarter(){
   $('qRangeTxt').textContent=`${['Jan–Mar','Apr–Jun','Jul–Sep','Oct–Dec'][q-1]} ${y}`;
   const lines=[];
   AGREEMENTS.forEach(a=>{const c=compute(a);
-    if(c.initialQI===selQI&&c.initialCommission>0)
-      lines.push({a,c,type:'initial',amount:c.initialCommission,paid:!!a.paid_initial,field:'paid_initial'});
-    if(c.renewalCommission>0&&c.renewalQI===selQI){
-      const renewed=!!a.autorenew||!!a.renewed;            // auto-renew pays automatically; manual needs the Renew action
-      if(renewed) lines.push({a,c,type:'renewal',amount:c.renewalCommission,paid:!!a.renewal_paid,field:'renewal_paid',auto:!!a.autorenew});
+    const fi=frozenAmount(a,'initial');
+    if(c.initialQI===selQI&&fi.amount>0)
+      lines.push({a,c,type:'initial',amount:fi.amount,paid:!!a.paid_initial,field:'paid_initial',frozen:fi.frozen,snap:fi.snap});
+    if(c.renewalQI===selQI){
+      const renewed=!!a.autorenew||!!a.renewed;
+      const fr=frozenAmount(a,'renewal');
+      if(renewed&&fr.amount>0) lines.push({a,c,type:'renewal',amount:fr.amount,paid:!!a.renewal_paid,field:'renewal_paid',auto:!!a.autorenew,frozen:fr.frozen,snap:fr.snap});
     }
   });
   const total=lines.reduce((s,l)=>s+l.amount,0),paid=lines.filter(l=>l.paid).reduce((s,l)=>s+l.amount,0),owed=total-paid;
   const initCt=lines.filter(l=>l.type==='initial').length, renCt=lines.filter(l=>l.type==='renewal').length;
   // pending manual renewals coming due (autorenew OFF, not yet renewed, renewal in this quarter or earlier)
   const pendingRenew=AGREEMENTS.filter(a=>{const c=compute(a);return c.renewalCommission>0&&!a.autorenew&&!a.renewed&&c.renewalQI!=null&&c.renewalQI<=selQI;}).length;
-  const newRMR=AGREEMENTS.reduce((s,a)=>{const c=compute(a);return s+(c.initialQI===selQI?(+a.monthly_rmr||0):0);},0);
+  const newRMR=AGREEMENTS.reduce((s,a)=>{const c=compute(a);return s+(c.initialQI===selQI?c.mrr:0);},0);
   $('qCards').innerHTML=`
     <div class="stat accent"><div class="lbl">Due this quarter</div><div class="val">${fmt(total)}</div></div>
     <div class="stat green"><div class="lbl">Still owed</div><div class="val">${fmt(owed)}</div></div>
@@ -683,12 +741,13 @@ function renderQuarter(){
     const st=l.paid?'paid':'payable',meta=STATUS_META[st];
     const typeTag=l.type==='renewal'?'<span class="type-tag" style="background:#e7f3ee;color:var(--payable)">Renewal</span>':'<span class="type-tag">Initial</span>';
     const dateTxt=l.type==='renewal'
-      ? `${l.auto?'auto-renew':'manually renewed'} · ${Math.round(l.c.renewMult*100)}%`
-      : `at activation · ${Math.round(l.c.initMult*100)}%`;
+      ? `${l.auto?'auto-renew':'manually renewed'} · ${Math.round(l.c.renewMult*1000)/10}%`
+      : `at activation · ${Math.round(l.c.initMult*1000)/10}%`;
     const btn=`<button class="paidbtn ${l.paid?'is-paid':''}" data-paid="${l.a.id}" data-field="${l.field}" data-val="${l.paid?0:1}">${l.paid?'✓ Paid':'Mark paid'}</button>`;
+    const lockTag=l.frozen?` <span title="Frozen at mark-paid · plan ${esc(l.snap.plan_version)} · ${l.snap.paid_date} · rate ${Math.round(l.snap.rate*100)}%" style="font-size:9px;font-weight:700;color:var(--muted);background:#eee;border-radius:4px;padding:1px 4px">🔒 ${esc(l.snap.plan_version)}</span>`:'';
     return `<tr>
       <td class="ag-no">#${esc(l.a.agreement_number||'—')}</td>
-      <td>${esc(l.a.customer_name||'—')}</td>
+      <td>${esc(l.a.customer_name||'—')}${lockTag}</td>
       <td>${typeTag}</td>
       <td class="num mono">${fmt2(l.amount)}</td>
       <td class="mono" style="color:var(--muted)">${dateTxt}</td>
@@ -712,7 +771,7 @@ function renderAgreements(){
       if(typeof a==='string')return a.localeCompare(b)*dir;
       return (a<b?-1:a>b?1:0)*dir;});
   }
-  const totalRMR=list.reduce((s,a)=>s+(+a.monthly_rmr||0),0);
+  const totalRMR=list.reduce((s,a)=>s+compute(a).mrr,0);
   $('agShown').textContent=`${list.length} agreement${list.length===1?'':'s'}`;
   $('agRmrTotal').textContent=fmt(totalRMR);
   $('agCount').textContent=`${list.length} of ${AGREEMENTS.length}`;
@@ -720,23 +779,23 @@ function renderAgreements(){
   const rows=list.map(a=>{
     const c=compute(a);
     const termTxt=(+a.contract_term===0)?'M2M':`${a.contract_term}mo`;
-    const thr=marginThreshold(a);
-    const thin=c.grossMargin!=null&&c.grossMargin<thr;
+    const elig=c.grossMargin!=null&&c.grossMargin<0.45;
+    const accel=c.marginMultiplier>1;
     const mPct=c.grossMargin==null?'—':`${Math.round(c.grossMargin*1000)/10}%`;
-    const ownTarget=(a.target_margin!=null&&a.target_margin!=='');
     const mCell=c.grossMargin==null?'<span style="color:var(--none)">—</span>'
-      :`<span class="chip ${thin?'c-maturing':'c-none'}" title="${ownTarget?'target '+Math.round(a.target_margin*100)+'%':'global '+marginFlagPct+'%'}" style="${thin?'':'background:transparent;color:var(--muted)'}">${mPct}${thin?' ⚠':''}</span>`;
-    const renewTxt=c.renewMult>0?`${fmt(c.renewalCommission)} (${Math.round(c.renewMult*100)}%)`:'<span style="color:var(--none)">—</span>';
-    const autoTag=c.renewMult>0?(a.autorenew
+      :`<span class="chip ${elig?'c-held':(accel?'c-payable':'c-none')}" title="${esc(c.marginLabel)}${elig?' — not eligible':''}" style="${elig||accel?'':'background:transparent;color:var(--muted)'}">${mPct} <span style="opacity:.7">×${c.marginMultiplier.toFixed(2)}</span></span>`;
+    const pct=m=>`${Math.round(m*1000)/10}%`;
+    const renewTxt=(c.renewMult>0&&c.term>0)?`${fmt(c.renewalCommission)} <span style="font-size:10px;color:var(--muted)">(${pct(c.renewMult)})</span>`:'<span style="color:var(--none)">—</span>';
+    const autoTag=(c.renewMult>0&&c.term>0)?(a.autorenew
       ?'<span class="chip c-payable" style="font-size:10px">auto</span>'
       :(a.renewed?'<span class="chip c-paid" style="font-size:10px">renewed</span>':'<span class="chip c-maturing" style="font-size:10px">manual</span>')):'';
     return `<tr>
       <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
       <td>${esc(a.customer_name||'—')}</td>
-      <td class="mono">${fmt(+a.monthly_rmr||0)}${c.scheduled?'<div style="font-size:10px;color:var(--orange);font-weight:600;letter-spacing:.03em">SCHEDULED</div>':''}</td>
+      <td class="mono">${fmt(c.mrr)}${c.scheduled?'<div style="font-size:10px;color:var(--orange);font-weight:600;letter-spacing:.03em">SCHEDULED</div>':''}</td>
       <td>${termTxt}</td>
       <td>${mCell}</td>
-      <td class="num mono">${fmt(c.initialCommission)} <span style="font-size:10px;color:var(--muted)">(${Math.round(c.initMult*100)}%)</span></td>
+      <td class="num mono">${fmt(c.initialCommission)} <span style="font-size:10px;color:var(--muted)">(${pct(c.initMult)})</span></td>
       <td class="num mono">${renewTxt}</td>
       <td>${autoTag}</td>
       <td><button class="iconbtn" data-edit="${a.id}">Edit</button></td>
@@ -840,10 +899,10 @@ function openModal(id){
   const sch=(a&&Array.isArray(a.billing_schedule))?a.billing_schedule:[];
   if(sch.length) sch.forEach(r=>addSchedRow(r.month,r.amount,r.once));
   else if(a&&a.custom_billing) addSchedRow(1,'',false);
-  $('f_direct').value=v('monthly_direct_cost');$('f_rate').value=v('loaded_labor_rate');
+  $('f_rate').value=v('loaded_labor_rate');
   $('f_freq').value=a?String(a.inspection_frequency):'2';$('f_hrs').value=v('hours_per_inspection');
-  $('f_shrs').value=v('startup_labor_hours');$('f_scost').value=v('other_startup_cost');
-  $('f_sub').value=v('subcontractor_annual_cost');
+  $('f_mat').value=v('material_cost_annual');$('f_mon').value=v('monitoring_cost_annual');
+  $('f_soft').value=v('software_cost_annual');$('f_sub').value=v('subcontractor_annual_cost');$('f_other').value=v('other_direct_annual');
   $('f_target').value=(a&&a.target_margin!=null&&a.target_margin!=='')?Math.round(a.target_margin*100):'';
   $('f_auto').checked=!!(a&&a.autorenew);
   $('f_notes').value=v('notes');$('mDelete').style.display=a?'inline-block':'none';
@@ -853,28 +912,51 @@ function closeModal(){$('scrim').classList.remove('show');editingId=null;}
 function readForm(){return{
   id:editingId||undefined,agreement_number:$('f_num').value.trim(),customer_name:$('f_cust').value.trim(),
   activation_date:$('f_date').value||null,contract_term:+$('f_term').value,monthly_rmr:+$('f_rmr').value||0,
-  monthly_direct_cost:+$('f_direct').value||0,loaded_labor_rate:+$('f_rate').value||0,
+  loaded_labor_rate:+$('f_rate').value||0,
   custom_billing:$('f_custom').checked,billing_schedule:readSchedule(),
-  inspection_frequency:+$('f_freq').value,hours_per_inspection:+$('f_hrs').value||0,startup_labor_hours:+$('f_shrs').value||0,
-  other_startup_cost:+$('f_scost').value||0,subcontractor_annual_cost:+$('f_sub').value||0,
+  inspection_frequency:+$('f_freq').value,hours_per_inspection:+$('f_hrs').value||0,
+  material_cost_annual:+$('f_mat').value||0,monitoring_cost_annual:+$('f_mon').value||0,
+  software_cost_annual:+$('f_soft').value||0,subcontractor_annual_cost:+$('f_sub').value||0,other_direct_annual:+$('f_other').value||0,
   target_margin:($('f_target').value.trim()===''?null:(+$('f_target').value/100)),
   autorenew:$('f_auto').checked,notes:$('f_notes').value.trim()};}
 function updatePreview(){
   const row=readForm();const c=compute(row);
-  const thr=marginThreshold(row);
-  const mPct=c.grossMargin==null?null:Math.round(c.grossMargin*1000)/10;
-  const thin=c.grossMargin!=null&&c.grossMargin<thr;
-  const mColor=mPct==null?'var(--muted)':(thin?'var(--maturing)':'var(--payable)');
-  const mTxt=mPct==null?'—':`${mPct}%${thin?' ⚠':''}`;
-  const initWhen=c.initialQI!=null?`pays ${qLabel(c.initialQI)}`:'at activation';
-  const renWhen=c.renewMult<=0?'no renewal commission':(c.renewalQI!=null?`${qLabel(c.renewalQI)} · ${row.autorenew?'auto':'manual'}`:'set activation date');
-  $('mPreview').innerHTML=`<h4>Live calculation</h4><div class="pgrid">
-    <div><span>Initial commission <span style="color:var(--none)">(${Math.round(c.initMult*100)}%)</span></span><b style="color:var(--payable);font-size:16px">${fmt(c.initialCommission)}</b></div>
+  const gm=c.grossMargin;
+  const mPct=gm==null?'—':`${Math.round(gm*1000)/10}%`;
+  const target=CONFIG.targetMargin||0.50,minM=CONFIG.minMargin||0.45;
+  const elig=gm!=null&&gm<minM;
+  // §4.11 color indicator
+  let mColor='var(--muted)',mDot='⚪';
+  if(gm!=null){ if(gm<minM){mColor='var(--held)';mDot='🔴';} else if(gm<target){mColor='var(--orange)';mDot='🟡';} else if(gm<target+0.05){mColor='var(--payable)';mDot='🟢';} else {mColor='var(--paid)';mDot='🔵';} }
+  const tgtTxt=gm==null?'':(gm>=target?'above target':(gm>=minM?'below target':'not profitable'));
+  const multColor=c.marginMultiplier>=1.10?'var(--payable)':(c.marginMultiplier<1?'var(--held)':'var(--ink)');
+  const initWhen=c.initialQI!=null?`pays ${qLabel(c.initialQI)}`:'set activation date';
+  const renWhen=c.renewalQI!=null?`${qLabel(c.renewalQI)} · ${row.autorenew?'auto':'manual'}`:'set activation date';
+  // §4.16 alert
+  let alert='';
+  if(gm!=null&&gm<minM) alert=`<div style="grid-column:1/-1;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:7px 10px;font-size:12px;color:#9a2a2a"><b>⚠ Does not meet minimum profitability (${Math.round(minM*100)}%).</b> Increase recurring revenue or reduce direct costs. Management approval required to pay.</div>`;
+  else if(gm!=null&&gm<target) alert=`<div style="grid-column:1/-1;background:#fff4e8;border:1px solid #f3d4ad;border-radius:8px;padding:7px 10px;font-size:12px;color:#8a5a17">Below the ${Math.round(target*100)}% target — commission is reduced. Consider raising RMR or trimming costs.</div>`;
+  $('mPreview').innerHTML=`<h4>Live calculation <span style="font-weight:500;color:var(--none);font-size:11px">plan ${PLAN_VERSION} · ${c.basis} basis</span></h4>
+  <div class="pgrid">
+    <div><span>MRR <span style="color:var(--none)">(annual billing ÷ 12)</span></span><b style="font-size:15px">${fmt2(c.mrr)}</b></div>
+    <div><span>${c.basis==='ACV'?'ACV (×12)':'TCV (×'+c.months+'mo)'} <span style="color:var(--none)">commissionable</span></span><b style="font-size:15px">${fmt(c.commissionableValue)}</b></div>
+    <div style="grid-column:1/-1;font-weight:700;color:var(--muted);font-size:11px;letter-spacing:.04em;text-transform:uppercase;margin-top:2px">Margin Engine</div>
+    <div><span>Annual revenue</span><b style="font-size:14px">${fmt(c.acv)}</b></div>
+    <div><span>Direct costs <span style="color:var(--none)">(labor ${fmt(c.laborCost)})</span></span><b style="font-size:14px">${fmt(c.directCosts)}</b></div>
+    <div><span>Gross profit</span><b style="font-size:14px">${fmt(c.grossProfit)}</b></div>
+    <div><span>Gross margin <span style="color:var(--none)">(${esc(c.marginStatus||'—')}${tgtTxt?' · '+tgtTxt:''})</span></span><b style="color:${mColor};font-size:15px">${mDot} ${mPct}</b></div>
+    <div><span>Margin multiplier</span><b style="color:${multColor};font-size:15px">×${c.marginMultiplier.toFixed(2)}</b></div>
+    <div><span>Net profit <span style="color:var(--none)">(after commission)</span></span><b style="font-size:14px;color:${c.netProfit<0?'var(--held)':'var(--ink)'}">${fmt(c.netProfit)}</b></div>
+    ${alert}
+    <div style="grid-column:1/-1;border-top:1px solid var(--line);margin-top:2px;padding-top:6px"></div>
+    <div><span>New: base ${Math.round(c.newPct*1000)/10}%</span><b style="font-size:13px;color:var(--muted)">${fmt(c.baseCommissionNew)}</b></div>
+    <div><span>New commission <span style="color:var(--none)">× ${c.marginMultiplier.toFixed(2)}</span></span><b style="color:var(--payable);font-size:17px">${fmt(c.initialCommission)}</b></div>
     <div><span>When</span><b style="font-size:13px">${initWhen}</b></div>
-    <div><span>Renewal commission <span style="color:var(--none)">(${Math.round(c.renewMult*100)}%)</span></span><b style="font-size:16px">${c.renewMult>0?fmt(c.renewalCommission):'—'}</b></div>
+    <div><span>Renewal: base ${Math.round(c.renewalPct*1000)/10}%</span><b style="font-size:13px;color:var(--muted)">${fmt(c.baseCommissionRenewal)}</b></div>
+    <div><span>Renewal commission</span><b style="font-size:16px">${fmt(c.renewalCommission)}</b></div>
     <div><span>Renews</span><b style="font-size:13px">${renWhen}</b></div>
-    <div><span>True margin <span style="color:var(--none)">(flag &lt;${Math.round(thr*100)}%)</span></span><b style="color:${mColor};font-size:15px">${mTxt}</b></div>
-    ${c.scheduled?`<div><span>Annual billed</span><b style="font-size:15px">${fmt(c.annualBilled)}</b></div>`:''}</div>`;
+    ${c.scheduled?`<div><span>Annual billed <span style="color:var(--none)">(custom schedule)</span></span><b style="font-size:14px">${fmt(c.annualBilled)}</b></div>`:''}
+  </div>`;
 }
 
 /* ---- view switching ---- */
@@ -901,10 +983,12 @@ function exportQuarterPDF(details){
   const initials=[],renewalPays=[];
   AGREEMENTS.forEach(a=>{
     const c=compute(a);
-    if(c.initialQI===selQI&&c.initialCommission>0)
-      initials.push({a,amount:c.initialCommission,paid:!!a.paid_initial,mult:c.initMult});
-    if(c.renewalCommission>0&&c.renewalQI===selQI&&(a.autorenew||a.renewed))
-      renewalPays.push({a,amount:c.renewalCommission,paid:!!a.renewal_paid,mult:c.renewMult,auto:!!a.autorenew});
+    const fi=frozenAmount(a,'initial');
+    if(c.initialQI===selQI&&fi.amount>0)
+      initials.push({a,amount:fi.amount,paid:!!a.paid_initial,mult:c.initMult,frozen:fi.frozen});
+    const fr=frozenAmount(a,'renewal');
+    if(c.renewalQI===selQI&&fr.amount>0&&(a.autorenew||a.renewed))
+      renewalPays.push({a,amount:fr.amount,paid:!!a.renewal_paid,mult:c.renewMult,auto:!!a.autorenew,frozen:fr.frozen});
   });
   if(!initials.length&&!renewalPays.length){ toast('Nothing to export for '+qLabel(selQI)); return; }
 
@@ -949,8 +1033,8 @@ function exportQuarterPDF(details){
     return sub;
   }
 
-  const subInit=section('Initial Commissions',initials,it=>`Initial · ${Math.round(it.mult*100)}%`);
-  const subRnw=section('Renewal Commissions',renewalPays,it=>`Renewal · ${Math.round(it.mult*100)}% · ${it.auto?'auto-renew':'manual'}`);
+  const subInit=section('Initial Commissions',initials,it=>`Initial · ${Math.round(it.mult*1000)/10}%`);
+  const subRnw=section('Renewal Commissions',renewalPays,it=>`Renewal · ${Math.round(it.mult*1000)/10}% · ${it.auto?'auto-renew':'manual'}`);
   const grand=subInit+subRnw;
 
   if(y>262){doc.addPage();y=20;}
@@ -1022,7 +1106,7 @@ $('marginFlag').onchange=()=>{const v=parseFloat($('marginFlag').value);if(!isNa
 $('agFilter').onchange=e=>{agFilter=(e.target.value==='all')?'all':+e.target.value;renderAgreements();};
 $('mClose').onclick=closeModal;$('mCancel').onclick=closeModal;
 $('scrim').onclick=e=>{if(e.target===$('scrim'))closeModal();};
-['f_num','f_cust','f_date','f_term','f_rmr','f_direct','f_rate','f_freq','f_hrs','f_shrs','f_scost','f_sub','f_target','f_auto'].forEach(id=>{const el=$(id);el.addEventListener('input',updatePreview);el.addEventListener('change',updatePreview);});
+['f_num','f_cust','f_date','f_term','f_rmr','f_rate','f_freq','f_hrs','f_mat','f_mon','f_soft','f_sub','f_other','f_target','f_auto'].forEach(id=>{const el=$(id);el.addEventListener('input',updatePreview);el.addEventListener('change',updatePreview);});
 $('mSave').onclick=async()=>{
   if(!sb){toast('Sign in first');return;}
   const row=readForm();
