@@ -704,6 +704,7 @@ const PERMISSIONS={
   editConfig:['Administrator'],
   viewAudit:['Administrator','Executive'],
   override:['Administrator','Executive','Sales Manager'],
+  editAgreements:['Administrator','Executive','Sales Manager'],
   calculate:['Administrator','Executive','Sales Manager','Sales Representative'],
   export:['Administrator','Executive','Sales Manager','Sales Representative','Read Only']
 };
@@ -722,7 +723,7 @@ function applyPermissions(){
   const adm=can('editConfig');
   const at=$('tabAdmin'); if(at) at.style.display=(adm||can('viewAudit'))?'':'none';
   const badge=$('roleBadge'); if(badge){ badge.textContent=CURRENT_ROLE; badge.style.display=CURRENT_ROLE?'inline-block':'none'; }
-  const add=$('addBtn'); if(add) add.style.display=can('calculate')?'':'none';
+  const add=$('addBtn'); if(add) add.style.display=can('editAgreements')?'':'none';
 }
 async function audit(action,module,recordId,oldVal,newVal,reason){
   try{ await sb.from('rmr_audit_log').insert({ts:new Date().toISOString(),user_email:CURRENT_EMAIL,user_role:CURRENT_ROLE,action,module,
@@ -841,6 +842,7 @@ async function upsert(row){
   }
 }
 async function patchPaid(id,field,val){
+  if(!can('editAgreements')){ toast('Your role cannot mark commissions paid.'); return; }
   const a=AGREEMENTS.find(x=>x.id===id);
   const snapCol=field==='paid_initial'?'initial_snapshot':(field==='renewal_paid'?'renewal_snapshot':null);
   const update={[field]:val,updated_at:new Date().toISOString()};
@@ -854,6 +856,7 @@ async function patchPaid(id,field,val){
   if(a){a[field]=val;if(snapCol&&snapCol in update)a[snapCol]=update[snapCol];}render();
 }
 async function patchRenew(id){
+  if(!can('editAgreements')){ toast('Your role cannot trigger a renewal.'); return; }
   const {error}=await sb.from('rmr_agreements').update({renewed:true,updated_at:new Date().toISOString()}).eq('id',id);
   if(error){toast(error.message);return;}
   const a=AGREEMENTS.find(x=>x.id===id);if(a)a.renewed=true;toast('Renewed — renewal commission now due');render();
@@ -864,6 +867,7 @@ async function patchRenewalPaid(id,val){
   const r=RENEWALS.find(x=>x.id===id);if(r)r.paid=val;render();
 }
 async function removeRow(id){
+  if(!can('editAgreements')){ toast('Your role cannot delete agreements.'); return; }
   const a=AGREEMENTS.find(x=>x.id===id);
   // §10.11 soft delete — preserve the financial record; fall back to hard delete only if column not migrated
   let {error}=await sb.from('rmr_agreements').update({deleted_at:new Date().toISOString()}).eq('id',id);
@@ -936,7 +940,9 @@ function renderQuarter(){
     const dateTxt=l.type==='renewal'
       ? `${l.auto?'auto-renew':'manually renewed'} · ${Math.round(l.c.renewMult*1000)/10}%`
       : `at activation · ${Math.round(l.c.initMult*1000)/10}%`;
-    const btn=`<button class="paidbtn ${l.paid?'is-paid':''}" data-paid="${l.a.id}" data-field="${l.field}" data-val="${l.paid?0:1}">${l.paid?'✓ Paid':'Mark paid'}</button>`;
+    const btn=can('editAgreements')
+      ? `<button class="paidbtn ${l.paid?'is-paid':''}" data-paid="${l.a.id}" data-field="${l.field}" data-val="${l.paid?0:1}">${l.paid?'✓ Paid':'Mark paid'}</button>`
+      : `<span class="chip ${l.paid?'c-paid':'c-payable'}">${l.paid?'Paid':'Payable'}</span>`;
     const lockTag=l.frozen?` <span title="Frozen at mark-paid · plan ${esc(l.snap.plan_version)} · ${l.snap.paid_date} · rate ${Math.round(l.snap.rate*100)}%" style="font-size:9px;font-weight:700;color:var(--muted);background:#eee;border-radius:4px;padding:1px 4px">🔒 ${esc(l.snap.plan_version)}</span>`:'';
     return `<tr>
       <td class="ag-no">#${esc(l.a.agreement_number||'—')}</td>
@@ -991,7 +997,7 @@ function renderAgreements(){
       <td class="num mono">${fmt(c.initialCommission)} <span style="font-size:10px;color:var(--muted)">(${pct(c.initMult)})</span></td>
       <td class="num mono">${renewTxt}</td>
       <td>${autoTag}</td>
-      <td><button class="iconbtn" data-edit="${a.id}">Edit</button></td>
+      <td>${can('editAgreements')?`<button class="iconbtn" data-edit="${a.id}">Edit</button>`:'<span class="qctx">view</span>'}</td>
     </tr>`;}).join('');
   const th=(key,label,numCls)=>{
     const active=agSort&&agSort.key===key;
@@ -1041,7 +1047,7 @@ function renderRenewals(){
       <td class="mono" style="color:var(--muted)">${fmtDate(c.renewalDate)}</td>
       <td>${daysCell(days)}</td>
       <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(c.renewalCommission)} <span style="font-size:10px;color:var(--muted)">(${Math.round(c.renewMult*100)}%)</span></td>
-      <td><button class="paidbtn" data-renew="${a.id}">Renew now</button></td>
+      <td>${can('editAgreements')?`<button class="paidbtn" data-renew="${a.id}">Renew now</button>`:'<span class="qctx">awaiting renewal</span>'}</td>
     </tr>`).join('');
   $('renTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Term</th><th>Renews</th><th>Days left</th><th class="num">Renewal comm.</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('renTableWrap').querySelectorAll('[data-renew]').forEach(b=>b.onclick=()=>patchRenew(b.dataset.renew));
@@ -1417,6 +1423,7 @@ function readSchedule(){
 function toggleBilling(){ $('billWrap').classList.toggle('show',$('f_custom').checked); updatePreview(); }
 function todayISO(){return new Date().toISOString().slice(0,10);}
 function openModal(id){
+  if(!can('editAgreements')){ toast('Your role can view agreements but not add or edit them.'); return; }
   editingId=id||null;const a=id?AGREEMENTS.find(x=>x.id===id):null;
   $('mTitle').textContent=a?`Edit agreement #${a.agreement_number||''}`:'New agreement';
   const v=(k,d='')=>a?(a[k]??d):d;
@@ -1671,6 +1678,7 @@ function validateForm(row){
 }
 $('mSave').onclick=async()=>{
   if(!sb){toast('Sign in first');return;}
+  if(!can('editAgreements')){ toast('Your role cannot save agreements.'); return; }
   const row=readForm();
   const errs=validateForm(row);
   const box=$('mErr');
