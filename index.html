@@ -260,7 +260,7 @@
   <div class="session">
     <span class="who" id="whoTxt"></span>
     <span id="roleBadge" class="chip c-paid" style="display:none;font-size:10px;font-weight:700;margin-left:6px"></span>
-    <button class="hdr-help" id="guideBtn">? Guide</button>
+    <button class="hdr-help" id="guideBtn">Guide?</button>
     <button class="signout" id="signoutBtn">Sign out</button>
   </div>
 </header>
@@ -456,35 +456,54 @@
     </div>
     <div class="guide-body">
       <h3>The big idea</h3>
-      <p>You earn a commission on every recurring-revenue (RMR) agreement you sell. The commission is a <b>percentage of the RMR</b>, and the percentage is set by how long the customer commits for. You earn it again — at the renewal rate — when the agreement renews.</p>
+      <p>You earn a commission on every recurring-revenue (RMR) agreement you sell — and again when it renews. Your commission is built from three things: <b>how big the deal is</b>, <b>a percentage set by the contract length</b>, and <b>a multiplier based on how profitable the deal is</b>.</p>
+      <div class="guide-callout"><b>Commission = Deal value × Term&nbsp;% × Margin multiplier.</b> Every rate below is set by your administrator in the plan, so the numbers you see always reflect the current plan.</div>
 
-      <h3>Initial commission (when you sell it)</h3>
+      <h3>1 · The deal value</h3>
+      <p>By default the tool uses <b>Total Contract Value (TCV)</b> — your monthly RMR × the full length of the contract. A $6,500/mo deal on a 36-month contract has a TCV of <b>$234,000</b>. <span style="color:var(--muted)">(An administrator can switch this to Annual Contract Value — just RMR × 12 — in the Admin tab.)</span></p>
+
+      <h3>2 · The term percentage</h3>
       <table class="guide-table">
-        <thead><tr><th>Contract term</th><th>Initial commission</th></tr></thead>
+        <thead><tr><th>Contract term</th><th>New&nbsp;%</th><th>Renewal&nbsp;%</th></tr></thead>
         <tbody>
-          <tr><td>12 months</td><td><b>100%</b> of RMR</td></tr>
-          <tr><td>24 months</td><td><b>125%</b> of RMR</td></tr>
-          <tr><td>36 / 60 months / longer</td><td><b>200%</b> of RMR</td></tr>
+          <tr><td>12 months</td><td><b>6%</b></td><td>4%</td></tr>
+          <tr><td>24 months</td><td><b>7%</b></td><td>5%</td></tr>
+          <tr><td>36 months</td><td><b>8%</b></td><td>5.5%</td></tr>
+          <tr><td>48 months</td><td><b>8.5%</b></td><td>5.75%</td></tr>
+          <tr><td>60 months</td><td><b>9%</b></td><td>6%</td></tr>
         </tbody>
       </table>
-      <p>Paid the quarter the agreement is sold. So a $6,184 RMR on a 12-month deal pays <b>$6,184</b> (100%); a 36-month deal pays <b>$12,368</b> (200%).</p>
 
-      <h3>Renewal commission (once, at the first renewal)</h3>
+      <h3>3 · The margin multiplier</h3>
+      <p>How profitable the deal is sets a multiplier on top of everything:</p>
       <table class="guide-table">
-        <thead><tr><th>Contract term</th><th>Renewal commission</th></tr></thead>
+        <thead><tr><th>Gross margin</th><th>Multiplier</th><th>Tier</th></tr></thead>
         <tbody>
-          <tr><td>12 months</td><td><b>150%</b> of RMR</td></tr>
-          <tr><td>24 months</td><td><b>125%</b> of RMR</td></tr>
-          <tr><td>36 / 60 months</td><td>none</td></tr>
+          <tr><td>60% and up</td><td><b>×1.25</b></td><td>Exceptional</td></tr>
+          <tr><td>55 – 59.99%</td><td><b>×1.10</b></td><td>Excellent</td></tr>
+          <tr><td>50 – 54.99%</td><td><b>×1.00</b></td><td>Target</td></tr>
+          <tr><td>45 – 49.99%</td><td><b>×0.75</b></td><td>Acceptable</td></tr>
+          <tr><td>Below 45%</td><td><b>$0</b></td><td>Not eligible</td></tr>
         </tbody>
       </table>
-      <p>Earned one time, when the agreement reaches its renewal date. A 12-month $6,184 RMR deal pays <b>$9,276</b> (150%) at renewal.</p>
+      <div class="guide-callout">Below 45% margin the deal <b>isn't eligible</b> — it pays <b>$0</b> until a manager approves an exception. Unlike the old plan, <b>margin now affects your pay.</b></div>
+
+      <h3>Put it together — an example</h3>
+      <p>A <b>$6,500/mo, 36-month</b> deal at <b>62% margin</b>:<br>
+      $234,000 (TCV) × 8% (36-mo rate) × 1.25 (60%+ margin) = <b>$23,400</b>.<br>
+      The same deal at 51% margin would be ×1.00 = <b>$18,720</b>.</p>
+
+      <h3>Renewal commission</h3>
+      <p>When an agreement reaches its renewal date you earn again at the <b>renewal rate</b> in the table above, using the deal's current value and margin. A 36-month renewal pays 5.5% of its value × the margin multiplier.</p>
 
       <h3>Autorenewal — on or off</h3>
       <div class="guide-legend">
         <div class="row"><b>ON</b> — the agreement auto-renews and the renewal commission pays out automatically in the quarter it renews. Nothing for you to do.</div>
-        <div class="row"><b>OFF</b> — the agreement shows in the <b>Pending Renewals</b> tab and shifts color (green → amber → red) as its renewal date nears. You must <b>manually renew</b> it there to release the renewal commission.</div>
+        <div class="row"><b>OFF</b> — the agreement shows in <b>Pending Renewals</b> and shifts color (green → amber → red) as its renewal date nears. You must <b>manually renew</b> it there to release the renewal commission.</div>
       </div>
+
+      <h3>Bonus Forecast &amp; Pending Renewals</h3>
+      <p>The <b>Bonus Forecast</b> tab estimates your upcoming renewal bonuses with reminder dates — it's informational only and never creates a payout. <b>Pending Renewals</b> is the action list of manual-renewal agreements you need to renew.</p>
 
       <h3>What the colors mean</h3>
       <div class="guide-legend">
@@ -493,9 +512,6 @@
         <div class="row"><span class="chip c-maturing">Manual renewal needed</span> renew it to get paid</div>
         <div class="row"><span class="chip c-held">Urgent / overdue</span> renewal date is here or past</div>
       </div>
-
-      <h3>Margin is information only</h3>
-      <p><b>True margin</b> = recurring profit after direct, labor, and subcontractor costs. It's shown as an account-health readout so you can see at a glance which deals are thin — but it <b>never changes your pay</b>. Every commission pays at its rate, when it's due, regardless of margin. There are no accelerators and no holds; the commission is simply the term rate × RMR.</p>
     </div>
   </div>
 </div>
@@ -1601,6 +1617,9 @@ $('qSelect').onchange=e=>{selQI=+e.target.value;renderQuarter();};
 $('tabQuarter').onclick=()=>switchView('quarter');
 $('tabAgreements').onclick=()=>switchView('agreements');
 $('tabRenewals').onclick=()=>switchView('renewals');
+$('tabForecast').onclick=()=>switchView('forecast');
+$('fcTerm').onchange=renderForecast;
+$('fcExport').onclick=exportForecastCSV;
 $('tabHistory').onclick=()=>switchView('history');
 $('tabReports').onclick=()=>switchView('reports');
 $('repExport').onclick=exportProfitabilityCSV;
