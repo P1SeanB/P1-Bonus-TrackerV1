@@ -334,6 +334,8 @@
       <div class="grid">
         <div class="fld"><label>Agreement #</label><input id="f_num" placeholder="e.g. 134"></div>
         <div class="fld"><label>Customer</label><input id="f_cust" placeholder="Customer name"></div>
+        <div class="fld"><label>Customer # <span class="hint">reference</span></label><input id="f_custnum" placeholder="optional"></div>
+        <div class="fld"><label>Site # <span class="hint">reference</span></label><input id="f_sitenum" placeholder="optional"></div>
         <div class="fld"><label>Activation / sale date</label><input id="f_date" type="date"></div>
         <div class="fld"><label>Contract term</label>
           <select id="f_term">
@@ -664,8 +666,27 @@ async function load(){
   const {data,error}=await sb.from('rmr_agreements').select('*').order('activation_date',{ascending:true});
   if(error)throw error;
   AGREEMENTS=data||[];
+  await loadPlan();
   await loadRenewals();
   render();
+}
+let ACTIVE_PLAN_ID=null;
+function normalizeConfig(j){ if(j.targetMargin==null)j.targetMargin=0.50; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='2026 v1.0'; if(!j.basis)j.basis='TCV'; return j; }
+async function loadPlan(){   // shared commission plan from Supabase (§6.9); falls back to local CONFIG if table absent
+  try{
+    const {data,error}=await sb.from('rmr_commission_plans').select('*').eq('status','active').order('modified_at',{ascending:false}).limit(1);
+    if(error)throw error;
+    if(data&&data.length&&data[0].config){ CONFIG=normalizeConfig(data[0].config); ACTIVE_PLAN_ID=data[0].id; saveConfig(); }
+    else { await savePlan(); }   // no active plan row yet → seed it from the current (local/default) CONFIG
+  }catch(e){ /* table not migrated yet or offline → keep the local CONFIG */ }
+}
+async function savePlan(){   // returns true if persisted to Supabase, false if it fell back to local only
+  try{
+    const row={plan_name:CONFIG.planVersion,version:CONFIG.planVersion,basis:CONFIG.basis,status:'active',config:CONFIG,modified_at:new Date().toISOString()};
+    if(ACTIVE_PLAN_ID){ const {error}=await sb.from('rmr_commission_plans').update(row).eq('id',ACTIVE_PLAN_ID); if(error)throw error; }
+    else { const {data,error}=await sb.from('rmr_commission_plans').insert({...row,created_at:new Date().toISOString()}).select('id'); if(error)throw error; if(data&&data[0])ACTIVE_PLAN_ID=data[0].id; }
+    return true;
+  }catch(e){ return false; }
 }
 async function loadRenewals(){
   // graceful: if the Phase 2 table isn't created yet, the app still works
@@ -684,8 +705,12 @@ async function removeRenewal(id){
 }
 async function upsert(row){
   const payload={...row,updated_at:new Date().toISOString()};
-  if(row.id){const {error}=await sb.from('rmr_agreements').update(payload).eq('id',row.id);if(error)throw error;}
-  else{const {error}=await sb.from('rmr_agreements').insert(payload);if(error)throw error;}
+  async function go(p){ if(p.id){const {error}=await sb.from('rmr_agreements').update(p).eq('id',p.id);if(error)throw error;} else {const {error}=await sb.from('rmr_agreements').insert(p);if(error)throw error;} }
+  try{ await go(payload); }
+  catch(e){ // ref columns not migrated yet → retry without them so saving still works
+    if(/customer_number|site_number|column/i.test(e.message||'')){ const {customer_number,site_number,...rest}=payload; await go(rest); }
+    else throw e;
+  }
 }
 async function patchPaid(id,field,val){
   const a=AGREEMENTS.find(x=>x.id===id);
@@ -811,7 +836,7 @@ function renderAgreements(){
       :(a.renewed?'<span class="chip c-paid" style="font-size:10px">renewed</span>':'<span class="chip c-maturing" style="font-size:10px">manual</span>')):'';
     return `<tr>
       <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
-      <td>${esc(a.customer_name||'—')}</td>
+      <td>${esc(a.customer_name||'—')}${(a.customer_number||a.site_number)?`<div style="font-size:10px;color:var(--muted)">${a.customer_number?'Cust #'+esc(a.customer_number):''}${a.customer_number&&a.site_number?' · ':''}${a.site_number?'Site #'+esc(a.site_number):''}</div>`:''}</td>
       <td class="mono">${fmt(c.mrr)}${c.scheduled?'<div style="font-size:10px;color:var(--orange);font-weight:600;letter-spacing:.03em">SCHEDULED</div>':''}</td>
       <td>${termTxt}</td>
       <td>${mCell}</td>
@@ -916,10 +941,10 @@ function renderAdmin(){
       <span id="cfgMsg" style="font-size:12px;color:var(--muted)"></span>
     </div>`;
   $('cfgSave').onclick=saveAdmin;
-  $('cfgReset').onclick=()=>{ if(confirm('Reset the commission plan to PRD defaults? This affects all unpaid calculations.')){CONFIG=JSON.parse(JSON.stringify(DEFAULT_CONFIG));saveConfig();toast('Reset to defaults');renderAdmin();} };
+  $('cfgReset').onclick=()=>{ if(confirm('Reset the commission plan to PRD defaults? This affects all unpaid calculations.')){CONFIG=JSON.parse(JSON.stringify(DEFAULT_CONFIG));saveConfig();savePlan();toast('Reset to defaults');renderAdmin();} };
   $('cfgExport').onclick=()=>{ const blob=new Blob([JSON.stringify(CONFIG,null,2)],{type:'application/json'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=`commission-plan-${String(CONFIG.planVersion||'plan').replace(/[^a-z0-9]+/gi,'-')}.json`; a.click(); URL.revokeObjectURL(u); };
   $('cfgImport').onclick=()=>$('cfgFile').click();
-  $('cfgFile').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ try{ const j=JSON.parse(r.result); if(!j.newPct||!j.marginTiers)throw 0; if(j.targetMargin==null)j.targetMargin=0.5; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='imported'; CONFIG=j; saveConfig(); toast('Plan imported'); renderAdmin(); }catch(err){ toast('Invalid plan file'); } }; r.readAsText(f); };
+  $('cfgFile').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ try{ const j=JSON.parse(r.result); if(!j.newPct||!j.marginTiers)throw 0; CONFIG=normalizeConfig(j); saveConfig(); savePlan(); toast('Plan imported'); renderAdmin(); }catch(err){ toast('Invalid plan file'); } }; r.readAsText(f); };
 }
 function saveAdmin(){
   const msg=$('cfgMsg'), errs=[];
@@ -943,7 +968,8 @@ function saveAdmin(){
   tiers.sort((a,b)=>b.min-a.min);
   CONFIG={planVersion:plan,basis,targetMargin:target,minMargin:min,newPct,renewalPct,marginTiers:tiers};
   saveConfig();
-  msg.style.color='var(--payable)'; msg.textContent='✓ Saved — applied to all unpaid calculations.';
+  msg.style.color='var(--muted)'; msg.textContent='Saving…';
+  savePlan().then(ok=>{ msg.style.color=ok?'var(--payable)':'var(--orange)'; msg.textContent=ok?'✓ Saved to shared plan — applies to all users & unpaid calculations.':'✓ Saved locally. Run migration_v6 to share across users.'; });
   toast('Commission plan saved');
 }
 function renderLegend(){
@@ -982,7 +1008,7 @@ function openModal(id){
   editingId=id||null;const a=id?AGREEMENTS.find(x=>x.id===id):null;
   $('mTitle').textContent=a?`Edit agreement #${a.agreement_number||''}`:'New agreement';
   const v=(k,d='')=>a?(a[k]??d):d;
-  $('f_num').value=v('agreement_number');$('f_cust').value=v('customer_name');
+  $('f_num').value=v('agreement_number');$('f_cust').value=v('customer_name');$('f_custnum').value=v('customer_number');$('f_sitenum').value=v('site_number');
   $('f_date').value=v('activation_date')||(a?'':todayISO());
   $('f_term').value=a?String(a.contract_term):'12';
   $('f_rmr').value=v('monthly_rmr');
@@ -1003,7 +1029,7 @@ function openModal(id){
 }
 function closeModal(){$('scrim').classList.remove('show');editingId=null;}
 function readForm(){return{
-  id:editingId||undefined,agreement_number:$('f_num').value.trim(),customer_name:$('f_cust').value.trim(),
+  id:editingId||undefined,agreement_number:$('f_num').value.trim(),customer_name:$('f_cust').value.trim(),customer_number:$('f_custnum').value.trim()||null,site_number:$('f_sitenum').value.trim()||null,
   activation_date:$('f_date').value||null,contract_term:+$('f_term').value,monthly_rmr:+$('f_rmr').value||0,
   loaded_labor_rate:+$('f_rate').value||0,
   custom_billing:$('f_custom').checked,billing_schedule:readSchedule(),
