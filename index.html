@@ -392,6 +392,9 @@
         <div class="fld"><label>Customer # <span class="hint">reference</span></label><input id="f_custnum" placeholder="optional"></div>
         <div class="fld"><label>Site # <span class="hint">reference</span></label><input id="f_sitenum" placeholder="optional"></div>
         <div class="fld"><label>Activation / sale date</label><input id="f_date" type="date"></div>
+        <div class="fld" id="ownerFld"><label>Assigned to <span class="hint">sales rep / owner</span></label>
+          <select id="f_owner"></select>
+        </div>
         <div class="fld"><label>Contract term</label>
           <select id="f_term">
             <option value="0">Month-to-month</option>
@@ -783,7 +786,17 @@ async function load(){
   AGREEMENTS=(data||[]).filter(a=>!a.deleted_at);
   await loadPlan();
   await loadRenewals();
+  await loadUsers();
   render();
+}
+let KNOWN_USERS=[];
+async function loadUsers(){
+  let emails=[];
+  try{ const {data,error}=await sb.from('rmr_users').select('email'); if(!error&&data) emails=data.map(u=>u.email); }catch(e){}
+  const set=new Set(emails);
+  AGREEMENTS.forEach(a=>{ if(a.owner_email) set.add(a.owner_email); });
+  if(CURRENT_EMAIL) set.add(CURRENT_EMAIL);
+  KNOWN_USERS=[...set].filter(Boolean).sort();
 }
 let ACTIVE_PLAN_ID=null;
 function normalizeConfig(j){ if(j.targetMargin==null)j.targetMargin=0.50; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='2026 v1.0'; if(!j.basis)j.basis='TCV'; return j; }
@@ -1424,6 +1437,14 @@ function openModal(id){
   $('f_target').value=(a&&a.target_margin!=null&&a.target_margin!=='')?Math.round(a.target_margin*100):'';
   $('f_auto').checked=!!(a&&a.autorenew);
   $('f_notes').value=v('notes');$('mDelete').style.display=a?'inline-block':'none';
+  // Assigned-to / owner picker — only for roles that can see all users
+  const ownerFld=$('ownerFld');
+  if(canViewAll()){
+    ownerFld.style.display='';
+    const cur=a?(a.owner_email||CURRENT_EMAIL||''):(CURRENT_EMAIL||'');
+    const list=[...new Set([...(KNOWN_USERS||[]),cur,CURRENT_EMAIL].filter(Boolean))].sort();
+    $('f_owner').innerHTML=list.map(e=>`<option value="${esc(e)}" ${e===cur?'selected':''}>${esc(e)}</option>`).join('');
+  }else{ ownerFld.style.display='none'; }
   $('mErr').style.display='none';updatePreview();$('scrim').classList.add('show');
 }
 function closeModal(){$('scrim').classList.remove('show');editingId=null;}
@@ -1659,7 +1680,8 @@ $('mSave').onclick=async()=>{
   if(dup && !confirm(`Agreement #${row.agreement_number} already exists for "${dup.customer_name||'—'}". Save another with the same number?`)){ return; }
   box.style.display='none';
   const isEdit=!!editingId;
-  if(isEdit){ const orig=AGREEMENTS.find(a=>a.id===editingId); row.owner_email=orig?(orig.owner_email||null):null; }
+  if(canViewAll() && $('ownerFld').style.display!=='none' && $('f_owner').value){ row.owner_email=$('f_owner').value; }
+  else if(isEdit){ const orig=AGREEMENTS.find(a=>a.id===editingId); row.owner_email=orig?(orig.owner_email||null):null; }
   else { row.owner_email=CURRENT_EMAIL||null; }
   try{await upsert(row);await load();closeModal();toast(isEdit?'Agreement updated':'Agreement added');
     audit(isEdit?'Agreement edited':'Agreement created','Agreements',row.agreement_number,null,{agreement_number:row.agreement_number,customer:row.customer_name,mrr:row.monthly_rmr,term:row.contract_term},null);}
