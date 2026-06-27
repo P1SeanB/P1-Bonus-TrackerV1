@@ -265,6 +265,7 @@
   <button class="active" data-view="quarter" id="tabQuarter">Quarter view</button>
   <button data-view="agreements" id="tabAgreements">Agreements</button>
   <button data-view="renewals" id="tabRenewals">Pending Renewals</button>
+  <button data-view="forecast" id="tabForecast">Bonus Forecast</button>
   <button data-view="history" id="tabHistory">Commission History</button>
   <button data-view="reports" id="tabReports">Reports</button>
   <button data-view="admin" id="tabAdmin">⚙ Admin</button>
@@ -322,6 +323,19 @@
     <div class="panel">
       <div class="panel-head"><h2>Pending manual renewals</h2><span class="qctx" id="renCount"></span></div>
       <div id="renTableWrap"></div>
+    </div>
+  </section>
+
+  <section id="view-forecast" style="display:none">
+    <div class="qbar" style="flex-wrap:wrap;gap:10px">
+      <div style="font-size:13px;color:var(--muted)"><b style="color:var(--ink)">Informational only.</b> Estimated renewal-bonus opportunities — this screen does not create commissions.</div>
+      <select id="fcTerm" style="border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:13px;background:#fff;font-weight:600;color:var(--ink);margin-left:auto"><option value="all">All terms</option><option value="12">12-month only (per spec)</option></select>
+      <button class="iconbtn" id="fcExport">Export CSV</button>
+    </div>
+    <div id="fcCards" class="cards" style="margin-bottom:16px"></div>
+    <div class="panel">
+      <div class="panel-head"><h2>Upcoming renewal bonus opportunities</h2><span class="qctx" id="fcCount"></span></div>
+      <div id="fcTableWrap"></div>
     </div>
   </section>
 
@@ -825,7 +839,7 @@ function buildQuarterOptions(){
 }
 
 /* ---- render ---- */
-function render(){ if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='history')renderHistory(); if(view==='reports')renderReports(); if(view==='admin')renderAdmin(); renderLegend(); }
+function render(){ if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='forecast')renderForecast(); if(view==='history')renderHistory(); if(view==='reports')renderReports(); if(view==='admin')renderAdmin(); renderLegend(); }
 function renderQuarter(){
   buildQuarterOptions();$('qSelect').value=selQI;
   $('qCtx').textContent=selQI===CUR_QI?'Current quarter':(selQI<CUR_QI?'Past quarter':'Upcoming quarter');
@@ -971,6 +985,58 @@ function renderRenewals(){
     </tr>`).join('');
   $('renTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Term</th><th>Renews</th><th>Days left</th><th class="num">Renewal comm.</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('renTableWrap').querySelectorAll('[data-renew]').forEach(b=>b.onclick=()=>patchRenew(b.dataset.renew));
+}
+function forecastList(){
+  const today=new Date(); const only12=$('fcTerm')&&$('fcTerm').value==='12';
+  const REMIND=[180,120,90,60,30,14,7];
+  return AGREEMENTS.map(a=>({a,c:compute(a)}))
+    .filter(x=>x.c.term>0 && x.c.renewalDate && x.c.renewMult>0 && !x.a.renewal_paid && (!only12||x.c.term===12))
+    .map(x=>{
+      const days=Math.ceil((x.c.renewalDate-today)/86400000);
+      const status= days<0?'Past due' : days<=7?'Final — 7 days' : days<=30?'Reminder — 30 days' : days<=90?'Reminder — 90 days' : days<=180?'Reminder — 180 days' : 'Future';
+      // next reminder threshold still ahead of "days"
+      const nextT=REMIND.filter(t=>t<days).sort((a,b)=>b-a)[0];
+      const reminderDate=nextT!=null?addMonths(new Date(x.c.renewalDate),0):null;
+      let rd=null; if(nextT!=null){ rd=new Date(x.c.renewalDate); rd.setDate(rd.getDate()-nextT); }
+      return {...x,days,status,reminderDate:rd};
+    })
+    .filter(x=>x.days>=-31)
+    .sort((p,q)=>p.days-q.days);
+}
+function renderForecast(){
+  const rows=forecastList();
+  const total=rows.reduce((s,x)=>s+x.c.renewalCommission,0);
+  const within180=rows.filter(x=>x.days<=180).length;
+  const within90=rows.filter(x=>x.days<=90).length;
+  $('fcCards').innerHTML=`
+    <div class="stat accent"><div class="lbl">Forecasted bonus liability</div><div class="val">${fmt(total)}</div></div>
+    <div class="stat orange"><div class="lbl">Renewing ≤180 days</div><div class="val">${within180}</div></div>
+    <div class="stat"><div class="lbl">Renewing ≤90 days</div><div class="val">${within90}</div></div>`;
+  $('fcCount').textContent=`${rows.length} opportunit${rows.length===1?'y':'ies'}`;
+  if(!rows.length){$('fcTableWrap').innerHTML=`<div class="empty"><b>No upcoming renewals</b>Active term agreements with a future renewal date and a renewal commission appear here as a forecast.</div>`;return;}
+  const stColor=s=>s==='Past due'?'c-held':(s.startsWith('Final')?'c-maturing':(s==='Future'?'c-none':'c-payable'));
+  const body=rows.map(x=>{const c=x.c,a=x.a;
+    const mPct=c.grossMargin==null?'—':`${Math.round(c.grossMargin*1000)/10}%`;
+    return `<tr>
+      <td>${esc(a.customer_name||'—')}${a.site_number?`<div style="font-size:10px;color:var(--muted)">Site #${esc(a.site_number)}</div>`:''}</td>
+      <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
+      <td>${c.term}mo</td>
+      <td class="mono">${fmtDate(c.renewalDate)}</td>
+      <td class="mono" style="font-weight:700;${x.days<0?'color:var(--held)':(x.days<=90?'color:var(--orange)':'')}">${x.days<0?'overdue':x.days+' d'}</td>
+      <td class="mono">${mPct}</td>
+      <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(c.renewalCommission)}</td>
+      <td class="mono" style="color:var(--muted)">${x.reminderDate?fmtDate(x.reminderDate):'—'}</td>
+      <td><span class="chip ${stColor(x.status)}" style="font-size:10px">${x.status}</span> ${a.autorenew?'<span class="chip c-paid" style="font-size:10px">auto</span>':'<span class="chip c-maturing" style="font-size:10px">manual</span>'}</td>
+    </tr>`;}).join('');
+  $('fcTableWrap').innerHTML=`<table><thead><tr><th>Customer</th><th>Agr #</th><th>Term</th><th>Expiration</th><th>Days left</th><th>Current margin</th><th class="num">Est. bonus</th><th>Next reminder</th><th>Forecast status</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+function exportForecastCSV(){
+  const rows=forecastList();
+  const head=['Customer','Site #','Agreement #','Term','Expiration','Days Remaining','Current Margin %','Estimated Bonus','Next Reminder','Forecast Status','Renewal'];
+  const lines=[head.join(',')];
+  rows.forEach(x=>{const c=x.c,a=x.a;const cells=[a.customer_name||'',a.site_number||'',a.agreement_number||'',c.term,c.renewalDate?c.renewalDate.toISOString().slice(0,10):'',x.days,c.grossMargin==null?'':Math.round(c.grossMargin*1000)/10,Math.round(c.renewalCommission),x.reminderDate?x.reminderDate.toISOString().slice(0,10):'',x.status,a.autorenew?'auto':'manual'];
+    lines.push(cells.map(v=>{v=String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(','));});
+  const blob=new Blob([lines.join('\n')],{type:'text/csv'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=`bonus-forecast-${todayISO()}.csv`; a.click(); URL.revokeObjectURL(u);
 }
 function customerProfitability(){
   const map={};
@@ -1317,7 +1383,7 @@ function updatePreview(){
 
 /* ---- view switching ---- */
 function switchView(v){
-  view=v;['quarter','agreements','renewals','history','reports','admin'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
+  view=v;['quarter','agreements','renewals','forecast','history','reports','admin'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   render();
 }
