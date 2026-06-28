@@ -976,14 +976,23 @@ function buildQuarterOptions(){
 /* ---- render ---- */
 function renderScopeBar(){
   const bar=$('scopeBar'); if(!bar)return;
-  if(!canViewAll()||AGREEMENTS.length===0){ bar.style.display='none'; return; }
-  const owners=distinctOwners();
-  // self-heal: if the active filter points at a user who no longer owns anything, clear it so you're never stranded
-  if(USER_FILTER){ USER_FILTER=USER_FILTER.filter(o=>owners.includes(o)); if(!USER_FILTER.length)USER_FILTER=null; }
+  if(!canViewAll()){ bar.style.display='none'; return; }
+  // agreements owned per user key — so we can show who currently has 0
+  const counts={};
+  AGREEMENTS.forEach(a=>{ const k=ownerKey(a); counts[k]=(counts[k]||0)+1; });
+  // Full picker = every known user (rmr_users table + agreement owners + you),
+  // regardless of whether they currently own an agreement. (unassigned) is added
+  // only when something is actually unassigned, so you can still isolate those.
+  const people=[...new Set([...(KNOWN_USERS||[])].filter(k=>k&&k!=='(unassigned)'))].sort();
+  const list=[...people];
+  if(counts['(unassigned)']) list.push('(unassigned)');
+  if(!list.length){ bar.style.display='none'; return; }
+  // self-heal: only clear a filter that points at someone no longer selectable
+  if(USER_FILTER){ USER_FILTER=USER_FILTER.filter(o=>list.includes(o)); if(!USER_FILTER.length)USER_FILTER=null; }
   bar.style.display='flex';
   const selected=(USER_FILTER&&USER_FILTER.length===1)?USER_FILTER[0]:'__all';
-  const opts=`<option value="__all">All users</option>`+
-    owners.map(o=>`<option value="${esc(o)}"${o===selected?' selected':''}>${esc(o)}</option>`).join('');
+  const opts=`<option value="__all">All users (${AGREEMENTS.length})</option>`+
+    list.map(o=>`<option value="${esc(o)}"${o===selected?' selected':''}>${esc(o)} (${counts[o]||0})</option>`).join('');
   const n=scopedAgreements().length;
   bar.innerHTML=`<span class="scopelbl">Viewing</span>`+
     `<select id="scopeSel" class="scopesel">${opts}</select>`+
