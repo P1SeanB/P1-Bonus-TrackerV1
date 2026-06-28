@@ -523,16 +523,18 @@
       <p>By default the tool uses <b>Total Contract Value (TCV)</b> — your monthly RMR × the full length of the contract. A $6,500/mo deal on a 36-month contract has a TCV of <b>$234,000</b>. <span style="color:var(--muted)">(An administrator can switch this to Annual Contract Value — just RMR × 12 — in the Admin tab.)</span></p>
 
       <h3>2 · The term percentage</h3>
+      <p>The rate depends on the contract length and on whether it's a new sale, a <b>manual</b> renewal, or an <b>auto</b>-renewal:</p>
       <table class="guide-table">
-        <thead><tr><th>Contract term</th><th>New&nbsp;%</th><th>Renewal&nbsp;%</th></tr></thead>
+        <thead><tr><th>Contract term</th><th>New&nbsp;%</th><th>Manual renewal</th><th>Auto-renewal</th></tr></thead>
         <tbody>
-          <tr><td>12 months</td><td><b>6%</b></td><td>4%</td></tr>
-          <tr><td>24 months</td><td><b>7%</b></td><td>5%</td></tr>
-          <tr><td>36 months</td><td><b>8%</b></td><td>5.5%</td></tr>
-          <tr><td>48 months</td><td><b>8.5%</b></td><td>5.75%</td></tr>
-          <tr><td>60 months</td><td><b>9%</b></td><td>6%</td></tr>
+          <tr><td>12 months</td><td><b>6%</b></td><td>4%</td><td>2%</td></tr>
+          <tr><td>24 months</td><td><b>7%</b></td><td>5%</td><td>2.5%</td></tr>
+          <tr><td>36 months</td><td><b>8%</b></td><td>5.5%</td><td>n/a</td></tr>
+          <tr><td>48 months</td><td><b>8.5%</b></td><td>5.75%</td><td>n/a</td></tr>
+          <tr><td>60 months</td><td><b>9%</b></td><td>6%</td><td>n/a</td></tr>
         </tbody>
       </table>
+      <p style="font-size:12.5px;color:var(--muted)">Auto-renewals pay a <b>lower</b> rate because they take less sales effort, and only <b>12 and 24-month</b> agreements qualify. 36/48/60-month deals aren't auto-renewal eligible — they're expected to be renegotiated.</p>
 
       <h3>3 · The margin multiplier</h3>
       <p>How profitable the deal is sets a multiplier on top of everything:</p>
@@ -553,17 +555,25 @@
       $234,000 (TCV) × 8% (36-mo rate) × 1.25 (60%+ margin) = <b>$23,400</b>.<br>
       The same deal at 51% margin would be ×1.00 = <b>$18,720</b>.</p>
 
-      <h3>Renewal commission</h3>
-      <p>When an agreement reaches its renewal date you earn again at the <b>renewal rate</b> in the table above, using the deal's current value and margin. A 36-month renewal pays 5.5% of its value × the margin multiplier.</p>
-
-      <h3>Autorenewal — on or off</h3>
+      <h3>Renewal commission — manual vs auto</h3>
+      <p>When an agreement reaches its renewal date, you earn a renewal commission. There are two kinds, and they behave differently:</p>
       <div class="guide-legend">
-        <div class="row"><b>ON</b> — the agreement auto-renews and the renewal commission pays out automatically in the quarter it renews. Nothing for you to do.</div>
-        <div class="row"><b>OFF</b> — the agreement shows in <b>Pending Renewals</b> and shifts color (green → amber → red) as its renewal date nears. You must <b>manually renew</b> it there to release the renewal commission.</div>
+        <div class="row"><b>Manual renewal</b> — you actively renew it. Pays the higher manual rate, and pays <b>every time</b> it's renewed (e.g. a 12-month deal renewed each year earns a manual commission each year). Lives in the <b>Pending manual renewals</b> table.</div>
+        <div class="row"><b>Auto-renewal</b> — it renews automatically under the contract. Pays the lower auto rate <b>one time only</b>, and only on <b>12 / 24-month</b> agreements. Lives in the <b>Pending auto-renewals</b> table. Once it's paid, no further auto-renewal commission is earned.</div>
+      </div>
+      <p>Both still run through the margin multiplier, and a deal under 45% margin pays <b>$0</b> and is flagged <b>Management Approval Required</b>.</p>
+
+      <h3>Autorenewal toggle — on or off</h3>
+      <div class="guide-legend">
+        <div class="row"><b>ON</b> — treated as an auto-renewal: the lower one-time rate (12/24-mo only), paid automatically in the quarter it renews.</div>
+        <div class="row"><b>OFF</b> — treated as a manual renewal: it appears in <b>Pending manual renewals</b> and shifts color (green → amber → red) as the date nears. You renew it there to release the (higher) manual commission.</div>
       </div>
 
+      <h3>Renegotiated an auto-renewal? Convert it</h3>
+      <p>If you actively renegotiate an agreement that was set to auto-renew — new pricing, scope, term, or a fresh signed agreement — use <b>Convert to manual</b> on the auto-renewals table. It records your sales involvement and switches that renewal to the <b>higher manual rate</b>, since you earned it.</p>
+
       <h3>Bonus Forecast &amp; Pending Renewals</h3>
-      <p>The <b>Bonus Forecast</b> tab estimates your upcoming renewal bonuses with reminder dates — it's informational only and never creates a payout. <b>Pending Renewals</b> is the action list of manual-renewal agreements you need to renew.</p>
+      <p>The <b>Bonus Forecast</b> tab estimates your upcoming renewal bonuses with reminder dates — it's informational only and never creates a payout. <b>Pending Renewals</b> holds the two action tables (manual and auto) described above.</p>
 
       <h3>What the colors mean</h3>
       <div class="guide-legend">
