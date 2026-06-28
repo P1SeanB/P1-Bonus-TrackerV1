@@ -325,12 +325,42 @@
 
   <section id="view-renewals" style="display:none">
     <div class="qbar" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
-      <div style="font-size:13px;color:var(--muted)">Agreements with <b style="color:var(--ink)">autorenewal OFF</b> that need a manual renewal to release the renewal commission. Rows shift <b style="color:var(--ink)">green → amber → red</b> as the renewal date approaches.</div>
+      <div style="font-size:13px;color:var(--muted)"><b style="color:var(--ink)">Manual</b> renewals pay every time they're renewed; <b style="color:var(--ink)">auto</b>-renewals pay a lower rate one time only (12/24-mo). Rows shift <b style="color:var(--ink)">green → amber → red</b> as the renewal date approaches.</div>
     </div>
     <div id="renQuickCards" class="cards" style="margin-bottom:16px"></div>
     <div class="panel">
-      <div class="panel-head"><h2>Pending manual renewals</h2><span class="qctx" id="renCount"></span></div>
+      <div class="panel-head" style="flex-wrap:wrap;gap:8px">
+        <h2>Pending manual renewals</h2>
+        <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+          <input id="renSearch" class="cfg-in" placeholder="Search customer / #" style="width:180px;font-size:12px">
+          <select id="renSort" class="cfg-in" style="font-size:12px">
+            <option value="days">Soonest first</option>
+            <option value="commission">Highest commission</option>
+            <option value="mrr">Highest MRR</option>
+            <option value="customer">Customer A–Z</option>
+          </select>
+          <button class="iconbtn" id="renExport">Export CSV</button>
+        </div>
+        <span class="qctx" id="renCount" style="flex-basis:100%;text-align:right"></span>
+      </div>
       <div id="renTableWrap"></div>
+    </div>
+    <div class="panel" style="margin-top:16px">
+      <div class="panel-head" style="flex-wrap:wrap;gap:8px">
+        <h2>Pending auto-renewals</h2>
+        <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+          <input id="autoSearch" class="cfg-in" placeholder="Search customer / #" style="width:180px;font-size:12px">
+          <select id="autoSort" class="cfg-in" style="font-size:12px">
+            <option value="days">Soonest first</option>
+            <option value="commission">Highest commission</option>
+            <option value="mrr">Highest MRR</option>
+            <option value="customer">Customer A–Z</option>
+          </select>
+          <button class="iconbtn" id="autoExport">Export CSV</button>
+        </div>
+        <span class="qctx" id="autoCount" style="flex-basis:100%;text-align:right"></span>
+      </div>
+      <div id="autoTableWrap"></div>
     </div>
   </section>
 
@@ -446,6 +476,30 @@
       <div style="display:flex;gap:10px;margin-left:auto">
         <button class="btn-ghost" id="mCancel">Cancel</button>
         <button class="btn-primary" id="mSave">Save agreement</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="convScrim">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-head"><div><h2 style="margin:0">Convert auto-renewal to manual</h2><div style="font-size:12px;color:var(--muted);margin-top:2px">Records active renegotiation — the agreement then earns the <b>manual</b> renewal rate instead of the reduced auto rate.</div></div><button class="x" id="convClose">×</button></div>
+    <div class="modal-body">
+      <div class="grid2">
+        <div class="fld"><label>Conversion date</label><input id="cv_date" type="date"></div>
+        <div class="fld"><label>New agreement / renewal reference <span class="hint">optional</span></label><input id="cv_ref" placeholder="e.g. renewal PO #"></div>
+        <div class="fld"><label>Updated MRR <span class="hint">optional</span></label><input id="cv_mrr" type="number" step="0.01" placeholder="leave blank to keep"></div>
+        <div class="fld"><label>Updated term <span class="hint">optional</span></label>
+          <select id="cv_term"><option value="">Keep current</option><option value="12">12 months</option><option value="24">24 months</option><option value="36">36 months</option><option value="48">48 months</option><option value="60">60 months</option></select>
+        </div>
+      </div>
+      <div class="fld" style="margin-top:6px"><label>Sales involvement notes <span class="hint">required</span></label><textarea id="cv_notes" rows="3" placeholder="What was renegotiated — pricing, scope, term, new signed agreement…"></textarea></div>
+      <div id="cvErr" style="display:none;margin-top:8px;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#9a2a2a"></div>
+    </div>
+    <div class="modal-foot">
+      <div style="display:flex;gap:10px;margin-left:auto">
+        <button class="btn-ghost" id="convCancel">Cancel</button>
+        <button class="btn-primary" id="convSave">Convert to manual</button>
       </div>
     </div>
   </div>
@@ -576,7 +630,8 @@ const DEFAULT_CONFIG={
   targetMargin:0.50,                                        // §4.3 program target
   minMargin:0.45,                                           // §4.4 floor for eligibility
   newPct:{12:0.06,24:0.07,36:0.08,48:0.085,60:0.09},        // §3.6 new-agreement matrix
-  renewalPct:{12:0.04,24:0.05,36:0.055,48:0.0575,60:0.06},  // §3.6 renewal matrix
+  renewalPct:{12:0.04,24:0.05,36:0.055,48:0.0575,60:0.06},  // §3.6 manual renewal matrix (every renewal)
+  autoRenewalPct:{12:0.02,24:0.025},                        // auto-renewal: lower rate, ONE-TIME, only 12/24-mo
   marginTiers:[                                             // §4.4/§4.13 (first match wins, descending)
     {min:0.60,mult:1.25,label:'Maximum',status:'Exceptional'},
     {min:0.55,mult:1.10,label:'Accelerated',status:'Excellent'},
@@ -594,6 +649,7 @@ function buildSnapshot(a,type){
   return {plan_version:CONFIG.planVersion,paid_date:new Date().toISOString().slice(0,10),
           rmr:c.mrr,term:+a.contract_term||0,basis:c.basis,commissionable:c.commissionableValue,
           rate:isInit?c.newPct:c.renewalPct,multiplier:c.marginMultiplier,margin:c.grossMargin,
+          acv:c.acv,tcv:c.tcv,renewal_type:isInit?'Initial':c.renewalType,customer:a.customer_name||null,
           amount:isInit?c.initialCommission:c.renewalCommission};
 }
 // frozen amount if this payout is paid + has a snapshot, else the live figure
@@ -632,7 +688,17 @@ function compute(a){
   const laborPctRevenue=acv>0?laborCost/acv:null;
   const mm=marginMult(grossMargin);
   const eligible=grossMargin==null?true:grossMargin>=(CONFIG.minMargin||0.45)-1e-9;
-  const newPct=pctFor(CONFIG.newPct,term),renewalPct=pctFor(CONFIG.renewalPct,term);
+  const converted=!!a.converted_to_manual;
+  const isAuto=!!a.autorenew && !converted;                  // a converted auto-renewal pays the MANUAL rate
+  const manualRenewalPct=pctFor(CONFIG.renewalPct,term);
+  // auto-renewal: only 12/24-mo are eligible; 36/48/60 are expected to be renegotiated → no auto-renewal commission
+  const autoRenewEligible=isAuto && (term===12||term===24);
+  const autoRenewalPct=autoRenewEligible?(pctFor(CONFIG.autoRenewalPct,term)||0):0;
+  const newPct=pctFor(CONFIG.newPct,term);
+  const renewalPct=isAuto?autoRenewalPct:manualRenewalPct;   // effective rate for THIS agreement
+  const renewalType= converted ? 'Auto-Renewal Converted to Manual Renewal'
+                    : a.autorenew ? 'Auto-Renewal'
+                    : (term>0 ? 'Manual Renewal' : 'Not Applicable');
   const baseCommissionNew=commissionableValue*newPct;
   const baseCommissionRenewal=commissionableValue*renewalPct;
   const initialCommission=baseCommissionNew*mm.mult;          // Final = Base × Margin Multiplier (§3.11)
@@ -646,6 +712,7 @@ function compute(a){
           grossProfit,grossMargin,laborPctRevenue,netProfit,
           marginMultiplier:mm.mult,marginLabel:mm.label,marginStatus:mm.status,eligible,
           newPct,renewalPct,initMult:newPct,renewMult:renewalPct,
+          isAuto,autoRenewEligible,manualRenewalPct,autoRenewalPct,renewalType,converted,
           baseCommissionNew,baseCommissionRenewal,initialCommission,renewalCommission,
           initialQI,renewalDate,renewalQI,annualBilled,firstBill,scheduled:!!sched};
 }
@@ -803,7 +870,7 @@ async function loadUsers(){
   KNOWN_USERS=[...set].filter(Boolean).sort();
 }
 let ACTIVE_PLAN_ID=null;
-function normalizeConfig(j){ if(j.targetMargin==null)j.targetMargin=0.50; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='2026 v1.0'; if(!j.basis)j.basis='TCV'; return j; }
+function normalizeConfig(j){ if(j.targetMargin==null)j.targetMargin=0.50; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='2026 v1.0'; if(!j.basis)j.basis='TCV'; if(!j.autoRenewalPct)j.autoRenewalPct={12:0.02,24:0.025}; return j; }
 async function loadPlan(){   // shared commission plan from Supabase (§6.9); falls back to local CONFIG if table absent
   try{
     const {data,error}=await sb.from('rmr_commission_plans').select('*').eq('status','active').order('modified_at',{ascending:false}).limit(1);
@@ -840,7 +907,7 @@ async function upsert(row){
   async function go(p){ if(p.id){const {error}=await sb.from('rmr_agreements').update(p).eq('id',p.id);if(error)throw error;} else {const {error}=await sb.from('rmr_agreements').insert(p);if(error)throw error;} }
   try{ await go(payload); }
   catch(e){ // ref columns not migrated yet → retry without them so saving still works
-    if(/customer_number|site_number|owner_email|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,...rest}=payload; await go(rest); }
+    if(/customer_number|site_number|owner_email|converted_to_manual|conversion_|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,converted_to_manual,conversion_date,conversion_notes,conversion_ref,...rest}=payload; await go(rest); }
     else throw e;
   }
 }
@@ -856,13 +923,20 @@ async function patchPaid(id,field,val){
     ({error}=await sb.from('rmr_agreements').update(update).eq('id',id));
   }
   if(error){toast(error.message);return;}
-  if(a){a[field]=val;if(snapCol&&snapCol in update)a[snapCol]=update[snapCol];}render();
+  if(a){a[field]=val;if(snapCol&&snapCol in update)a[snapCol]=update[snapCol];}
+  if(a){ const isRen=field==='renewal_paid'; const c=compute(a);
+    audit(val?(isRen?'Renewal commission paid':'Initial commission paid'):(isRen?'Renewal commission un-paid':'Initial commission un-paid'),
+      'Commissions', a.agreement_number, null,
+      {agreement:a.agreement_number, customer:a.customer_name, type:isRen?(c.isAuto?'auto-renewal':'manual-renewal'):'initial', amount: isRen?c.renewalCommission:c.initialCommission}, null); }
+  render();
 }
 async function patchRenew(id){
   if(!can('editAgreements')){ toast('Your role cannot trigger a renewal.'); return; }
   const {error}=await sb.from('rmr_agreements').update({renewed:true,updated_at:new Date().toISOString()}).eq('id',id);
   if(error){toast(error.message);return;}
-  const a=AGREEMENTS.find(x=>x.id===id);if(a)a.renewed=true;toast('Renewed — renewal commission now due');render();
+  const a=AGREEMENTS.find(x=>x.id===id);if(a)a.renewed=true;
+  if(a) audit('Manual renewal triggered','Renewals',a.agreement_number,null,{agreement:a.agreement_number,customer:a.customer_name,renewal_commission:compute(a).renewalCommission},null);
+  toast('Renewed — renewal commission now due');render();
 }
 async function patchRenewalPaid(id,val){
   const {error}=await sb.from('rmr_renewals').update({paid:val,updated_at:new Date().toISOString()}).eq('id',id);
@@ -1027,33 +1101,104 @@ function daysCell(d){
 }
 function fmtDate(d){return d?d.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):'—';}
 function rowTint(d){ if(d==null)return''; if(d<=30)return 'background:#fbeaea'; if(d<=90)return 'background:#fff4e8'; return 'background:#eaf5ee'; }
+function renewSearchMatch(x,q){ if(!q)return true; q=q.toLowerCase(); return (x.a.customer_name||'').toLowerCase().includes(q)||String(x.a.agreement_number||'').toLowerCase().includes(q); }
+function renewSort(arr,key){
+  const a=[...arr];
+  if(key==='commission') a.sort((p,q)=>q.c.renewalCommission-p.c.renewalCommission);
+  else if(key==='mrr') a.sort((p,q)=>q.c.mrr-p.c.mrr);
+  else if(key==='customer') a.sort((p,q)=>(p.a.customer_name||'').localeCompare(q.a.customer_name||''));
+  else a.sort((p,q)=>p.days-q.days);
+  return a;
+}
+function renewStatus(days){
+  if(days==null) return '<span class="chip c-none">—</span>';
+  if(days<0) return '<span class="chip c-held">Overdue</span>';
+  if(days<=30) return '<span class="chip c-maturing">Due ≤30d</span>';
+  if(days<=90) return '<span class="chip c-payable">Due ≤90d</span>';
+  return '<span class="chip c-paid">Upcoming</span>';
+}
+function autoStatusLabel(x){           // §10 auto-renewal status options
+  const c=x.c,a=x.a;
+  if(a.renewal_paid) return 'Auto-Renewal Commission Paid';
+  if(!c.eligible) return (c.grossMargin!=null && c.grossMargin<(CONFIG.minMargin||0.45)) ? 'Management Approval Required' : 'Auto-Renewal Commission Not Eligible';
+  if(x.days!=null && x.days<0) return 'Auto-Renewal Commission Pending';
+  if(x.days!=null && x.days<=90) return 'Auto-Renewal Eligible';
+  return 'Pending Auto-Renewal';
+}
+function statusChipClass(s){ return /Paid/.test(s)?'c-paid':(/Not Eligible|Approval/.test(s)?'c-held':(/Pending Auto/.test(s)?'c-none':'c-payable')); }
+let MANUAL_LIST=[], AUTO_LIST=[];
 function renderRenewals(){
-  // manual (autorenew OFF) agreements with a renewal commission, not yet renewed
-  const items=scopedAgreements().map(a=>({a,c:compute(a)}))
-    .filter(x=>x.c.renewMult>0 && !x.a.autorenew && !x.a.renewed && x.c.renewalDate)
-    .map(x=>({...x,days:Math.ceil((x.c.renewalDate-new Date())/86400000)}))
-    .sort((p,q)=>p.days-q.days);
-  const due=items.filter(x=>x.days<=90).length;
-  const sumDue=items.filter(x=>x.days<=90).reduce((s,x)=>s+x.c.renewalCommission,0);
-  const autoCt=scopedAgreements().filter(a=>compute(a).renewMult>0&&a.autorenew&&!a.renewal_paid).length;
+  const all=scopedAgreements().map(a=>({a,c:compute(a)}))
+    .map(x=>({...x,days:x.c.renewalDate?Math.ceil((x.c.renewalDate-new Date())/86400000):null}));
+  // MANUAL: effectively manual (autorenew OFF *or* converted), has a renewal commission, not yet renewed
+  let manual=all.filter(x=>!x.c.isAuto && x.c.renewMult>0 && !x.a.renewed && x.c.renewalDate);
+  // AUTO: still auto (not converted), term-eligible (12/24-mo), one-time, not yet paid.
+  // Low-margin ones are kept and shown as "Management Approval Required" (spec §9/§10), not hidden.
+  let auto=all.filter(x=>x.c.isAuto && x.c.autoRenewEligible && !x.a.renewal_paid && x.c.renewalDate);
+
+  const sumManual=manual.filter(x=>x.days<=90).reduce((s,x)=>s+x.c.renewalCommission,0);
+  const sumAuto=auto.reduce((s,x)=>s+x.c.renewalCommission,0);
   $('renQuickCards').innerHTML=`
-    <div class="stat accent"><div class="lbl">Commission to claim (≤90d)</div><div class="val">${fmt(sumDue)}</div></div>
-    <div class="stat orange"><div class="lbl">Need manual renewal ≤90d</div><div class="val">${due}</div></div>
-    <div class="stat"><div class="lbl">Manual renewals pending</div><div class="val">${items.length}</div></div>
-    <div class="stat green"><div class="lbl">Auto-renewing agreements</div><div class="val">${autoCt}</div></div>`;
-  $('renCount').textContent=`${items.length} awaiting manual renewal`;
-  if(!items.length){$('renTableWrap').innerHTML=`<div class="empty"><b>No manual renewals pending</b>12/24-month agreements with autorenewal OFF show here as their renewal date nears — colored by urgency.</div>`;return;}
-  const rows=items.map(({a,c,days})=>`<tr style="${rowTint(days)}">
+    <div class="stat accent"><div class="lbl">Manual commission to claim (≤90d)</div><div class="val">${fmt(sumManual)}</div></div>
+    <div class="stat orange"><div class="lbl">Manual renewals pending</div><div class="val">${manual.length}</div></div>
+    <div class="stat green"><div class="lbl">Auto-renewals pending</div><div class="val">${auto.length}</div></div>
+    <div class="stat"><div class="lbl">Auto commission (one-time)</div><div class="val">${fmt(sumAuto)}</div></div>`;
+
+  // ---- manual table ----
+  const mq=($('renSearch')&&$('renSearch').value)||'', mk=($('renSort')&&$('renSort').value)||'days';
+  MANUAL_LIST=renewSort(manual.filter(x=>renewSearchMatch(x,mq)),mk);
+  $('renCount').textContent=`${MANUAL_LIST.length} shown · ${manual.length} pending`;
+  if(!MANUAL_LIST.length){ $('renTableWrap').innerHTML=`<div class="empty"><b>No manual renewals${mq?' match':' pending'}</b>Manual renewals (and auto-renewals converted to manual) appear here. They pay the manual rate every renewal cycle.</div>`; }
+  else {
+    const rows=MANUAL_LIST.map(({a,c,days})=>`<tr style="${rowTint(days)}">
+      <td>${esc(a.customer_name||'—')}${c.converted?' <span class="chip c-maturing" style="font-size:9px">converted</span>':''}</td>
       <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
-      <td>${esc(a.customer_name||'—')}</td>
       <td>${(+a.contract_term)}mo</td>
       <td class="mono" style="color:var(--muted)">${fmtDate(c.renewalDate)}</td>
       <td>${daysCell(days)}</td>
-      <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(c.renewalCommission)} <span style="font-size:10px;color:var(--muted)">(${Math.round(c.renewMult*100)}%)</span></td>
-      <td>${can('editAgreements')?`<button class="paidbtn" data-renew="${a.id}">Renew now</button>`:'<span class="qctx">awaiting renewal</span>'}</td>
+      <td class="num mono">${fmt(c.mrr)}</td>
+      <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(c.renewalCommission)} <span style="font-size:10px;color:var(--muted)">(${Math.round(c.renewMult*1000)/10}%)</span></td>
+      <td>${can('editAgreements')?`<button class="paidbtn" data-renew="${a.id}">Renew now</button>`:renewStatus(days)}</td>
     </tr>`).join('');
-  $('renTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Term</th><th>Renews</th><th>Days left</th><th class="num">Renewal comm.</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
-  $('renTableWrap').querySelectorAll('[data-renew]').forEach(b=>b.onclick=()=>patchRenew(b.dataset.renew));
+    $('renTableWrap').innerHTML=`<table><thead><tr><th>Customer</th><th>Agr #</th><th>Term</th><th>Renews</th><th>Days left</th><th class="num">MRR</th><th class="num">Renewal comm.</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
+    $('renTableWrap').querySelectorAll('[data-renew]').forEach(b=>b.onclick=()=>patchRenew(b.dataset.renew));
+  }
+
+  // ---- auto table (full spec §2 columns) ----
+  const aq=($('autoSearch')&&$('autoSearch').value)||'', ak=($('autoSort')&&$('autoSort').value)||'days';
+  AUTO_LIST=renewSort(auto.filter(x=>renewSearchMatch(x,aq)),ak);
+  $('autoCount').textContent=`${AUTO_LIST.length} shown · ${auto.length} pending`;
+  if(!AUTO_LIST.length){ $('autoTableWrap').innerHTML=`<div class="empty"><b>No auto-renewals${aq?' match':' pending'}</b>12/24-month agreements with autorenewal ON appear here for their one-time renewal commission. 36/48/60-month terms aren't auto-renewal eligible.</div>`; }
+  else {
+    const rows=AUTO_LIST.map(x=>{const {a,c,days}=x; const st=autoStatusLabel(x);
+      return `<tr style="${rowTint(days)}">
+      <td>${esc(a.customer_name||'—')}${a.customer_number?`<div style="font-size:10px;color:var(--muted)">Cust #${esc(a.customer_number)}</div>`:''}${a.site_number?`<div style="font-size:10px;color:var(--muted)">Site ${esc(a.site_number)}</div>`:''}</td>
+      <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
+      <td>${(+a.contract_term)}mo</td>
+      <td class="mono" style="color:var(--muted)">${fmtDate(c.renewalDate)}</td>
+      <td>${daysCell(days)}</td>
+      <td class="num mono">${fmt(c.mrr)}</td>
+      <td class="num mono">${fmt(c.acv)}</td>
+      <td class="mono">${c.grossMargin==null?'—':Math.round(c.grossMargin*1000)/10+'%'}</td>
+      <td class="num mono">${Math.round(c.renewMult*1000)/10}%</td>
+      <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(c.renewalCommission)}</td>
+      <td><span class="chip ${statusChipClass(st)}" style="font-size:10px">${st}</span></td>
+      <td>${can('editAgreements')?`<button class="iconbtn" data-convert="${a.id}">Convert to manual</button>`:''}</td>
+    </tr>`;}).join('');
+    $('autoTableWrap').innerHTML=`<table><thead><tr><th>Customer</th><th>Agr #</th><th>Term</th><th>Renewal date</th><th>Days left</th><th class="num">MRR</th><th class="num">ACV</th><th>Margin</th><th class="num">Auto %</th><th class="num">Est. comm.</th><th>Auto-renewal status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    $('autoTableWrap').querySelectorAll('[data-convert]').forEach(b=>b.onclick=()=>openConvert(b.dataset.convert));
+  }
+}
+function exportRenewalCSV(list,fname){
+  const head=['Customer','Customer #','Site','Agreement #','Term','Renewal Type','Renewal Date','Days Remaining','MRR','ACV','TCV','Gross Margin %','Renewal %','Margin Multiplier','Estimated Commission','Status'];
+  const lines=[head.join(',')];
+  list.forEach(x=>{const {a,c,days}=x;
+    const cells=[a.customer_name||'',a.customer_number||'',a.site_number||'',a.agreement_number||'',c.term+'mo',c.renewalType,
+      c.renewalDate?c.renewalDate.toISOString().slice(0,10):'',days,Math.round(c.mrr),Math.round(c.acv),Math.round(c.tcv),
+      c.grossMargin==null?'':Math.round(c.grossMargin*1000)/10,Math.round(c.renewMult*1000)/10,c.marginMultiplier,Math.round(c.renewalCommission),
+      c.isAuto?autoStatusLabel(x):(a.renewed?'Renewed':'Pending Manual Renewal')];
+    lines.push(cells.map(v=>{v=String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(','));});
+  const blob=new Blob([lines.join('\n')],{type:'text/csv'}); const u=URL.createObjectURL(blob); const el=document.createElement('a'); el.href=u; el.download=`${fname}-${todayISO()}.csv`; el.click(); URL.revokeObjectURL(u);
 }
 function forecastList(){
   const today=new Date(); const only12=$('fcTerm')&&$('fcTerm').value==='12';
@@ -1277,8 +1422,12 @@ function renderAdmin(){
       <div class="panel"><div class="panel-head"><h2>New-agreement commission</h2></div><div class="admin-body">
         <table class="cfg-table"><thead><tr><th>Term</th><th>Commission</th></tr></thead><tbody>${pctRows(c.newPct,'newpct')}</tbody></table>
       </div></div>
-      <div class="panel"><div class="panel-head"><h2>Renewal commission</h2></div><div class="admin-body">
+      <div class="panel"><div class="panel-head"><h2>Manual renewal commission</h2><span class="qctx">paid every renewal</span></div><div class="admin-body">
         <table class="cfg-table"><thead><tr><th>Term</th><th>Commission</th></tr></thead><tbody>${pctRows(c.renewalPct,'renpct')}</tbody></table>
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Auto-renewal commission</h2><span class="qctx">one-time · 12/24-mo only</span></div><div class="admin-body">
+        <table class="cfg-table"><thead><tr><th>Term</th><th>Commission</th></tr></thead><tbody>${[12,24].map(t=>`<tr><td>${t} months</td><td><input class="cfg-in" data-autopct="${t}" type="number" step="0.01" value="${Math.round((c.autoRenewalPct&&c.autoRenewalPct[t]!=null?c.autoRenewalPct[t]:(t===12?0.02:0.025))*10000)/100}"> %</td></tr>`).join('')}</tbody></table>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">36/48/60-month agreements are expected to be renegotiated and earn no auto-renewal commission.</div>
       </div></div>
     </div>
     <div class="admin-actions">
@@ -1372,9 +1521,10 @@ function saveAdmin(){
   if(isNaN(target)||target<=0||target>1) errs.push('Target margin must be between 0 and 100%.');
   if(isNaN(min)||min<0||min>1) errs.push('Minimum margin must be between 0 and 100%.');
   if(!errs.length && min>target) errs.push('Minimum margin cannot exceed target margin.');
-  const newPct={}, renewalPct={};
+  const newPct={}, renewalPct={}, autoRenewalPct={};
   document.querySelectorAll('[data-newpct]').forEach(i=>{const t=+i.dataset.newpct,v=+i.value/100; if(isNaN(v)||v<0)errs.push(`New ${t}-mo % is invalid.`); newPct[t]=v;});
-  document.querySelectorAll('[data-renpct]').forEach(i=>{const t=+i.dataset.renpct,v=+i.value/100; if(isNaN(v)||v<0)errs.push(`Renewal ${t}-mo % is invalid.`); renewalPct[t]=v;});
+  document.querySelectorAll('[data-renpct]').forEach(i=>{const t=+i.dataset.renpct,v=+i.value/100; if(isNaN(v)||v<0)errs.push(`Manual renewal ${t}-mo % is invalid.`); renewalPct[t]=v;});
+  document.querySelectorAll('[data-autopct]').forEach(i=>{const t=+i.dataset.autopct,v=+i.value/100; if(isNaN(v)||v<0)errs.push(`Auto-renewal ${t}-mo % is invalid.`); autoRenewalPct[t]=v;});
   const tiers=CONFIG.marginTiers.map((t,i)=>({
     min:(+document.querySelector(`[data-tiermin="${i}"]`).value)/100,
     mult:+document.querySelector(`[data-tiermult="${i}"]`).value,
@@ -1386,7 +1536,7 @@ function saveAdmin(){
   tiers.sort((a,b)=>b.min-a.min);
   if(!confirm('Save changes to the active commission plan? This applies to all unpaid calculations.')) return;
   const before={planVersion:CONFIG.planVersion,basis:CONFIG.basis,newPct:CONFIG.newPct,renewalPct:CONFIG.renewalPct};
-  CONFIG={planVersion:plan,basis,targetMargin:target,minMargin:min,newPct,renewalPct,marginTiers:tiers};
+  CONFIG={planVersion:plan,basis,targetMargin:target,minMargin:min,newPct,renewalPct,autoRenewalPct,marginTiers:tiers};
   saveConfig();
   msg.style.color='var(--muted)'; msg.textContent='Saving…';
   savePlan().then(ok=>{ msg.style.color=ok?'var(--payable)':'var(--orange)'; msg.textContent=ok?'✓ Saved to shared plan — applies to all users & unpaid calculations.':'✓ Saved locally. Run migration_v6 to share across users.'; });
@@ -1458,6 +1608,32 @@ function openModal(id){
   $('mErr').style.display='none';updatePreview();$('scrim').classList.add('show');
 }
 function closeModal(){$('scrim').classList.remove('show');editingId=null;}
+let convertingId=null;
+function openConvert(id){
+  if(!can('editAgreements')){ toast('Your role cannot convert renewals.'); return; }
+  const a=AGREEMENTS.find(x=>x.id===id); if(!a)return;
+  convertingId=id;
+  $('cv_date').value=todayISO(); $('cv_ref').value=''; $('cv_mrr').value=''; $('cv_term').value=''; $('cv_notes').value='';
+  $('cvErr').style.display='none';
+  $('convScrim').classList.add('show');
+}
+function closeConvert(){ $('convScrim').classList.remove('show'); convertingId=null; }
+async function saveConvert(){
+  if(!convertingId)return;
+  const a=AGREEMENTS.find(x=>x.id===convertingId); if(!a){closeConvert();return;}
+  const notes=$('cv_notes').value.trim();
+  if(!notes){ $('cvErr').textContent='Sales involvement notes are required to record the renegotiation.'; $('cvErr').style.display='block'; return; }
+  const row={id:a.id, converted_to_manual:true, conversion_date:$('cv_date').value||todayISO(), conversion_notes:notes, conversion_ref:$('cv_ref').value.trim()||null};
+  if($('cv_mrr').value.trim()!=='' && +$('cv_mrr').value>0) row.monthly_rmr=+$('cv_mrr').value;
+  if($('cv_term').value) row.contract_term=+$('cv_term').value;
+  try{
+    await upsert(row); await load(); closeConvert();
+    toast('Converted to manual renewal — manual rate now applies');
+    audit('Auto-renewal converted to manual','Renewals',a.agreement_number,
+      {renewal_type:'Auto-Renewal'},
+      {renewal_type:'Auto-Renewal Converted to Manual Renewal',agreement:a.agreement_number,customer:a.customer_name,notes,ref:row.conversion_ref,updated_mrr:row.monthly_rmr||a.monthly_rmr,updated_term:row.contract_term||a.contract_term},null);
+  }catch(e){ $('cvErr').textContent=e.message||'Conversion failed'; $('cvErr').style.display='block'; }
+}
 function readForm(){return{
   id:editingId||undefined,agreement_number:$('f_num').value.trim(),customer_name:$('f_cust').value.trim(),customer_number:$('f_custnum').value.trim()||null,site_number:$('f_sitenum').value.trim()||null,
   activation_date:$('f_date').value||null,contract_term:+$('f_term').value,monthly_rmr:+$('f_rmr').value||0,
@@ -1648,6 +1824,12 @@ $('qSelect').onchange=e=>{selQI=+e.target.value;renderQuarter();};
 $('tabQuarter').onclick=()=>switchView('quarter');
 $('tabAgreements').onclick=()=>switchView('agreements');
 $('tabRenewals').onclick=()=>switchView('renewals');
+['renSearch','renSort','autoSearch','autoSort'].forEach(id=>{const el=$(id); if(el){el.addEventListener('input',renderRenewals);el.addEventListener('change',renderRenewals);}});
+$('renExport').onclick=()=>exportRenewalCSV(MANUAL_LIST,'pending-manual-renewals');
+$('autoExport').onclick=()=>exportRenewalCSV(AUTO_LIST,'pending-auto-renewals');
+$('convClose').onclick=closeConvert; $('convCancel').onclick=closeConvert;
+$('convSave').onclick=saveConvert;
+$('convScrim').onclick=e=>{if(e.target===$('convScrim'))closeConvert();};
 $('tabForecast').onclick=()=>switchView('forecast');
 $('fcTerm').onchange=renderForecast;
 $('fcExport').onclick=exportForecastCSV;
