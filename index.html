@@ -203,8 +203,11 @@
   .bartrack{flex:1;background:#f1f1f1;border-radius:6px;height:18px;overflow:hidden}
   .barfill{height:100%;border-radius:6px;background:var(--orange);transition:width .3s}
   .barval{width:96px;flex:none;font-weight:700;color:var(--ink);text-align:right}
-  .scopebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 24px;background:#fff;border-bottom:1px solid var(--line)}
+  .scopebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 24px;background:#fff;border-bottom:1px solid var(--line)}
   .scopelbl{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .scopesel{border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px;font-weight:600;color:var(--ink);background:#fff;min-width:200px;cursor:pointer}
+  .scopesel:focus{outline:none;border-color:var(--orange)}
+  .scopecount{font-size:12px;color:var(--muted)}
   .scopechip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:4px 12px;font-size:12px;font-weight:600;color:var(--ink);cursor:pointer}
   .scopechip.on{background:var(--orange);color:#fff;border-color:var(--orange)}
 </style>
@@ -889,19 +892,19 @@ function buildQuarterOptions(){
 /* ---- render ---- */
 function renderScopeBar(){
   const bar=$('scopeBar'); if(!bar)return;
+  if(!canViewAll()||AGREEMENTS.length===0){ bar.style.display='none'; return; }
   const owners=distinctOwners();
-  if(!canViewAll()||owners.length<=1){ bar.style.display='none'; return; }
+  // self-heal: if the active filter points at a user who no longer owns anything, clear it so you're never stranded
+  if(USER_FILTER){ USER_FILTER=USER_FILTER.filter(o=>owners.includes(o)); if(!USER_FILTER.length)USER_FILTER=null; }
   bar.style.display='flex';
-  const sel=USER_FILTER||[], allOn=!sel.length;
-  const chip=(key,label,on)=>`<button class="scopechip${on?' on':''}" data-owner="${esc(key)}">${esc(label)}</button>`;
-  bar.innerHTML=`<span class="scopelbl">Viewing</span>`+chip('__all','All users',allOn)+
-    owners.map(o=>chip(o,o,sel.includes(o))).join('');
-  bar.querySelectorAll('.scopechip').forEach(b=>b.onclick=()=>{
-    const o=b.dataset.owner;
-    if(o==='__all'){ USER_FILTER=null; }
-    else { const s=new Set(USER_FILTER||[]); s.has(o)?s.delete(o):s.add(o); USER_FILTER=s.size?[...s]:null; }
-    renderScopeBar(); render();
-  });
+  const selected=(USER_FILTER&&USER_FILTER.length===1)?USER_FILTER[0]:'__all';
+  const opts=`<option value="__all">All users</option>`+
+    owners.map(o=>`<option value="${esc(o)}"${o===selected?' selected':''}>${esc(o)}</option>`).join('');
+  const n=scopedAgreements().length;
+  bar.innerHTML=`<span class="scopelbl">Viewing</span>`+
+    `<select id="scopeSel" class="scopesel">${opts}</select>`+
+    `<span class="scopecount">${n} agreement${n===1?'':'s'}</span>`;
+  $('scopeSel').onchange=function(){ USER_FILTER=(this.value==='__all')?null:[this.value]; render(); };
 }
 function render(){ renderScopeBar(); if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='forecast')renderForecast(); if(view==='history')renderHistory(); if(view==='reports')renderReports(); if(view==='admin')renderAdmin(); renderLegend(); }
 function renderQuarter(){
