@@ -515,24 +515,19 @@
       <button class="x" id="guideClose">×</button>
     </div>
     <div class="guide-body">
+      <div id="gdPlanTag" class="guide-callout" style="background:#eef6ef;border-left-color:var(--payable)"></div>
       <h3>The big idea</h3>
       <p>You earn a commission on every recurring-revenue (RMR) agreement you sell — and again when it renews. Your commission is built from three things: <b>how big the deal is</b>, <b>a percentage set by the contract length</b>, and <b>a multiplier based on how profitable the deal is</b>.</p>
-      <div class="guide-callout"><b>Commission = Deal value × Term&nbsp;% × Margin multiplier.</b> Every rate below is set by your administrator in the plan, so the numbers you see always reflect the current plan.</div>
+      <div class="guide-callout"><b>Commission = Deal value × Term&nbsp;% × Margin multiplier.</b> Every rate below is set by your administrator, so the numbers always reflect the plan assigned to you.</div>
 
       <h3>1 · The deal value</h3>
-      <p>By default the tool uses <b>Total Contract Value (TCV)</b> — your monthly RMR × the full length of the contract. A $6,500/mo deal on a 36-month contract has a TCV of <b>$234,000</b>. <span style="color:var(--muted)">(An administrator can switch this to Annual Contract Value — just RMR × 12 — in the Admin tab.)</span></p>
+      <p id="gdDealValue"></p>
 
       <h3>2 · The term percentage</h3>
       <p>The rate depends on the contract length and on whether it's a new sale, a <b>manual</b> renewal, or an <b>auto</b>-renewal:</p>
       <table class="guide-table">
         <thead><tr><th>Contract term</th><th>New&nbsp;%</th><th>Manual renewal</th><th>Auto-renewal</th></tr></thead>
-        <tbody>
-          <tr><td>12 months</td><td><b>6%</b></td><td>4%</td><td>2%</td></tr>
-          <tr><td>24 months</td><td><b>7%</b></td><td>5%</td><td>2.5%</td></tr>
-          <tr><td>36 months</td><td><b>8%</b></td><td>5.5%</td><td>n/a</td></tr>
-          <tr><td>48 months</td><td><b>8.5%</b></td><td>5.75%</td><td>n/a</td></tr>
-          <tr><td>60 months</td><td><b>9%</b></td><td>6%</td><td>n/a</td></tr>
-        </tbody>
+        <tbody id="gdTermBody"></tbody>
       </table>
       <p style="font-size:12.5px;color:var(--muted)">Auto-renewals pay a <b>lower</b> rate because they take less sales effort, and only <b>12 and 24-month</b> agreements qualify. 36/48/60-month deals aren't auto-renewal eligible — they're expected to be renegotiated.</p>
 
@@ -540,20 +535,12 @@
       <p>How profitable the deal is sets a multiplier on top of everything:</p>
       <table class="guide-table">
         <thead><tr><th>Gross margin</th><th>Multiplier</th><th>Tier</th></tr></thead>
-        <tbody>
-          <tr><td>60% and up</td><td><b>×1.25</b></td><td>Exceptional</td></tr>
-          <tr><td>55 – 59.99%</td><td><b>×1.10</b></td><td>Excellent</td></tr>
-          <tr><td>50 – 54.99%</td><td><b>×1.00</b></td><td>Target</td></tr>
-          <tr><td>45 – 49.99%</td><td><b>×0.75</b></td><td>Acceptable</td></tr>
-          <tr><td>Below 45%</td><td><b>$0</b></td><td>Not eligible</td></tr>
-        </tbody>
+        <tbody id="gdTierBody"></tbody>
       </table>
-      <div class="guide-callout">Below 45% margin the deal <b>isn't eligible</b> — it pays <b>$0</b> until a manager approves an exception. Unlike the old plan, <b>margin now affects your pay.</b></div>
+      <div class="guide-callout" id="gdEligNote"></div>
 
       <h3>Put it together — an example</h3>
-      <p>A <b>$6,500/mo, 36-month</b> deal at <b>62% margin</b>:<br>
-      $234,000 (TCV) × 8% (36-mo rate) × 1.25 (60%+ margin) = <b>$23,400</b>.<br>
-      The same deal at 51% margin would be ×1.00 = <b>$18,720</b>.</p>
+      <p id="gdExample"></p>
 
       <h3>Renewal commission — manual vs auto</h3>
       <p>When an agreement reaches its renewal date, you earn a renewal commission. There are two kinds, and they behave differently:</p>
@@ -561,7 +548,7 @@
         <div class="row"><b>Manual renewal</b> — you actively renew it. Pays the higher manual rate, and pays <b>every time</b> it's renewed (e.g. a 12-month deal renewed each year earns a manual commission each year). Lives in the <b>Pending manual renewals</b> table.</div>
         <div class="row"><b>Auto-renewal</b> — it renews automatically under the contract. Pays the lower auto rate <b>one time only</b>, and only on <b>12 / 24-month</b> agreements. Lives in the <b>Pending auto-renewals</b> table. Once it's paid, no further auto-renewal commission is earned.</div>
       </div>
-      <p>Both still run through the margin multiplier, and a deal under 45% margin pays <b>$0</b> and is flagged <b>Management Approval Required</b>.</p>
+      <p>Both still run through the margin multiplier, and a deal under <b id="gdFloorInline">45%</b> margin pays <b>$0</b> and is flagged <b>Management Approval Required</b>.</p>
 
       <h3>Autorenewal toggle — on or off</h3>
       <div class="guide-legend">
@@ -652,11 +639,27 @@ const DEFAULT_CONFIG={
 };
 let CONFIG=(()=>{try{const j=JSON.parse(LS.get('rmr_commission_config'));if(j&&j.newPct&&j.marginTiers){if(j.targetMargin==null)j.targetMargin=0.50;if(j.minMargin==null)j.minMargin=0.45;if(!j.planVersion)j.planVersion='2026 v1.0';return j;}return JSON.parse(JSON.stringify(DEFAULT_CONFIG));}catch(e){return JSON.parse(JSON.stringify(DEFAULT_CONFIG));}})();
 function saveConfig(){LS.set('rmr_commission_config',JSON.stringify(CONFIG));}
+/* ===== Multi-plan model (per-rep commission plans) =====
+   PLANS      = every saved plan row from rmr_commission_plans
+   USER_PLAN  = { email(lowercased) -> plan id } assignments from rmr_users
+   resolvePlan(a) decides which plan an agreement is calculated under:
+     owner's assigned plan → the default plan → the local CONFIG fallback.
+   Paid lines stay frozen via the snapshot regardless of which plan resolves. */
+let PLANS=[], USER_PLAN={}, EDIT_PLAN_ID=null;
+function planById(id){ if(id==null)return null; const p=PLANS.find(p=>String(p.id)===String(id)); return p?p.config:null; }
+function defaultPlanConfig(){ const d=PLANS.find(p=>p.is_default); if(d)return d.config; const a=PLANS.find(p=>p.status==='active'); if(a)return a.config; return PLANS.length?PLANS[0].config:CONFIG; }
+function resolvePlan(a){
+  const email=(a&&a.owner_email)?String(a.owner_email).toLowerCase():null;
+  const pid=email?USER_PLAN[email]:null;
+  return planById(pid)||defaultPlanConfig();
+}
+function planLabelFor(a){ const cfg=resolvePlan(a); return cfg&&cfg.planVersion?cfg.planVersion:''; }
 function pctFor(map,term){if(map[term]!=null)return map[term];const ks=Object.keys(map).map(Number).sort((a,b)=>a-b);let v=map[ks[0]];for(const k of ks){if(term>=k)v=map[k];}return v;}
-function marginMult(gm){if(gm==null)return {mult:1.0,label:'—',status:'—'};for(const t of CONFIG.marginTiers){if(gm>=t.min-1e-9)return {mult:t.mult,label:t.label,status:t.status||t.label};}return {mult:0,label:'Not eligible',status:'Not profitable'};}
+function marginMult(gm,plan){const cfg=plan||CONFIG;if(gm==null)return {mult:1.0,label:'—',status:'—'};for(const t of cfg.marginTiers){if(gm>=t.min-1e-9)return {mult:t.mult,label:t.label,status:t.status||t.label};}return {mult:0,label:'Not eligible',status:'Not profitable'};}
 function buildSnapshot(a,type){
-  const c=compute(a),isInit=type==='initial';
-  return {plan_version:CONFIG.planVersion,paid_date:new Date().toISOString().slice(0,10),
+  const plan=resolvePlan(a);
+  const c=compute(a,plan),isInit=type==='initial';
+  return {plan_version:plan.planVersion,paid_date:new Date().toISOString().slice(0,10),
           rmr:c.mrr,term:+a.contract_term||0,basis:c.basis,commissionable:c.commissionableValue,
           rate:isInit?c.newPct:c.renewalPct,multiplier:c.marginMultiplier,margin:c.grossMargin,
           acv:c.acv,tcv:c.tcv,renewal_type:isInit?'Initial':c.renewalType,customer:a.customer_name||null,
@@ -670,7 +673,8 @@ function frozenAmount(a,type){
   const frozen=paid&&snap&&snap.amount!=null;
   return {amount:frozen?+snap.amount:live,frozen,snap:frozen?snap:null};
 }
-function compute(a){
+function compute(a,plan){
+  const cfg=plan||resolvePlan(a);
   const term=+a.contract_term||0;
   const rate=+a.loaded_labor_rate||0;
   // billing schedule → annual billed → MRR (handles custom / uneven invoicing through the year)
@@ -684,7 +688,7 @@ function compute(a){
   const acv=mrr*12;
   const months=term>0?term:12;                               // M2M/custom → 12 for value basis
   const tcv=mrr*months;
-  const commissionableValue=(CONFIG.basis==='ACV')?acv:tcv;
+  const commissionableValue=(cfg.basis==='ACV')?acv:tcv;
   // ── Margin Engine §4.5–4.10: annual recurring direct costs ──
   const laborHours=(+a.inspection_frequency||0)*(+a.hours_per_inspection||0);
   const laborCost=laborHours*rate;
@@ -696,15 +700,15 @@ function compute(a){
   const grossProfit=acv-directCosts;
   const grossMargin=acv>0?grossProfit/acv:null;
   const laborPctRevenue=acv>0?laborCost/acv:null;
-  const mm=marginMult(grossMargin);
-  const eligible=grossMargin==null?true:grossMargin>=(CONFIG.minMargin||0.45)-1e-9;
+  const mm=marginMult(grossMargin,cfg);
+  const eligible=grossMargin==null?true:grossMargin>=(cfg.minMargin||0.45)-1e-9;
   const converted=!!a.converted_to_manual;
   const isAuto=!!a.autorenew && !converted;                  // a converted auto-renewal pays the MANUAL rate
-  const manualRenewalPct=pctFor(CONFIG.renewalPct,term);
+  const manualRenewalPct=pctFor(cfg.renewalPct,term);
   // auto-renewal: only 12/24-mo are eligible; 36/48/60 are expected to be renegotiated → no auto-renewal commission
   const autoRenewEligible=isAuto && (term===12||term===24);
-  const autoRenewalPct=autoRenewEligible?(pctFor(CONFIG.autoRenewalPct,term)||0):0;
-  const newPct=pctFor(CONFIG.newPct,term);
+  const autoRenewalPct=autoRenewEligible?(pctFor(cfg.autoRenewalPct,term)||0):0;
+  const newPct=pctFor(cfg.newPct,term);
   const renewalPct=isAuto?autoRenewalPct:manualRenewalPct;   // effective rate for THIS agreement
   const renewalType= converted ? 'Auto-Renewal Converted to Manual Renewal'
                     : a.autorenew ? 'Auto-Renewal'
@@ -717,7 +721,8 @@ function compute(a){
   // timing
   let initialQI=null,renewalDate=null,renewalQI=null;
   if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad)){initialQI=qIndexFromYM(ad.getFullYear(),ad.getMonth());if(term>0){renewalDate=addMonths(ad,term);renewalQI=qIndexFromYM(renewalDate.getFullYear(),renewalDate.getMonth());}}}
-  return {term,rmr:mrr,mrr,acv,tcv,months,commissionableValue,basis:CONFIG.basis,
+  return {term,rmr:mrr,mrr,acv,tcv,months,commissionableValue,basis:cfg.basis,
+          planVersion:cfg.planVersion,minMargin:cfg.minMargin,targetMargin:cfg.targetMargin,
           laborHours,laborCost,materialCost,monitoringCost,softwareCost,subCost,otherCost,directCosts,
           grossProfit,grossMargin,laborPctRevenue,netProfit,
           marginMultiplier:mm.mult,marginLabel:mm.label,marginStatus:mm.status,eligible,
@@ -865,29 +870,42 @@ async function load(){
   const {data,error}=await sb.from('rmr_agreements').select('*').order('activation_date',{ascending:true});
   if(error)throw error;
   AGREEMENTS=(data||[]).filter(a=>!a.deleted_at);
-  await loadPlan();
+  await loadPlans();
   await loadRenewals();
   await loadUsers();
   render();
 }
 let KNOWN_USERS=[];
 async function loadUsers(){
-  let emails=[];
-  try{ const {data,error}=await sb.from('rmr_users').select('email'); if(!error&&data) emails=data.map(u=>u.email); }catch(e){}
-  const set=new Set(emails);
+  let users=[];
+  // try with plan_id; if that column isn't migrated yet, fall back to email only
+  try{ const {data,error}=await sb.from('rmr_users').select('email,plan_id'); if(error)throw error; users=data||[]; }
+  catch(e){ try{ const {data}=await sb.from('rmr_users').select('email'); users=data||[]; }catch(_){ users=[]; } }
+  USER_PLAN={};
+  const set=new Set();
+  users.forEach(u=>{ if(u&&u.email){ set.add(u.email); if(u.plan_id!=null&&u.plan_id!=='') USER_PLAN[String(u.email).toLowerCase()]=u.plan_id; } });
   AGREEMENTS.forEach(a=>{ if(a.owner_email) set.add(a.owner_email); });
   if(CURRENT_EMAIL) set.add(CURRENT_EMAIL);
   KNOWN_USERS=[...set].filter(Boolean).sort();
 }
 let ACTIVE_PLAN_ID=null;
-function normalizeConfig(j){ if(j.targetMargin==null)j.targetMargin=0.50; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='2026 v1.0'; if(!j.basis)j.basis='TCV'; if(!j.autoRenewalPct)j.autoRenewalPct={12:0.02,24:0.025}; return j; }
-async function loadPlan(){   // shared commission plan from Supabase (§6.9); falls back to local CONFIG if table absent
+function normalizeConfig(j){ j=j||{}; if(j.targetMargin==null)j.targetMargin=0.50; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='2026 v1.0'; if(!j.basis)j.basis='TCV'; if(!j.autoRenewalPct)j.autoRenewalPct={12:0.02,24:0.025}; return j; }
+async function loadPlans(){   // load EVERY saved plan; pick a default for the editor + fallback. Graceful if table absent.
   try{
-    const {data,error}=await sb.from('rmr_commission_plans').select('*').eq('status','active').order('modified_at',{ascending:false}).limit(1);
+    const {data,error}=await sb.from('rmr_commission_plans').select('*').order('modified_at',{ascending:false});
     if(error)throw error;
-    if(data&&data.length&&data[0].config){ CONFIG=normalizeConfig(data[0].config); ACTIVE_PLAN_ID=data[0].id; saveConfig(); }
-    else { await savePlan(); }   // no active plan row yet → seed it from the current (local/default) CONFIG
-  }catch(e){ /* table not migrated yet or offline → keep the local CONFIG */ }
+    PLANS=(data||[]).filter(p=>p&&p.config).map(p=>({...p,config:normalizeConfig(p.config)}));
+    if(PLANS.length){
+      const def=PLANS.find(p=>p.is_default)||PLANS.find(p=>p.status==='active')||PLANS[0];
+      CONFIG=normalizeConfig(JSON.parse(JSON.stringify(def.config)));
+      ACTIVE_PLAN_ID=def.id; EDIT_PLAN_ID=def.id; saveConfig();
+    } else {
+      await savePlan();     // no plan rows yet → seed one from the current (local/default) CONFIG, then re-read
+      try{ const {data:d2}=await sb.from('rmr_commission_plans').select('*').order('modified_at',{ascending:false});
+        PLANS=(d2||[]).filter(p=>p&&p.config).map(p=>({...p,config:normalizeConfig(p.config)}));
+        if(PLANS.length){ EDIT_PLAN_ID=PLANS[0].id; ACTIVE_PLAN_ID=PLANS[0].id; } }catch(_){}
+    }
+  }catch(e){ /* table not migrated yet or offline → keep the local CONFIG; PLANS stays [] so resolvePlan falls back to CONFIG */ }
 }
 async function savePlan(){   // returns true if persisted to Supabase, false if it fell back to local only
   try{
@@ -896,6 +914,21 @@ async function savePlan(){   // returns true if persisted to Supabase, false if 
     else { const {data,error}=await sb.from('rmr_commission_plans').insert({...row,created_at:new Date().toISOString()}).select('id'); if(error)throw error; if(data&&data[0])ACTIVE_PLAN_ID=data[0].id; }
     return true;
   }catch(e){ return false; }
+}
+// Create or update a specific plan row (used by the Admin plan picker). Optionally mark it the default.
+async function persistPlan(cfg,id,makeDefault){
+  const base={plan_name:cfg.planVersion,version:cfg.planVersion,basis:cfg.basis,config:cfg,status:'active',modified_at:new Date().toISOString()};
+  try{
+    if(id){ const {error}=await sb.from('rmr_commission_plans').update(base).eq('id',id); if(error)throw error; }
+    else { const {data,error}=await sb.from('rmr_commission_plans').insert({...base,created_at:new Date().toISOString()}).select('id'); if(error)throw error; if(data&&data[0])id=data[0].id; }
+    if(makeDefault&&id!=null){ try{ await sb.from('rmr_commission_plans').update({is_default:false}).neq('id',id); await sb.from('rmr_commission_plans').update({is_default:true}).eq('id',id); }catch(_){ /* is_default not migrated */ } }
+    await loadPlans();
+    return {ok:true,id};
+  }catch(e){ return {ok:false,err:e.message||'save failed'}; }
+}
+async function deletePlanRow(id){
+  try{ const {error}=await sb.from('rmr_commission_plans').delete().eq('id',id); if(error)throw error; await loadPlans(); return {ok:true}; }
+  catch(e){ return {ok:false,err:e.message||'delete failed'}; }
 }
 async function loadRenewals(){
   // graceful: if the Phase 2 table isn't created yet, the app still works
@@ -999,7 +1032,7 @@ function renderScopeBar(){
     `<span class="scopecount">${n} agreement${n===1?'':'s'}</span>`;
   $('scopeSel').onchange=function(){ USER_FILTER=(this.value==='__all')?null:[this.value]; render(); };
 }
-function render(){ renderScopeBar(); if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='forecast')renderForecast(); if(view==='history')renderHistory(); if(view==='reports')renderReports(); if(view==='admin')renderAdmin(); renderLegend(); }
+function render(){ renderScopeBar(); if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='forecast')renderForecast(); if(view==='history')renderHistory(); if(view==='reports')renderReports(); if(view==='admin')renderAdmin(); renderLegend(); if($('guideScrim')&&$('guideScrim').classList.contains('show'))renderGuide(); }
 function renderQuarter(){
   buildQuarterOptions();$('qSelect').value=selQI;
   $('qCtx').textContent=selQI===CUR_QI?'Current quarter':(selQI<CUR_QI?'Past quarter':'Upcoming quarter');
@@ -1071,10 +1104,11 @@ function renderAgreements(){
   $('agRmrTotal').textContent=fmt(totalRMR);
   $('agCount').textContent=`${list.length} of ${_sa.length}`;
   if(!list.length){$('agTableWrap').innerHTML=`<div class="empty"><b>No agreements ${agFilter==='all'?'yet':'activated in '+qLabel(agFilter)}</b>${agFilter==='all'?'Add your first RMR agreement to start tracking maturity.':'Try a different quarter or All time.'}</div>`;return;}
+  const showOwner=canViewAll() && !(USER_FILTER&&USER_FILTER.length===1);
   const rows=list.map(a=>{
     const c=compute(a);
     const termTxt=(+a.contract_term===0)?'M2M':`${a.contract_term}mo`;
-    const elig=c.grossMargin!=null&&c.grossMargin<0.45;
+    const elig=c.grossMargin!=null&&c.grossMargin<(c.minMargin||0.45);
     const accel=c.marginMultiplier>1;
     const mPct=c.grossMargin==null?'—':`${Math.round(c.grossMargin*1000)/10}%`;
     const mCell=c.grossMargin==null?'<span style="color:var(--none)">—</span>'
@@ -1086,7 +1120,7 @@ function renderAgreements(){
       :(a.renewed?'<span class="chip c-paid" style="font-size:10px">renewed</span>':'<span class="chip c-maturing" style="font-size:10px">manual</span>')):'';
     return `<tr>
       <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
-      <td>${esc(a.customer_name||'—')}${(a.customer_number||a.site_number)?`<div style="font-size:10px;color:var(--muted)">${a.customer_number?'Cust #'+esc(a.customer_number):''}${a.customer_number&&a.site_number?' · ':''}${a.site_number?'Site #'+esc(a.site_number):''}</div>`:''}</td>
+      <td>${esc(a.customer_name||'—')}${(a.customer_number||a.site_number)?`<div style="font-size:10px;color:var(--muted)">${a.customer_number?'Cust #'+esc(a.customer_number):''}${a.customer_number&&a.site_number?' · ':''}${a.site_number?'Site #'+esc(a.site_number):''}</div>`:''}${showOwner?`<div style="font-size:10px;color:var(--orange);font-weight:600;margin-top:2px">${esc(a.owner_email||'(unassigned)')}<span style="color:var(--muted);font-weight:500"> · plan ${esc(c.planVersion||'—')}</span></div>`:''}</td>
       <td class="mono">${fmt(c.mrr)}${c.scheduled?'<div style="font-size:10px;color:var(--orange);font-weight:600;letter-spacing:.03em">SCHEDULED</div>':''}</td>
       <td>${termTxt}</td>
       <td>${mCell}</td>
@@ -1139,7 +1173,7 @@ function renewStatus(days){
 function autoStatusLabel(x){           // §10 auto-renewal status options
   const c=x.c,a=x.a;
   if(a.renewal_paid) return 'Auto-Renewal Commission Paid';
-  if(!c.eligible) return (c.grossMargin!=null && c.grossMargin<(CONFIG.minMargin||0.45)) ? 'Management Approval Required' : 'Auto-Renewal Commission Not Eligible';
+  if(!c.eligible) return (c.grossMargin!=null && c.grossMargin<(c.minMargin||0.45)) ? 'Management Approval Required' : 'Auto-Renewal Commission Not Eligible';
   if(x.days!=null && x.days<0) return 'Auto-Renewal Commission Pending';
   if(x.days!=null && x.days<=90) return 'Auto-Renewal Eligible';
   return 'Pending Auto-Renewal';
@@ -1291,7 +1325,7 @@ function renderReports(){
   CONFIG.marginTiers.forEach(t=>tiers[t.status||t.label]=0);
   ags.forEach(a=>{const c=compute(a);
     totMRR+=c.mrr; sumPct+=c.newPct;
-    if(c.grossMargin!=null){sumMargin+=c.grossMargin;marginN++; if(c.grossMargin<CONFIG.targetMargin)belowTarget++; tiers[c.marginStatus]=(tiers[c.marginStatus]||0)+1;}
+    if(c.grossMargin!=null){sumMargin+=c.grossMargin;marginN++; if(c.grossMargin<c.targetMargin)belowTarget++; tiers[c.marginStatus]=(tiers[c.marginStatus]||0)+1;}
     const tk=c.term>0?c.term+'mo':'M2M'; byTerm[tk]=(byTerm[tk]||0)+c.mrr;
     if(c.initialQI!=null&&c.initialCommission>0) byQ[c.initialQI]=(byQ[c.initialQI]||0)+(a.paid_initial&&a.initial_snapshot?+a.initial_snapshot.amount:c.initialCommission);
     if(c.renewalQI!=null&&c.renewalCommission>0&&(a.autorenew||a.renewed||a.renewal_paid)) byQ[c.renewalQI]=(byQ[c.renewalQI]||0)+(a.renewal_paid&&a.renewal_snapshot?+a.renewal_snapshot.amount:c.renewalCommission);
@@ -1355,7 +1389,7 @@ function historyLedger(){
         date:s&&s.paid_date?s.paid_date:a.activation_date,
         term:s?s.term:c.term, commissionable:(s&&s.commissionable!=null)?+s.commissionable:c.commissionableValue,
         margin:s?s.margin:c.grossMargin, rate:s?s.rate:c.newPct, mult:s?s.multiplier:c.marginMultiplier,
-        amount:s?+s.amount:c.initialCommission, plan:s?s.plan_version:CONFIG.planVersion});
+        amount:s?+s.amount:c.initialCommission, plan:s?s.plan_version:c.planVersion});
     }
     // Renewal event (term agreements with a renewal rate)
     if(c.term>0 && c.renewMult>0 && (c.renewalCommission>0 || a.renewal_paid)){
@@ -1365,7 +1399,7 @@ function historyLedger(){
         date:s&&s.paid_date?s.paid_date:(c.renewalDate?c.renewalDate.toISOString().slice(0,10):null),
         term:s?s.term:c.term, commissionable:(s&&s.commissionable!=null)?+s.commissionable:c.commissionableValue,
         margin:s?s.margin:c.grossMargin, rate:s?s.rate:c.renewalPct, mult:s?s.multiplier:c.marginMultiplier,
-        amount:s?+s.amount:c.renewalCommission, plan:s?s.plan_version:CONFIG.planVersion});
+        amount:s?+s.amount:c.renewalCommission, plan:s?s.plan_version:c.planVersion});
     }
   });
   rows.forEach(r=>{ r.status = r.paid?'Paid' : (r.mult===0?'Not eligible' : (r.pending?'Forecast':'Pending')); });
@@ -1422,7 +1456,9 @@ function renderAdmin(){
     </tr>`).join('');
   $('adminWrap').innerHTML=`
     <div class="admin-grid">
-      <div class="panel"><div class="panel-head"><h2>Plan &amp; basis</h2></div><div class="admin-body">
+      <div class="panel"><div class="panel-head"><h2>Plan &amp; basis</h2>${(()=>{const d=PLANS.find(p=>String(p.id)===String(EDIT_PLAN_ID));return d&&d.is_default?'<span class="qctx" style="color:var(--payable);font-weight:700">default plan</span>':'';})()}</div><div class="admin-body">
+        ${PLANS.length?`<label class="cfg-lbl">Saved plan <span style="color:var(--none)">(pick one to edit, or create a new one)</span></label>
+        <select class="cfg-in wide" id="planPicker">${PLANS.map(p=>`<option value="${esc(String(p.id))}" ${String(p.id)===String(EDIT_PLAN_ID)?'selected':''}>${esc(p.plan_name||p.version||'plan')}${p.is_default?' — default':''}</option>`).join('')}<option value="__new">+ New plan…</option></select>`:''}
         <label class="cfg-lbl">Plan name / version <span style="color:var(--none)">(stamped on every paid snapshot)</span></label>
         <input class="cfg-in wide" id="cfg_plan" value="${esc(c.planVersion||'')}">
         <label class="cfg-lbl">Commission basis</label>
@@ -1451,20 +1487,44 @@ function renderAdmin(){
     </div>
     <div class="admin-actions">
       <button class="btn-primary" id="cfgSave">Save plan</button>
+      <button class="iconbtn" id="cfgNew">+ New plan</button>
+      <button class="iconbtn" id="cfgDefault">Set as default</button>
+      ${PLANS.length>1?`<button class="iconbtn" id="cfgDelete" style="color:var(--held)">Delete plan</button>`:''}
       <button class="iconbtn" id="cfgReset">Reset to PRD defaults</button>
       <button class="iconbtn" id="cfgExport">Export JSON</button>
       <button class="iconbtn" id="cfgImport">Import JSON</button>
       <input type="file" id="cfgFile" accept="application/json" style="display:none">
       <span id="cfgMsg" style="font-size:12px;color:var(--muted)"></span>
     </div>
-    ${can('editConfig')?`<div class="panel"><div class="panel-head"><h2>User permissions</h2><span class="qctx">roles for employees who sign in</span></div><div id="usersWrap"><div class="admin-body" style="color:var(--muted);font-size:13px">Loading…</div></div></div>`:''}
+    <div style="font-size:12px;color:var(--muted);margin:-12px 0 20px;line-height:1.5">Assign a plan to each rep in <b>User permissions</b> below. Reps with no plan assigned use the <b>default</b> plan. Editing a plan reprices every <b>unpaid</b> commission for the reps on it — already-paid commissions stay frozen at their original amounts.</div>
+    ${can('editConfig')?`<div class="panel"><div class="panel-head"><h2>User permissions</h2><span class="qctx">roles &amp; commission plan per employee</span></div><div id="usersWrap"><div class="admin-body" style="color:var(--muted);font-size:13px">Loading…</div></div></div>`:''}
     ${can('viewAudit')?`<div class="panel"><div class="panel-head"><h2>Audit log</h2><span class="qctx">immutable · most recent first</span></div><div id="auditWrap"><div class="admin-body" style="color:var(--muted);font-size:13px">Loading…</div></div></div>`:''}`;
   $('cfgSave').onclick=saveAdmin;
-  $('cfgReset').onclick=()=>{ if(confirm('Reset the commission plan to PRD defaults? This affects all unpaid calculations.')){CONFIG=JSON.parse(JSON.stringify(DEFAULT_CONFIG));saveConfig();savePlan();toast('Reset to defaults');renderAdmin();} };
+  if($('planPicker')) $('planPicker').onchange=function(){
+    if(this.value==='__new'){ const fresh=JSON.parse(JSON.stringify(DEFAULT_CONFIG)); fresh.planVersion='New plan'; CONFIG=fresh; EDIT_PLAN_ID=null; saveConfig(); renderAdmin(); $('cfg_plan').focus(); $('cfg_plan').select(); return; }
+    const p=PLANS.find(pp=>String(pp.id)===this.value); if(p){ CONFIG=normalizeConfig(JSON.parse(JSON.stringify(p.config))); EDIT_PLAN_ID=p.id; saveConfig(); renderAdmin(); }
+  };
+  $('cfgNew').onclick=()=>{ const fresh=JSON.parse(JSON.stringify(DEFAULT_CONFIG)); fresh.planVersion='New plan'; CONFIG=fresh; EDIT_PLAN_ID=null; saveConfig(); renderAdmin(); $('cfg_plan').focus(); $('cfg_plan').select(); };
+  $('cfgDefault').onclick=async()=>{
+    if(EDIT_PLAN_ID==null){ toast('Save this plan first, then set it as default'); return; }
+    $('cfgMsg').style.color='var(--muted)';$('cfgMsg').textContent='Setting default…';
+    const r=await persistPlan(CONFIG,EDIT_PLAN_ID,true);
+    if(r.ok){ audit('Default commission plan set','Admin',null,null,{planVersion:CONFIG.planVersion}); toast('Default plan updated'); renderAdmin(); render(); }
+    else { $('cfgMsg').style.color='var(--held)'; $('cfgMsg').textContent=r.err||'Could not set default (run migration_v9).'; }
+  };
+  if($('cfgDelete')) $('cfgDelete').onclick=async()=>{
+    if(EDIT_PLAN_ID==null){ toast('Nothing to delete'); return; }
+    const assigned=Object.values(USER_PLAN).filter(pid=>String(pid)===String(EDIT_PLAN_ID)).length;
+    if(!confirm(`Delete plan "${CONFIG.planVersion}"?${assigned?` ${assigned} rep(s) are assigned to it and will fall back to the default plan.`:''} Paid commissions already frozen under it are unaffected.`)) return;
+    const r=await deletePlanRow(EDIT_PLAN_ID);
+    if(r.ok){ audit('Commission plan deleted','Admin',null,{planVersion:CONFIG.planVersion},null); EDIT_PLAN_ID=null; toast('Plan deleted'); renderAdmin(); render(); }
+    else toast(r.err||'Delete failed');
+  };
+  $('cfgReset').onclick=()=>{ if(confirm('Reset THIS plan to PRD defaults? This affects all unpaid calculations for reps on this plan.')){const keep=CONFIG.planVersion;CONFIG=JSON.parse(JSON.stringify(DEFAULT_CONFIG));CONFIG.planVersion=keep;saveConfig();renderAdmin();toast('Reset to defaults — Save plan to persist');} };
   $('cfgExport').onclick=()=>{ const blob=new Blob([JSON.stringify(CONFIG,null,2)],{type:'application/json'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=`commission-plan-${String(CONFIG.planVersion||'plan').replace(/[^a-z0-9]+/gi,'-')}.json`; a.click(); URL.revokeObjectURL(u); };
   $('cfgImport').onclick=()=>$('cfgFile').click();
-  $('cfgFile').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ try{ const j=JSON.parse(r.result); if(!j.newPct||!j.marginTiers)throw 0; CONFIG=normalizeConfig(j); saveConfig(); savePlan(); toast('Plan imported'); renderAdmin(); }catch(err){ toast('Invalid plan file'); } }; r.readAsText(f); };
-  if(!can('editConfig')){ ['cfgSave','cfgReset','cfgImport'].forEach(id=>{const b=$(id); if(b){b.disabled=true;b.style.opacity=.5;b.title='Administrator only';}}); $('cfgMsg').textContent='Read-only — your role cannot modify the plan.'; }
+  $('cfgFile').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ try{ const j=JSON.parse(r.result); if(!j.newPct||!j.marginTiers)throw 0; CONFIG=normalizeConfig(j); saveConfig(); toast('Plan loaded into editor — review, then Save plan'); renderAdmin(); }catch(err){ toast('Invalid plan file'); } }; r.readAsText(f); };
+  if(!can('editConfig')){ ['cfgSave','cfgNew','cfgDefault','cfgDelete','cfgReset','cfgImport'].forEach(id=>{const b=$(id); if(b){b.disabled=true;b.style.opacity=.5;b.title='Administrator only';}}); if($('planPicker'))$('planPicker').disabled=true; $('cfgMsg').textContent='Read-only — your role cannot modify the plan.'; }
   if(can('viewAudit')) renderAudit();
   if(can('editConfig')) renderUsers();
 }
@@ -1475,29 +1535,36 @@ async function renderUsers(){
   try{ const {data,error}=await sb.from('rmr_users').select('*').order('email'); if(error)throw error; rows=data||[]; }
   catch(e){ w.innerHTML=`<div class="admin-body" style="color:var(--muted);font-size:13px">Run <b>migration_v7_security.sql</b> in Supabase to enable in-app role management.</div>`; return; }
   const opt=(r,sel)=>`<option ${r===sel?'selected':''}>${r}</option>`;
+  const planOpts=(sel)=>`<option value="">Default plan</option>`+PLANS.map(p=>`<option value="${esc(String(p.id))}" ${String(p.id)===String(sel)?'selected':''}>${esc(p.plan_name||p.version||'plan')}${p.is_default?' (default)':''}</option>`).join('');
+  const planCell=(u)=>PLANS.length?`<td><select class="cfg-in wide" style="width:200px" data-plan-email="${esc(u.email)}">${planOpts(u.plan_id)}</select></td>`:'<td><span class="qctx">—</span></td>';
   const body=rows.map(u=>{const self=(u.email||'').toLowerCase()===(CURRENT_EMAIL||'').toLowerCase();
     return `<tr>
       <td>${esc(u.email)}${self?' <span class="qctx">(you)</span>':''}</td>
-      <td><select class="cfg-in wide" style="width:190px" data-role-email="${esc(u.email)}">${ROLE_LIST.map(r=>opt(r,u.role)).join('')}</select></td>
+      <td><select class="cfg-in wide" style="width:180px" data-role-email="${esc(u.email)}">${ROLE_LIST.map(r=>opt(r,u.role)).join('')}</select></td>
+      ${planCell(u)}
       <td>${self?'':`<button class="iconbtn" data-del-user="${esc(u.email)}">Remove</button>`}</td>
     </tr>`;}).join('');
   w.innerHTML=`<div class="admin-body">
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
       <input id="nuEmail" class="cfg-in wide" placeholder="employee@point1.com" style="width:240px">
-      <select id="nuRole" class="cfg-in wide" style="width:190px">${ROLE_LIST.map(r=>opt(r,'Sales Representative')).join('')}</select>
-      <button class="btn-primary" id="nuAdd">Add / update role</button>
+      <select id="nuRole" class="cfg-in wide" style="width:180px">${ROLE_LIST.map(r=>opt(r,'Sales Representative')).join('')}</select>
+      ${PLANS.length?`<select id="nuPlan" class="cfg-in wide" style="width:200px">${planOpts('')}</select>`:''}
+      <button class="btn-primary" id="nuAdd">Add / update</button>
     </div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">
-      This sets a person's <b>role</b>. Their actual <b>login</b> is created in Supabase ▸ Authentication ▸ Users.
-      Anyone who can sign in but isn't listed here defaults to <b>Sales Representative</b>.
+      Sets a person's <b>role</b> and the <b>commission plan</b> their agreements calculate under. Their <b>login</b> is created in Supabase ▸ Authentication ▸ Users.
+      Anyone who can sign in but isn't listed here defaults to <b>Sales Representative</b> on the <b>default plan</b>.
     </div>
-    <table class="cfg-table"><thead><tr><th>Email</th><th>Role</th><th></th></tr></thead><tbody>${body||'<tr><td colspan="3" style="color:var(--muted)">No roles set yet — you are admin by default.</td></tr>'}</tbody></table>
+    <table class="cfg-table"><thead><tr><th>Email</th><th>Role</th>${PLANS.length?'<th>Commission plan</th>':''}<th></th></tr></thead><tbody>${body||`<tr><td colspan="${PLANS.length?4:3}" style="color:var(--muted)">No roles set yet — you are admin by default.</td></tr>`}</tbody></table>
   </div>`;
   $('nuAdd').onclick=async()=>{
     const em=($('nuEmail').value||'').trim().toLowerCase(), role=$('nuRole').value;
     if(!/^.+@.+\..+$/.test(em)){ toast('Enter a valid email'); return; }
-    try{ const {error}=await sb.from('rmr_users').upsert({email:em,role},{onConflict:'email'}); if(error)throw error;
-      audit('User role set','Admin',em,null,{email:em,role}); toast('Saved '+em+' → '+role); $('nuEmail').value=''; renderUsers(); }
+    const rec={email:em,role}; const pv=$('nuPlan')?$('nuPlan').value:''; if($('nuPlan')) rec.plan_id=pv||null;
+    try{ let {error}=await sb.from('rmr_users').upsert(rec,{onConflict:'email'});
+      if(error&&/plan_id|column/i.test(error.message||'')){ ({error}=await sb.from('rmr_users').upsert({email:em,role},{onConflict:'email'})); if(!error)toast('Role saved — run migration_v9 to enable per-user plans'); }
+      if(error)throw error;
+      audit('User role set','Admin',em,null,rec); toast('Saved '+em); $('nuEmail').value=''; await loadUsers(); renderUsers(); render(); }
     catch(e){ toast(e.message||'Failed to save'); }
   };
   w.querySelectorAll('[data-role-email]').forEach(s=>s.onchange=async()=>{
@@ -1506,12 +1573,20 @@ async function renderUsers(){
       audit('User role changed','Admin',em,null,{email:em,role:s.value}); toast('Role updated'); }
     catch(e){ toast(e.message||'Failed'); }
   });
+  w.querySelectorAll('[data-plan-email]').forEach(s=>s.onchange=async()=>{
+    const em=s.dataset.planEmail, val=s.value||null;
+    try{ const {error}=await sb.from('rmr_users').update({plan_id:val}).eq('email',em); if(error)throw error;
+      USER_PLAN[(em||'').toLowerCase()]=val||undefined; if(!val) delete USER_PLAN[(em||'').toLowerCase()];
+      const pn=val?((PLANS.find(p=>String(p.id)===String(val))||{}).plan_name||'plan'):'Default plan';
+      audit('User plan assigned','Admin',em,null,{email:em,plan_id:val,plan:pn}); toast(em+' → '+pn); render(); }
+    catch(e){ toast(/plan_id|column/i.test(e.message||'')?'Run migration_v9 to enable per-user plans':(e.message||'Failed')); }
+  });
   w.querySelectorAll('[data-del-user]').forEach(b=>b.onclick=async()=>{
     const em=b.dataset.delUser;
     if((em||'').toLowerCase()===(CURRENT_EMAIL||'').toLowerCase()){ toast("You can't remove your own access"); return; }
-    if(!confirm(`Remove ${em}? They keep their Supabase login but revert to the default Sales Representative role.`)) return;
+    if(!confirm(`Remove ${em}? They keep their Supabase login but revert to the default Sales Representative role on the default plan.`)) return;
     try{ const {error}=await sb.from('rmr_users').delete().eq('email',em); if(error)throw error;
-      audit('User role removed','Admin',em,null,null); toast('Removed'); renderUsers(); }
+      audit('User role removed','Admin',em,null,null); toast('Removed'); await loadUsers(); renderUsers(); render(); }
     catch(e){ toast(e.message||'Failed'); }
   });
 }
@@ -1553,18 +1628,26 @@ function saveAdmin(){
   tiers.forEach(t=>{ if(isNaN(t.min)||t.min<0||t.min>1)errs.push('A tier margin is out of range.'); if(isNaN(t.mult)||t.mult<0)errs.push('A tier multiplier is invalid.'); });
   if(errs.length){ msg.style.color='var(--held)'; msg.textContent=errs[0]; return; }
   tiers.sort((a,b)=>b.min-a.min);
-  if(!confirm('Save changes to the active commission plan? This applies to all unpaid calculations.')) return;
+  const isNew=(EDIT_PLAN_ID==null);
+  const assigned=Object.values(USER_PLAN).filter(pid=>String(pid)===String(EDIT_PLAN_ID)).length;
+  const who=isNew?'a new plan':(assigned?`"${plan}" (${assigned} rep${assigned===1?'':'s'} assigned)`:`"${plan}"`);
+  if(!confirm(`Save ${who}? This reprices every UNPAID commission for reps on this plan. Already-paid commissions stay frozen.`)) return;
   const before={planVersion:CONFIG.planVersion,basis:CONFIG.basis,newPct:CONFIG.newPct,renewalPct:CONFIG.renewalPct};
   CONFIG={planVersion:plan,basis,targetMargin:target,minMargin:min,newPct,renewalPct,autoRenewalPct,marginTiers:tiers};
   saveConfig();
   msg.style.color='var(--muted)'; msg.textContent='Saving…';
-  savePlan().then(ok=>{ msg.style.color=ok?'var(--payable)':'var(--orange)'; msg.textContent=ok?'✓ Saved to shared plan — applies to all users & unpaid calculations.':'✓ Saved locally. Run migration_v6 to share across users.'; });
-  audit('Commission plan modified','Admin',null,before,{planVersion:plan,basis,newPct,renewalPct},null);
+  persistPlan(CONFIG,EDIT_PLAN_ID,false).then(r=>{
+    if(r.ok){ EDIT_PLAN_ID=r.id; msg.style.color='var(--payable)'; msg.textContent=isNew?'✓ New plan created — assign it to reps in User permissions.':'✓ Saved — unpaid commissions for this plan have repriced.'; renderAdmin(); render(); }
+    else { msg.style.color='var(--orange)'; msg.textContent=r.err?('Saved locally only — '+r.err):'✓ Saved locally. Run migration to share across users.'; }
+  });
+  audit(isNew?'Commission plan created':'Commission plan modified','Admin',null,before,{planVersion:plan,basis,newPct,renewalPct},null);
   toast('Commission plan saved');
 }
 function renderLegend(){
   const items=[['c-payable','Payable — owed to you'],['c-paid','Paid — collected'],['c-maturing','Manual renewal needed'],['c-held','Urgent — renewal due / overdue']];
-  $('legend').innerHTML=items.map(([c,t])=>`<span class="chip ${c}">${t}</span>`).join('')+`<span class="chip" style="color:var(--muted);background:#f1f1f1">Plan ${esc(CONFIG.planVersion)} · ${CONFIG.basis} basis · margin-multiplied</span>`;
+  const dcfg=defaultPlanConfig();
+  const planTag=PLANS.length>1?`Default plan ${esc(dcfg.planVersion)} · per-rep plans apply`:`Plan ${esc(dcfg.planVersion)} · ${dcfg.basis} basis · margin-multiplied`;
+  $('legend').innerHTML=items.map(([c,t])=>`<span class="chip ${c}">${t}</span>`).join('')+`<span class="chip" style="color:var(--muted);background:#f1f1f1">${planTag}</span>`;
 }
 
 /* ---- modal ---- */
@@ -1662,12 +1745,13 @@ function readForm(){return{
   material_cost_annual:+$('f_mat').value||0,monitoring_cost_annual:+$('f_mon').value||0,
   software_cost_annual:+$('f_soft').value||0,subcontractor_annual_cost:+$('f_sub').value||0,other_direct_annual:+$('f_other').value||0,
   target_margin:($('f_target').value.trim()===''?null:(+$('f_target').value/100)),
+  owner_email:(canViewAll()&&$('ownerFld')&&$('ownerFld').style.display!=='none'&&$('f_owner').value)?$('f_owner').value:(editingId?((AGREEMENTS.find(a=>a.id===editingId)||{}).owner_email||CURRENT_EMAIL||null):(CURRENT_EMAIL||null)),
   autorenew:$('f_auto').checked,notes:$('f_notes').value.trim()};}
 function updatePreview(){
   const row=readForm();const c=compute(row);
   const gm=c.grossMargin;
   const mPct=gm==null?'—':`${Math.round(gm*1000)/10}%`;
-  const target=CONFIG.targetMargin||0.50,minM=CONFIG.minMargin||0.45;
+  const target=c.targetMargin||0.50,minM=c.minMargin||0.45;
   const elig=gm!=null&&gm<minM;
   // §4.11 color indicator
   let mColor='var(--muted)',mDot='⚪';
@@ -1680,7 +1764,7 @@ function updatePreview(){
   let alert='';
   if(gm!=null&&gm<minM) alert=`<div style="grid-column:1/-1;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:7px 10px;font-size:12px;color:#9a2a2a"><b>⚠ Does not meet minimum profitability (${Math.round(minM*100)}%).</b> Increase recurring revenue or reduce direct costs. Management approval required to pay.</div>`;
   else if(gm!=null&&gm<target) alert=`<div style="grid-column:1/-1;background:#fff4e8;border:1px solid #f3d4ad;border-radius:8px;padding:7px 10px;font-size:12px;color:#8a5a17">Below the ${Math.round(target*100)}% target — commission is reduced. Consider raising RMR or trimming costs.</div>`;
-  $('mPreview').innerHTML=`<h4>Live calculation <span style="font-weight:500;color:var(--none);font-size:11px">plan ${esc(CONFIG.planVersion)} · ${c.basis} basis</span></h4>
+  $('mPreview').innerHTML=`<h4>Live calculation <span style="font-weight:500;color:var(--none);font-size:11px">plan ${esc(c.planVersion)} · ${c.basis} basis</span></h4>
   <div class="pgrid">
     <div><span>MRR <span style="color:var(--none)">(annual billing ÷ 12)</span></span><b style="font-size:15px">${fmt2(c.mrr)}</b></div>
     <div><span>${c.basis==='ACV'?'ACV (×12)':'TCV (×'+c.months+'mo)'} <span style="color:var(--none)">commissionable</span></span><b style="font-size:15px">${fmt(c.commissionableValue)}</b></div>
@@ -1831,7 +1915,57 @@ $('saveConn').onclick=()=>{
   catch(e){ toast('Could not initialize — check values'); }
 };
 $('signoutBtn').onclick=doSignOut;
-function openGuide(){$('guideScrim').classList.add('show');$('guideScrim').querySelector('.guide-body').scrollTop=0;}
+/* Build the in-app guide from the LOGGED-IN user's assigned plan, so the rates,
+   margin tiers, basis and worked example always match what they actually earn.
+   Re-runs every time the guide opens and live while it's open (see render()). */
+function renderGuide(){
+  if(!$('gdTermBody'))return;
+  const plan=resolvePlan({owner_email:CURRENT_EMAIL});
+  const acv=plan.basis==='ACV';
+  const pc=v=>(v==null)?'n/a':(Math.round(v*10000)/100)+'%';     // 0.055 -> "5.5%"
+  const pn=v=>Math.round(v*10000)/100;                            // 0.60 -> 60
+  // plan tag banner
+  const tag=$('gdPlanTag');
+  if(tag) tag.innerHTML=`Reflecting <b>your</b> plan: <b>${esc(plan.planVersion||'—')}</b> · <b>${acv?'ACV':'TCV'}</b> basis · target margin <b>${pn(plan.targetMargin)}%</b>, floor <b>${pn(plan.minMargin)}%</b>.`;
+  // 1 · deal value
+  const dv=$('gdDealValue');
+  if(dv) dv.innerHTML=acv
+    ? `Your plan uses <b>Annual Contract Value (ACV)</b> — your monthly RMR × 12. A $6,500/mo deal has an ACV of <b>$78,000</b>, no matter the contract length. <span style="color:var(--muted)">(An administrator can switch a plan to Total Contract Value — RMR × the full term — in the Admin tab.)</span>`
+    : `Your plan uses <b>Total Contract Value (TCV)</b> — your monthly RMR × the full length of the contract. A $6,500/mo deal on a 36-month contract has a TCV of <b>$234,000</b>. <span style="color:var(--muted)">(An administrator can switch a plan to Annual Contract Value — RMR × 12 — in the Admin tab.)</span>`;
+  // 2 · term percentage table
+  const terms=[12,24,36,48,60];
+  $('gdTermBody').innerHTML=terms.map(t=>{
+    const auto=(t===12||t===24)?pc(pctFor(plan.autoRenewalPct,t)):'n/a';
+    return `<tr><td>${t} months</td><td><b>${pc(pctFor(plan.newPct,t))}</b></td><td>${pc(pctFor(plan.renewalPct,t))}</td><td>${auto}</td></tr>`;
+  }).join('');
+  // 3 · margin multiplier tiers (descending)
+  const tiers=(plan.marginTiers||[]).slice().sort((a,b)=>b.min-a.min);
+  $('gdTierBody').innerHTML=tiers.map((t,i)=>{
+    const hi=i>0?tiers[i-1].min:null;
+    let range;
+    if(i===0) range=`${pn(t.min)}% and up`;
+    else if(t.mult===0 && t.min===0) range=`Below ${pn(hi)}%`;
+    else range=`${pn(t.min)} – ${(pn(hi)-0.01).toFixed(2)}%`;
+    const mult=(t.mult===0)?'$0':'×'+t.mult;
+    return `<tr><td>${range}</td><td><b>${mult}</b></td><td>${esc(t.status||t.label||'')}</td></tr>`;
+  }).join('');
+  // eligibility callout + inline floor mention
+  const floor=pn(plan.minMargin);
+  const note=$('gdEligNote');
+  if(note) note.innerHTML=`Below ${floor}% margin the deal <b>isn't eligible</b> — it pays <b>$0</b> until a manager approves an exception. <b>Margin affects your pay.</b>`;
+  if($('gdFloorInline')) $('gdFloorInline').textContent=floor+'%';
+  // worked example, computed under THIS plan
+  const base=acv?78000:234000;
+  const r36=pctFor(plan.newPct,36)||0;
+  const top=tiers[0]||{mult:1,min:0};
+  const std=tiers.find(t=>Math.abs(t.mult-1)<1e-9)||tiers.find(t=>t.mult>0&&t.mult<top.mult)||top;
+  const money=n=>'$'+Math.round(n).toLocaleString();
+  const ex=$('gdExample');
+  if(ex) ex.innerHTML=`A <b>$6,500/mo, 36-month</b> deal at <b>${pn(top.min)}%+ margin</b>:<br>`+
+    `${money(base)} (${acv?'ACV':'TCV'}) × ${pc(r36)} (36-mo rate) × ${top.mult} (${pn(top.min)}%+ margin) = <b>${money(base*r36*top.mult)}</b>.<br>`+
+    `The same deal at ${pn(std.min)}% margin would be ×${std.mult} = <b>${money(base*r36*std.mult)}</b>.`;
+}
+function openGuide(){ renderGuide(); $('guideScrim').classList.add('show');$('guideScrim').querySelector('.guide-body').scrollTop=0;}
 $('guideBtn').onclick=openGuide;
 $('guideLink').onclick=openGuide;
 $('guideClose').onclick=()=>$('guideScrim').classList.remove('show');
