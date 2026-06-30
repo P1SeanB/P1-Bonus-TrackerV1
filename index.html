@@ -601,6 +601,7 @@
       <div id="oppErr" style="display:none;margin-top:8px;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#9a2a2a"></div>
     </div>
     <div class="modal-foot">
+      <button class="btn-ghost" id="oppDelete" style="color:var(--held);border-color:#f3c4c4;display:none">Delete opportunity</button>
       <button class="btn-ghost" id="oppLost" style="color:var(--held);border-color:#f3c4c4;display:none">Mark lost</button>
       <div style="display:flex;gap:10px;margin-left:auto">
         <button class="btn-ghost" id="oppCancel">Cancel</button>
@@ -883,7 +884,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-14';
+const APP_VERSION='P1RMR-15';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -897,6 +898,8 @@ const PERMISSIONS={
   viewAudit:['Administrator','Executive'],
   override:['Administrator','Executive','Sales Manager'],
   editAgreements:['Administrator','Executive','Sales Manager'],
+  editOpps:['Administrator','Executive','Sales Manager','Sales Representative'],
+  deleteOpps:['Administrator','Executive','Sales Manager'],
   calculate:['Administrator','Executive','Sales Manager','Sales Representative'],
   export:['Administrator','Executive','Sales Manager','Sales Representative','Read Only']
 };
@@ -934,6 +937,7 @@ function applyPermissions(){
   const at=$('tabAdmin'); if(at) at.style.display=(adm||can('viewAudit'))?'':'none';
   const badge=$('roleBadge'); if(badge){ badge.textContent=CURRENT_ROLE; badge.style.display=CURRENT_ROLE?'inline-block':'none'; }
   const add=$('addBtn'); if(add) add.style.display=can('editAgreements')?'':'none';
+  const oadd=$('oppAddBtn'); if(oadd) oadd.style.display=can('editOpps')?'':'none';
 }
 async function audit(action,module,recordId,oldVal,newVal,reason){
   try{ await sb.from('rmr_audit_log').insert({ts:new Date().toISOString(),user_email:CURRENT_EMAIL,user_role:CURRENT_ROLE,action,module,
@@ -2073,8 +2077,10 @@ async function deleteAttachment(att,containerId,agreementId,editable){
 /* ---- Opportunities (pipeline stubs that graduate into agreements) ---- */
 let editingOppId=null;
 function openOpp(id){
-  if(!can('editAgreements')){ toast('Your role cannot edit opportunities.'); return; }
-  editingOppId=id||null; const a=id?AGREEMENTS.find(x=>x.id===id):null;
+  if(!can('editOpps')){ toast('Your role cannot create or edit opportunities.'); return; }
+  const a0=id?AGREEMENTS.find(x=>x.id===id):null;
+  if(a0 && !canViewAll() && (a0.owner_email||'').toLowerCase()!==(CURRENT_EMAIL||'').toLowerCase()){ toast('You can only open your own opportunities.'); return; }
+  editingOppId=id||null; const a=a0;
   $('oppTitle').textContent=a?`Edit opportunity ${a.opportunity_number||''}`:'New opportunity';
   $('o_num').value=a?(a.opportunity_number||''):nextOppNumber();
   $('o_cust').value=a?(a.customer_name||''):'';
@@ -2090,15 +2096,18 @@ function openOpp(id){
     const listu=[...new Set([...(KNOWN_USERS||[]),cur,CURRENT_EMAIL].filter(Boolean))].sort();
     $('o_owner').innerHTML=listu.map(e=>`<option value="${esc(e)}" ${e===cur?'selected':''}>${esc(e)}</option>`).join('');
   }else{ ownerFld.style.display='none'; }
-  $('oppLost').style.display=(a&&a.stage!=='lost')?'inline-block':'none';
+  $('oppLost').style.display=(a&&a.stage!=='lost'&&can('editOpps'))?'inline-block':'none';
+  $('oppDelete').style.display=(a&&can('deleteOpps'))?'inline-block':'none';
   $('oppErr').style.display='none';
-  renderAttachments('oppFiles', editingOppId, can('editAgreements'));
+  renderAttachments('oppFiles', editingOppId, can('editOpps'));
   $('oppScrim').classList.add('show');
 }
 function closeOpp(){ $('oppScrim').classList.remove('show'); editingOppId=null; }
 function oppMigrationMsg(e){ return /stage|opportunity_number|estimate_ref|est_monthly_rmr|expected_close|lost_reason|column/i.test(e&&e.message||'')?'Run the opportunities migration in Supabase first (it adds the stage / opportunity_number columns).':((e&&e.message)||'Save failed'); }
 async function saveOpp(){
   if(!sb){toast('Sign in first');return;}
+  if(!can('editOpps')){ $('oppErr').textContent='Your role cannot create or edit opportunities.'; $('oppErr').style.display='block'; return; }
+  if(editingOppId && !canViewAll()){ const ex=AGREEMENTS.find(a=>a.id===editingOppId); if(ex && (ex.owner_email||'').toLowerCase()!==(CURRENT_EMAIL||'').toLowerCase()){ $('oppErr').textContent='You can only edit your own opportunities.'; $('oppErr').style.display='block'; return; } }
   const cust=$('o_cust').value.trim();
   if(!cust){ $('oppErr').textContent='Customer / prospect is required.'; $('oppErr').style.display='block'; return; }
   const oppNo=$('o_num').value.trim()||nextOppNumber();
@@ -2117,6 +2126,7 @@ async function saveOpp(){
 }
 async function markLost(id){
   id=id||editingOppId; const a=AGREEMENTS.find(x=>x.id===id); if(!a)return;
+  if(!can('editOpps')||(!canViewAll()&&(a.owner_email||'').toLowerCase()!==(CURRENT_EMAIL||'').toLowerCase())){ toast('You can only update your own opportunities.'); return; }
   const reason=(prompt('Reason this opportunity was lost? (optional)','')||'').trim();
   try{ const {error}=await sb.from('rmr_agreements').update({stage:'lost',lost_reason:reason||null,updated_at:new Date().toISOString()}).eq('id',id); if(error)throw error;
     a.stage='lost'; a.lost_reason=reason||null;
@@ -2126,6 +2136,7 @@ async function markLost(id){
 }
 async function reopenOpp(id){
   const a=AGREEMENTS.find(x=>x.id===id); if(!a)return;
+  if(!can('editOpps')||(!canViewAll()&&(a.owner_email||'').toLowerCase()!==(CURRENT_EMAIL||'').toLowerCase())){ toast('You can only update your own opportunities.'); return; }
   try{ const {error}=await sb.from('rmr_agreements').update({stage:'opportunity',lost_reason:null,updated_at:new Date().toISOString()}).eq('id',id); if(error)throw error;
     a.stage='opportunity'; a.lost_reason=null;
     audit('Opportunity reopened','Opportunities',a.opportunity_number,null,{opportunity:a.opportunity_number},null);
@@ -2133,9 +2144,19 @@ async function reopenOpp(id){
   }catch(e){ toast(oppMigrationMsg(e)); }
 }
 function winOpp(id){
-  if(!can('editAgreements')){ toast('Your role cannot win opportunities.'); return; }
+  if(!can('editAgreements')){ toast('Only a manager, executive, or admin can convert an opportunity into an agreement.'); return; }
   const a=AGREEMENTS.find(x=>x.id===id); if(!a)return;
   closeOpp(); openModal(id,true);
+}
+async function deleteOpp(id){
+  id=id||editingOppId; if(!can('deleteOpps')){ toast('Only a manager, executive, or admin can delete opportunities.'); return; }
+  const a=AGREEMENTS.find(x=>x.id===id); if(!a)return;
+  if(!confirm(`Delete opportunity ${a.opportunity_number||''} (${a.customer_name||'—'})?\n\nIt leaves the pipeline but is retained in the database for history.`)) return;
+  let {error}=await sb.from('rmr_agreements').update({deleted_at:new Date().toISOString()}).eq('id',id);
+  if(error && /deleted_at|column/i.test(error.message||'')){ ({error}=await sb.from('rmr_agreements').delete().eq('id',id)); }
+  if(error){ toast(error.message||'Delete failed'); return; }
+  audit('Opportunity deleted','Opportunities',a.opportunity_number,{customer:a.customer_name,stage:a.stage},null);
+  AGREEMENTS=AGREEMENTS.filter(x=>x.id!==id); closeOpp(); toast('Opportunity deleted'); render();
 }
 function renderOpportunities(){
   const all=scopedOpps();
@@ -2161,9 +2182,11 @@ function renderOpportunities(){
   const ageOf=a=>{const d=a.created_at?new Date(a.created_at):(a.updated_at?new Date(a.updated_at):null); if(!d||isNaN(d))return '—'; return Math.max(0,Math.floor((Date.now()-d)/86400000))+'d';};
   const rows=list.map(a=>{
     const isLost=a.stage==='lost';
-    const acts=can('editAgreements')?(isLost
-        ? `<button class="iconbtn" data-reopen="${a.id}">Reopen</button>`
-        : `<button class="iconbtn" data-oppedit="${a.id}">Edit</button> <button class="paidbtn" data-oppwin="${a.id}">Win</button>`):'';
+    const acts=[];
+    if(can('editOpps')) acts.push(isLost?`<button class="iconbtn" data-reopen="${a.id}">Reopen</button>`:`<button class="iconbtn" data-oppedit="${a.id}">Edit</button>`);
+    if(!isLost && can('editAgreements')) acts.push(`<button class="paidbtn" data-oppwin="${a.id}">Win</button>`);
+    if(can('deleteOpps')) acts.push(`<button class="iconbtn" data-oppdel="${a.id}" style="color:var(--held)">Delete</button>`);
+    const actHtml=acts.join(' ');
     return `<tr${isLost?' style="opacity:.6"':''}>
       <td class="ag-no">${esc(a.opportunity_number||'—')}</td>
       <td>${esc(a.customer_name||'—')}${isLost&&a.lost_reason?`<div style="font-size:10px;color:var(--muted)">${esc(a.lost_reason)}</div>`:''}</td>
@@ -2173,12 +2196,13 @@ function renderOpportunities(){
       <td class="mono" style="color:var(--muted)">${esc(a.estimate_ref||'—')}</td>
       <td class="mono" style="color:var(--muted)">${a.expected_close?esc(String(a.expected_close).slice(0,10)):'—'}</td>
       <td class="mono">${ageOf(a)}</td>
-      <td>${acts}</td>
+      <td>${actHtml}</td>
     </tr>`;}).join('');
   $('oppTableWrap').innerHTML=`<table><thead><tr><th>Opp #</th><th>Customer</th><th>Stage</th>${showOwner?'<th>Owner</th>':''}<th class="num">Est. MRR</th><th>Estimate #</th><th>Exp. close</th><th>Age</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('oppTableWrap').querySelectorAll('[data-oppedit]').forEach(b=>b.onclick=()=>openOpp(b.dataset.oppedit));
   $('oppTableWrap').querySelectorAll('[data-oppwin]').forEach(b=>b.onclick=()=>winOpp(b.dataset.oppwin));
   $('oppTableWrap').querySelectorAll('[data-reopen]').forEach(b=>b.onclick=()=>reopenOpp(b.dataset.reopen));
+  $('oppTableWrap').querySelectorAll('[data-oppdel]').forEach(b=>b.onclick=()=>deleteOpp(b.dataset.oppdel));
 }
 function readForm(){return{
   id:editingId||undefined,agreement_number:$('f_num').value.trim(),customer_name:$('f_cust').value.trim(),customer_number:$('f_custnum').value.trim()||null,site_number:$('f_sitenum').value.trim()||null,
@@ -2441,6 +2465,7 @@ $('rnSchedAdd').onclick=()=>addRnSchedRow(1,'',false);
 $('oppClose').onclick=closeOpp; $('oppCancel').onclick=closeOpp;
 $('oppSave').onclick=saveOpp;
 $('oppLost').onclick=()=>markLost(editingOppId);
+$('oppDelete').onclick=()=>deleteOpp(editingOppId);
 $('oppScrim').onclick=e=>{if(e.target===$('oppScrim'))closeOpp();};
 $('oppAddBtn').onclick=()=>{ if(!sb){toast('Sign in first');return;} openOpp(null); };
 $('oppSearch').addEventListener('input',()=>{if(view==='opportunities')renderOpportunities();});
