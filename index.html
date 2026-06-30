@@ -210,6 +210,19 @@
   .scopecount{font-size:12px;color:var(--muted)}
   .scopechip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:4px 12px;font-size:12px;font-weight:600;color:var(--ink);cursor:pointer}
   .scopechip.on{background:var(--orange);color:#fff;border-color:var(--orange)}
+  .file-block{margin-top:4px}
+  .file-list{display:flex;flex-direction:column;gap:6px}
+  .file-row{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:#fff}
+  .file-row .fr-name{font-size:13px;font-weight:600;color:var(--ink);text-decoration:none;cursor:pointer;word-break:break-word}
+  .file-row .fr-name:hover{text-decoration:underline}
+  .file-row .fr-meta{font-size:11px;color:var(--muted)}
+  .file-chip{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--navy);background:#eef1f6;border-radius:5px;padding:2px 6px;white-space:nowrap}
+  .file-actions{margin-left:auto;display:flex;gap:6px;flex-shrink:0}
+  .file-actions button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 8px;font-size:11px;font-weight:600;color:var(--ink);cursor:pointer}
+  .file-actions button.fr-del{color:var(--held);border-color:#f3c4c4}
+  .file-upload{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
+  .file-upload select,.file-upload input[type=file]{font-size:12.5px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:#fff}
+  .file-hint{color:var(--muted);font-size:12px;padding:6px 0}
 </style>
 </head>
 <body>
@@ -500,6 +513,7 @@
         <div class="fld"><label>Renewal month <span class="hint">quarter the bonus credits to</span></label><input id="f_rencredit" type="month"></div>
         <div class="fld full"><label>Estimate # <span class="hint">SSE quote reference — ties this agreement back to its opportunity</span></label><input id="f_estref" placeholder="e.g. SSE-045-26"></div>
         <div class="fld full"><label>Notes</label><input id="f_notes" placeholder="Optional"></div>
+        <div class="fld full"><div class="fieldset-h" style="margin-top:2px">Files</div><div id="agFiles" class="file-block"></div></div>
         <div class="preview" id="mPreview"></div>
       </div>
     </div>
@@ -582,6 +596,8 @@
         <div class="fld"><label>Expected close <span class="hint">optional</span></label><input id="o_close" type="date"></div>
         <div class="fld full"><label>Notes</label><input id="o_notes" placeholder="Optional"></div>
       </div>
+      <div class="fieldset-h" style="margin-top:14px">Files</div>
+      <div id="oppFiles" class="file-block"></div>
       <div id="oppErr" style="display:none;margin-top:8px;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#9a2a2a"></div>
     </div>
     <div class="modal-foot">
@@ -867,7 +883,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-13';
+const APP_VERSION='P1RMR-14';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1842,7 +1858,9 @@ function openModal(id,promote){
     if(!a.activation_date) $('f_date').value=todayISO();
     if(a.estimate_ref) $('f_estref').value=a.estimate_ref;
   }
-  updatePreview();$('scrim').classList.add('show');
+  updatePreview();
+  renderAttachments('agFiles', editingId, can('editAgreements'));
+  $('scrim').classList.add('show');
 }
 function closeModal(){$('scrim').classList.remove('show');editingId=null;}
 let convertingId=null;
@@ -1973,6 +1991,85 @@ async function revertRenewal(id){
   toast('Renewal reverted — back in Pending Renewals');
   render();
 }
+/* ---- File attachments (Supabase Storage + rmr_attachments metadata) ----
+   Keyed to the agreement row UUID, which is shared by the opportunity and the
+   won agreement — so files carry over on conversion with no migration. */
+const FILE_BUCKET='opportunity-files';
+const FILE_CATEGORIES=['SSE Export','Proposal','Drawing','Specification','Contract','Other'];
+function fmtBytes(n){ n=+n||0; if(!n)return ''; const u=['B','KB','MB','GB']; let i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;} return `${n.toFixed(n<10&&i>0?1:0)} ${u[i]}`; }
+function fileRowHTML(a,editable){
+  const meta=[a.category?`<span class="file-chip">${esc(a.category)}</span>`:'', a.size_bytes?fmtBytes(a.size_bytes):'', a.uploaded_by?esc(a.uploaded_by.split('@')[0]):'', a.created_at?esc(String(a.created_at).slice(0,10)):''].filter(Boolean).join(' · ');
+  return `<div class="file-row">
+    <div style="min-width:0">
+      <a class="fr-name" data-open="${a.id}">${esc(a.file_name||'file')}</a>
+      <div class="fr-meta">${meta}</div>
+    </div>
+    <div class="file-actions">
+      <button data-dl="${a.id}">Download</button>
+      ${editable?`<button class="fr-del" data-del="${a.id}">Delete</button>`:''}
+    </div>
+  </div>`;
+}
+async function renderAttachments(containerId, agreementId, editable){
+  const c=$(containerId); if(!c) return;
+  if(!agreementId){ c.innerHTML=`<div class="file-hint">Save first, then reopen this record to attach files.</div>`; return; }
+  c.innerHTML=`<div class="file-hint">Loading files…</div>`;
+  let rows=[];
+  try{ const {data,error}=await sb.from('rmr_attachments').select('*').eq('agreement_id',agreementId).order('created_at',{ascending:true}); if(error)throw error; rows=data||[]; }
+  catch(e){ c.innerHTML=`<div class="file-hint">${/relation|rmr_attachments|does not exist|column|bucket/i.test(e.message||'')?'Run the file-storage migration in Supabase to enable attachments.':'Could not load files.'}</div>`; return; }
+  const list=rows.length?`<div class="file-list">${rows.map(a=>fileRowHTML(a,editable)).join('')}</div>`:`<div class="file-hint">No files yet.</div>`;
+  const uploader=editable?`<div class="file-upload">
+      <input type="file" id="fu_input_${containerId}" multiple>
+      <select id="fu_cat_${containerId}">${FILE_CATEGORIES.map(c2=>`<option value="${esc(c2)}">${esc(c2)}</option>`).join('')}</select>
+      <button class="btn-primary" id="fu_btn_${containerId}" style="padding:7px 14px;font-size:12.5px">Upload</button>
+    </div>`:'';
+  c.innerHTML=list+uploader;
+  c.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openAttachment(rows.find(r=>r.id===b.dataset.open)));
+  c.querySelectorAll('[data-dl]').forEach(b=>b.onclick=()=>downloadAttachment(rows.find(r=>r.id===b.dataset.dl)));
+  c.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteAttachment(rows.find(r=>r.id===b.dataset.del),containerId,agreementId,editable));
+  if(editable){
+    const btn=$(`fu_btn_${containerId}`), inp=$(`fu_input_${containerId}`), cat=$(`fu_cat_${containerId}`);
+    if(btn) btn.onclick=async()=>{
+      const files=inp&&inp.files?[...inp.files]:[];
+      if(!files.length){ toast('Choose a file first'); return; }
+      btn.disabled=true; const orig=btn.textContent; let ok=0;
+      for(const f of files){ btn.textContent=`Uploading ${ok+1}/${files.length}…`; try{ await uploadAttachment(agreementId,f,cat?cat.value:null); ok++; }catch(e){ toast(`${f.name}: ${/bucket|not found|relation|rmr_attachments/i.test(e.message||'')?'run the file-storage migration first':(e.message||'upload failed')}`); break; } }
+      btn.disabled=false; btn.textContent=orig;
+      if(ok){ toast(`${ok} file${ok>1?'s':''} uploaded`); audit('File uploaded','Files',null,null,{agreement_id:agreementId,count:ok}); }
+      renderAttachments(containerId,agreementId,editable);
+    };
+  }
+}
+async function uploadAttachment(agreementId,file,category){
+  const attId=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():(Date.now()+'-'+Math.random().toString(16).slice(2));
+  const safe=(file.name||'file').replace(/[^\w.\-]+/g,'_').slice(-120);
+  const path=`${agreementId}/${attId}-${safe}`;
+  const up=await sb.storage.from(FILE_BUCKET).upload(path,file,{contentType:file.type||'application/octet-stream',upsert:false});
+  if(up.error) throw up.error;
+  const rec={id:attId,agreement_id:agreementId,file_name:file.name||safe,storage_path:path,mime_type:file.type||null,size_bytes:file.size||null,category:category||null,uploaded_by:CURRENT_EMAIL||null,created_at:new Date().toISOString()};
+  const ins=await sb.from('rmr_attachments').insert(rec);
+  if(ins.error){ try{ await sb.storage.from(FILE_BUCKET).remove([path]); }catch(_){}; throw ins.error; }
+  return rec;
+}
+async function signedUrl(att,forceDownload){
+  const opts=forceDownload?{download:att.file_name||true}:undefined;
+  const {data,error}=await sb.storage.from(FILE_BUCKET).createSignedUrl(att.storage_path,120,opts);
+  if(error){ toast(error.message||'Could not open file'); return null; }
+  return data&&data.signedUrl;
+}
+async function openAttachment(att){ if(!att)return; const u=await signedUrl(att,false); if(u) window.open(u,'_blank','noopener'); }
+async function downloadAttachment(att){ if(!att)return; const u=await signedUrl(att,true); if(u){ const a=document.createElement('a'); a.href=u; a.download=att.file_name||'file'; document.body.appendChild(a); a.click(); a.remove(); } }
+async function deleteAttachment(att,containerId,agreementId,editable){
+  if(!att)return;
+  if(!confirm(`Delete "${att.file_name}"? This permanently removes the file from storage.`)) return;
+  try{ await sb.storage.from(FILE_BUCKET).remove([att.storage_path]); }catch(_){}
+  const del=await sb.from('rmr_attachments').delete().eq('id',att.id);
+  if(del.error){ toast(del.error.message||'Delete failed'); return; }
+  audit('File deleted','Files',att.file_name,null,{file:att.file_name,agreement_id:agreementId});
+  toast('File deleted');
+  renderAttachments(containerId,agreementId,editable);
+}
+
 /* ---- Opportunities (pipeline stubs that graduate into agreements) ---- */
 let editingOppId=null;
 function openOpp(id){
@@ -1995,6 +2092,7 @@ function openOpp(id){
   }else{ ownerFld.style.display='none'; }
   $('oppLost').style.display=(a&&a.stage!=='lost')?'inline-block':'none';
   $('oppErr').style.display='none';
+  renderAttachments('oppFiles', editingOppId, can('editAgreements'));
   $('oppScrim').classList.add('show');
 }
 function closeOpp(){ $('oppScrim').classList.remove('show'); editingOppId=null; }
