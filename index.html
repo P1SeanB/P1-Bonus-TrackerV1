@@ -270,6 +270,7 @@
 
 <nav class="tabs">
   <button class="active" data-view="quarter" id="tabQuarter">Quarter view</button>
+  <button data-view="opportunities" id="tabOpportunities">Opportunities</button>
   <button data-view="agreements" id="tabAgreements">Agreements</button>
   <button data-view="renewals" id="tabRenewals">Pending Renewals</button>
   <button data-view="forecast" id="tabForecast">Bonus Forecast</button>
@@ -299,6 +300,31 @@
     <div style="margin-top:20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
       <div class="legend" id="legend" style="margin:0"></div>
       <button class="guide-link" id="guideLink">What do these mean? →</button>
+    </div>
+  </section>
+
+  <section id="view-opportunities" style="display:none">
+    <div class="qbar" style="flex-wrap:wrap;gap:10px">
+      <div style="font-size:13px;color:var(--muted)">Pipeline of potential deals. Mint an <b style="color:var(--ink)">opportunity #</b> here, quote it in the SSE, then <b style="color:var(--ink)">Win</b> it to graduate it into an agreement that earns commission. Opportunities never affect commission totals until won.</div>
+    </div>
+    <div class="cards" id="oppCards" style="margin-bottom:16px"></div>
+    <div class="panel">
+      <div class="panel-head" style="gap:10px;flex-wrap:wrap">
+        <h2>Opportunities</h2>
+        <div style="display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap">
+          <input id="oppSearch" placeholder="Search customer / #" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px;min-width:170px">
+          <select id="oppFilter" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:13px;background:#fff;font-weight:600;color:var(--ink)">
+            <option value="open">Open (opportunity + quoting)</option>
+            <option value="opportunity">Opportunity</option>
+            <option value="quoting">Quoting</option>
+            <option value="lost">Lost</option>
+            <option value="all">All pipeline</option>
+          </select>
+          <button class="btn-primary" id="oppAddBtn">+ New opportunity</button>
+        </div>
+      </div>
+      <div id="oppCount" class="qctx" style="padding:0 16px"></div>
+      <div id="oppTableWrap"></div>
     </div>
   </section>
 
@@ -419,6 +445,8 @@
   <div class="modal">
     <div class="modal-head"><h3 id="mTitle">New agreement</h3><button class="x" id="mClose">×</button></div>
     <div class="modal-body">
+      <input type="hidden" id="f_stage">
+      <div id="oppLink" style="display:none;margin-bottom:12px;background:#fff3ea;border:1px solid #fbd6b8;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#8a4b1e"></div>
       <div class="grid">
         <div class="fld"><label>Agreement #</label><input id="f_num" placeholder="e.g. 134"></div>
         <div class="fld"><label>Customer</label><input id="f_cust" placeholder="Customer name"></div>
@@ -470,6 +498,7 @@
         <div class="fld full" id="renStatusFld"><label style="color:var(--muted)" id="renStatusTxt">Not yet renewed — use the <b>Renew</b> button on Pending Renewals.</label></div>
         <div class="fld"><label>Renewal date <span class="hint">effective date once renewed</span></label><input id="f_rendate" type="date"></div>
         <div class="fld"><label>Renewal month <span class="hint">quarter the bonus credits to</span></label><input id="f_rencredit" type="month"></div>
+        <div class="fld full"><label>Estimate # <span class="hint">SSE quote reference — ties this agreement back to its opportunity</span></label><input id="f_estref" placeholder="e.g. SSE-045-26"></div>
         <div class="fld full"><label>Notes</label><input id="f_notes" placeholder="Optional"></div>
         <div class="preview" id="mPreview"></div>
       </div>
@@ -534,6 +563,32 @@
       <div style="display:flex;gap:10px;margin-left:auto">
         <button class="btn-ghost" id="rnCancel">Cancel</button>
         <button class="btn-primary" id="rnSave">Confirm renewal</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="oppScrim">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-head"><div><h2 style="margin:0" id="oppTitle">New opportunity</h2><div style="font-size:12px;color:var(--muted);margin-top:2px">A lightweight stub. Fill in the real sold values later when you Win it.</div></div><button class="x" id="oppClose">×</button></div>
+    <div class="modal-body">
+      <div class="grid2">
+        <div class="fld"><label>Opportunity # <span class="hint">auto — editable</span></label><input id="o_num" placeholder="SSE-001-26"></div>
+        <div class="fld" id="oppOwnerFld"><label>Assigned to <span class="hint">owner</span></label><select id="o_owner"></select></div>
+        <div class="fld full"><label>Customer / prospect</label><input id="o_cust" placeholder="Customer name"></div>
+        <div class="fld"><label>Stage</label><select id="o_stage"><option value="opportunity">Opportunity</option><option value="quoting">Quoting</option></select></div>
+        <div class="fld"><label>Estimate # <span class="hint">SSE quote ref</span></label><input id="o_est" placeholder="optional"></div>
+        <div class="fld"><label>Est. monthly RMR <span class="hint">$ / month — pipeline value</span></label><input id="o_rmr" type="number" step="0.01" placeholder="optional"></div>
+        <div class="fld"><label>Expected close <span class="hint">optional</span></label><input id="o_close" type="date"></div>
+        <div class="fld full"><label>Notes</label><input id="o_notes" placeholder="Optional"></div>
+      </div>
+      <div id="oppErr" style="display:none;margin-top:8px;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#9a2a2a"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="oppLost" style="color:var(--held);border-color:#f3c4c4;display:none">Mark lost</button>
+      <div style="display:flex;gap:10px;margin-left:auto">
+        <button class="btn-ghost" id="oppCancel">Cancel</button>
+        <button class="btn-primary" id="oppSave">Save opportunity</button>
       </div>
     </div>
   </div>
@@ -812,7 +867,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-11';
+const APP_VERSION='P1RMR-12';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -833,11 +888,28 @@ function can(fn){ return (PERMISSIONS[fn]||[]).includes(CURRENT_ROLE); }
 let USER_FILTER=null;   // null = all visible; else array of owner keys to include
 function canViewAll(){ return ['Administrator','Executive','Sales Manager'].includes(CURRENT_ROLE); }
 function ownerKey(a){ return (a&&a.owner_email)?a.owner_email:'(unassigned)'; }
-function scopedAgreements(){
-  let list=AGREEMENTS;
+/* ---- Opportunity pipeline: stage lives on the agreement record ----
+   stage: undefined/null/'won'/'active' = a live agreement (counts toward commission);
+          'opportunity'/'quoting' = open pipeline; 'lost' = terminal pipeline. */
+const OPEN_STAGES=['opportunity','quoting'];
+function isLiveAgreement(a){ const s=a&&a.stage; return !s||s==='won'||s==='active'; }
+function isPipeline(a){ const s=a&&a.stage; return s==='opportunity'||s==='quoting'||s==='lost'; }
+function scopeOwner(list){
   if(!canViewAll()){ const me=(CURRENT_EMAIL||'').toLowerCase(); return list.filter(a=>(a.owner_email||'').toLowerCase()===me); }
-  if(USER_FILTER&&USER_FILTER.length) list=list.filter(a=>USER_FILTER.includes(ownerKey(a)));
+  if(USER_FILTER&&USER_FILTER.length) return list.filter(a=>USER_FILTER.includes(ownerKey(a)));
   return list;
+}
+function scopedAgreements(){ return scopeOwner(AGREEMENTS).filter(isLiveAgreement); }
+function scopedOpps(){ return scopeOwner(AGREEMENTS).filter(isPipeline); }
+function pad3(n){return String(n).padStart(3,'0');}
+function yy2(){return String(new Date().getFullYear()).slice(-2);}
+function nextOppNumber(){   // SSE-NNN-YY, sequence runs continuously across all opportunities
+  let max=0; AGREEMENTS.forEach(a=>{const m=String(a.opportunity_number||'').match(/SSE-(\d+)-/i); if(m){const n=+m[1]; if(n>max)max=n;}});
+  return `SSE-${pad3(max+1)}-${yy2()}`;
+}
+function nextAgreementNumber(){   // plain integers, reserved band starting at 200
+  let max=199; AGREEMENTS.forEach(a=>{const s=String(a.agreement_number||'').trim(); if(/^\d+$/.test(s)){const n=+s; if(n>max)max=n;}});
+  return String(max+1);
 }
 function distinctOwners(){ return [...new Set(AGREEMENTS.map(ownerKey))].sort(); }
 function applyPermissions(){
@@ -986,7 +1058,7 @@ async function upsert(row){
   async function go(p){ if(p.id){const {error}=await sb.from('rmr_agreements').update(p).eq('id',p.id);if(error)throw error;} else {const {error}=await sb.from('rmr_agreements').insert(p);if(error)throw error;} }
   try{ await go(payload); }
   catch(e){ // ref columns not migrated yet → retry without them so saving still works
-    if(/customer_number|site_number|owner_email|converted_to_manual|conversion_|renewal_date|renewal_credit_month|prerenewal_state|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,converted_to_manual,conversion_date,conversion_notes,conversion_ref,renewal_date,renewal_credit_month,prerenewal_state,...rest}=payload; await go(rest); }
+    if(/customer_number|site_number|owner_email|converted_to_manual|conversion_|renewal_date|renewal_credit_month|prerenewal_state|stage|opportunity_number|estimate_ref|est_monthly_rmr|expected_close|lost_reason|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,converted_to_manual,conversion_date,conversion_notes,conversion_ref,renewal_date,renewal_credit_month,prerenewal_state,stage,opportunity_number,estimate_ref,est_monthly_rmr,expected_close,lost_reason,...rest}=payload; await go(rest); }
     else throw e;
   }
 }
@@ -1046,9 +1118,9 @@ function buildQuarterOptions(){
 function renderScopeBar(){
   const bar=$('scopeBar'); if(!bar)return;
   if(!canViewAll()){ bar.style.display='none'; return; }
-  // agreements owned per user key — so we can show who currently has 0
+  // agreements owned per user key — live agreements only (pipeline opportunities excluded)
   const counts={};
-  AGREEMENTS.forEach(a=>{ const k=ownerKey(a); counts[k]=(counts[k]||0)+1; });
+  AGREEMENTS.filter(isLiveAgreement).forEach(a=>{ const k=ownerKey(a); counts[k]=(counts[k]||0)+1; });
   // Full picker = every known user (rmr_users table + agreement owners + you),
   // regardless of whether they currently own an agreement. (unassigned) is added
   // only when something is actually unassigned, so you can still isolate those.
@@ -1060,7 +1132,7 @@ function renderScopeBar(){
   if(USER_FILTER){ USER_FILTER=USER_FILTER.filter(o=>list.includes(o)); if(!USER_FILTER.length)USER_FILTER=null; }
   bar.style.display='flex';
   const selected=(USER_FILTER&&USER_FILTER.length===1)?USER_FILTER[0]:'__all';
-  const opts=`<option value="__all">All users (${AGREEMENTS.length})</option>`+
+  const opts=`<option value="__all">All users (${AGREEMENTS.filter(isLiveAgreement).length})</option>`+
     list.map(o=>`<option value="${esc(o)}"${o===selected?' selected':''}>${esc(o)} (${counts[o]||0})</option>`).join('');
   const n=scopedAgreements().length;
   bar.innerHTML=`<span class="scopelbl">Viewing</span>`+
@@ -1068,7 +1140,7 @@ function renderScopeBar(){
     `<span class="scopecount">${n} agreement${n===1?'':'s'}</span>`;
   $('scopeSel').onchange=function(){ USER_FILTER=(this.value==='__all')?null:[this.value]; render(); };
 }
-function render(){ renderScopeBar(); if(view==='quarter')renderQuarter(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='forecast')renderForecast(); if(view==='history')renderHistory(); if(view==='reports')renderReports(); if(view==='admin')renderAdmin(); renderLegend(); if($('guideScrim')&&$('guideScrim').classList.contains('show'))renderGuide(); }
+function render(){ renderScopeBar(); if(view==='quarter')renderQuarter(); if(view==='opportunities')renderOpportunities(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='forecast')renderForecast(); if(view==='history')renderHistory(); if(view==='reports')renderReports(); if(view==='admin')renderAdmin(); renderLegend(); if($('guideScrim')&&$('guideScrim').classList.contains('show'))renderGuide(); }
 function renderQuarter(){
   buildQuarterOptions();$('qSelect').value=selQI;
   $('qCtx').textContent=selQI===CUR_QI?'Current quarter':(selQI<CUR_QI?'Past quarter':'Upcoming quarter');
@@ -1713,7 +1785,7 @@ function readSchedule(){
 }
 function toggleBilling(){ $('billWrap').classList.toggle('show',$('f_custom').checked); updatePreview(); }
 function todayISO(){return new Date().toISOString().slice(0,10);}
-function openModal(id){
+function openModal(id,promote){
   if(!can('editAgreements')){ toast('Your role can view agreements but not add or edit them.'); return; }
   editingId=id||null;const a=id?AGREEMENTS.find(x=>x.id===id):null;
   $('mTitle').textContent=a?`Edit agreement #${a.agreement_number||''}`:'New agreement';
@@ -1754,7 +1826,22 @@ function openModal(id){
     const list=[...new Set([...(KNOWN_USERS||[]),cur,CURRENT_EMAIL].filter(Boolean))].sort();
     $('f_owner').innerHTML=list.map(e=>`<option value="${esc(e)}" ${e===cur?'selected':''}>${esc(e)}</option>`).join('');
   }else{ ownerFld.style.display='none'; }
-  $('mErr').style.display='none';updatePreview();$('scrim').classList.add('show');
+  $('mErr').style.display='none';
+  // Opportunity thread + stage carry-through
+  $('f_stage').value = promote ? 'won' : ((a&&a.stage)||'');
+  $('f_estref').value = (a&&a.estimate_ref)||'';
+  if(a&&a.opportunity_number){
+    $('oppLink').style.display='block';
+    $('oppLink').innerHTML=`<b>From opportunity ${esc(a.opportunity_number)}</b>${a.estimate_ref?' · estimate '+esc(a.estimate_ref):''}${a.est_monthly_rmr?' · est. '+fmt(+a.est_monthly_rmr)+'/mo':''}`;
+  }else{ $('oppLink').style.display='none'; }
+  if(promote && a){
+    $('mTitle').textContent=`Win opportunity ${a.opportunity_number||''} → new agreement`;
+    if(!a.agreement_number) $('f_num').value=nextAgreementNumber();
+    if(!(+a.monthly_rmr>0) && a.est_monthly_rmr) $('f_rmr').value=a.est_monthly_rmr;
+    if(!a.activation_date) $('f_date').value=todayISO();
+    if(a.estimate_ref) $('f_estref').value=a.estimate_ref;
+  }
+  updatePreview();$('scrim').classList.add('show');
 }
 function closeModal(){$('scrim').classList.remove('show');editingId=null;}
 let convertingId=null;
@@ -1885,6 +1972,115 @@ async function revertRenewal(id){
   toast('Renewal reverted — back in Pending Renewals');
   render();
 }
+/* ---- Opportunities (pipeline stubs that graduate into agreements) ---- */
+let editingOppId=null;
+function openOpp(id){
+  if(!can('editAgreements')){ toast('Your role cannot edit opportunities.'); return; }
+  editingOppId=id||null; const a=id?AGREEMENTS.find(x=>x.id===id):null;
+  $('oppTitle').textContent=a?`Edit opportunity ${a.opportunity_number||''}`:'New opportunity';
+  $('o_num').value=a?(a.opportunity_number||''):nextOppNumber();
+  $('o_cust').value=a?(a.customer_name||''):'';
+  $('o_stage').value=(a&&OPEN_STAGES.includes(a.stage))?a.stage:'opportunity';
+  $('o_est').value=a?(a.estimate_ref||''):'';
+  $('o_rmr').value=(a&&a.est_monthly_rmr!=null&&a.est_monthly_rmr!=='')?a.est_monthly_rmr:'';
+  $('o_close').value=(a&&a.expected_close)?String(a.expected_close).slice(0,10):'';
+  $('o_notes').value=a?(a.notes||''):'';
+  const ownerFld=$('oppOwnerFld');
+  if(canViewAll()){
+    ownerFld.style.display='';
+    const cur=a?(a.owner_email||CURRENT_EMAIL||''):(CURRENT_EMAIL||'');
+    const listu=[...new Set([...(KNOWN_USERS||[]),cur,CURRENT_EMAIL].filter(Boolean))].sort();
+    $('o_owner').innerHTML=listu.map(e=>`<option value="${esc(e)}" ${e===cur?'selected':''}>${esc(e)}</option>`).join('');
+  }else{ ownerFld.style.display='none'; }
+  $('oppLost').style.display=(a&&a.stage!=='lost')?'inline-block':'none';
+  $('oppErr').style.display='none';
+  $('oppScrim').classList.add('show');
+}
+function closeOpp(){ $('oppScrim').classList.remove('show'); editingOppId=null; }
+function oppMigrationMsg(e){ return /stage|opportunity_number|estimate_ref|est_monthly_rmr|expected_close|lost_reason|column/i.test(e&&e.message||'')?'Run the opportunities migration in Supabase first (it adds the stage / opportunity_number columns).':((e&&e.message)||'Save failed'); }
+async function saveOpp(){
+  if(!sb){toast('Sign in first');return;}
+  const cust=$('o_cust').value.trim();
+  if(!cust){ $('oppErr').textContent='Customer / prospect is required.'; $('oppErr').style.display='block'; return; }
+  const oppNo=$('o_num').value.trim()||nextOppNumber();
+  const owner=(canViewAll()&&$('oppOwnerFld').style.display!=='none'&&$('o_owner').value)?$('o_owner').value
+            :(editingOppId?((AGREEMENTS.find(a=>a.id===editingOppId)||{}).owner_email||CURRENT_EMAIL||null):(CURRENT_EMAIL||null));
+  const fields={ opportunity_number:oppNo, customer_name:cust, stage:$('o_stage').value||'opportunity',
+    estimate_ref:$('o_est').value.trim()||null, est_monthly_rmr:($('o_rmr').value.trim()===''?null:(+$('o_rmr').value||0)),
+    expected_close:$('o_close').value||null, notes:$('o_notes').value.trim()||null, owner_email:owner, monthly_rmr:0 };
+  try{
+    if(editingOppId){ const {error}=await sb.from('rmr_agreements').update({...fields,updated_at:new Date().toISOString()}).eq('id',editingOppId); if(error)throw error; }
+    else { const {error}=await sb.from('rmr_agreements').insert({...fields,created_at:new Date().toISOString(),updated_at:new Date().toISOString()}); if(error)throw error; }
+    await load();
+    audit(editingOppId?'Opportunity edited':'Opportunity created','Opportunities',oppNo,null,{opportunity:oppNo,customer:cust,stage:fields.stage,est_rmr:fields.est_monthly_rmr},null);
+    closeOpp(); toast(editingOppId?'Opportunity updated':`Opportunity ${oppNo} created`);
+  }catch(e){ $('oppErr').textContent=oppMigrationMsg(e); $('oppErr').style.display='block'; }
+}
+async function markLost(id){
+  id=id||editingOppId; const a=AGREEMENTS.find(x=>x.id===id); if(!a)return;
+  const reason=(prompt('Reason this opportunity was lost? (optional)','')||'').trim();
+  try{ const {error}=await sb.from('rmr_agreements').update({stage:'lost',lost_reason:reason||null,updated_at:new Date().toISOString()}).eq('id',id); if(error)throw error;
+    a.stage='lost'; a.lost_reason=reason||null;
+    audit('Opportunity lost','Opportunities',a.opportunity_number,null,{opportunity:a.opportunity_number,customer:a.customer_name,reason},null);
+    closeOpp(); toast('Marked lost'); render();
+  }catch(e){ toast(oppMigrationMsg(e)); }
+}
+async function reopenOpp(id){
+  const a=AGREEMENTS.find(x=>x.id===id); if(!a)return;
+  try{ const {error}=await sb.from('rmr_agreements').update({stage:'opportunity',lost_reason:null,updated_at:new Date().toISOString()}).eq('id',id); if(error)throw error;
+    a.stage='opportunity'; a.lost_reason=null;
+    audit('Opportunity reopened','Opportunities',a.opportunity_number,null,{opportunity:a.opportunity_number},null);
+    toast('Reopened'); render();
+  }catch(e){ toast(oppMigrationMsg(e)); }
+}
+function winOpp(id){
+  if(!can('editAgreements')){ toast('Your role cannot win opportunities.'); return; }
+  const a=AGREEMENTS.find(x=>x.id===id); if(!a)return;
+  closeOpp(); openModal(id,true);
+}
+function renderOpportunities(){
+  const all=scopedOpps();
+  const openL=all.filter(a=>OPEN_STAGES.includes(a.stage));
+  const quotingL=all.filter(a=>a.stage==='quoting');
+  const lostL=all.filter(a=>a.stage==='lost');
+  const pipeRmr=openL.reduce((s,a)=>s+(+a.est_monthly_rmr||0),0);
+  $('oppCards').innerHTML=`
+    <div class="stat accent"><div class="lbl">Open opportunities</div><div class="val">${openL.length}</div></div>
+    <div class="stat orange"><div class="lbl">Est. RMR in pipeline</div><div class="val">${fmt(pipeRmr)}<span style="font-size:13px;font-weight:500;color:var(--muted)">/mo</span></div></div>
+    <div class="stat green"><div class="lbl">In quoting</div><div class="val">${quotingL.length}</div></div>
+    <div class="stat"><div class="lbl">Lost</div><div class="val">${lostL.length}</div></div>`;
+  const f=($('oppFilter')&&$('oppFilter').value)||'open';
+  const q=(($('oppSearch')&&$('oppSearch').value)||'').toLowerCase();
+  let list=all;
+  if(f==='open') list=openL; else if(f!=='all') list=all.filter(a=>a.stage===f);
+  if(q) list=list.filter(a=>(a.customer_name||'').toLowerCase().includes(q)||String(a.opportunity_number||'').toLowerCase().includes(q)||String(a.estimate_ref||'').toLowerCase().includes(q));
+  list=[...list].sort((x,y)=>String(y.opportunity_number||'').localeCompare(String(x.opportunity_number||'')));
+  $('oppCount').textContent=`${list.length} shown · ${openL.length} open`;
+  if(!list.length){ $('oppTableWrap').innerHTML=`<div class="empty"><b>No opportunities${q?' match':''}</b>Click “New opportunity” to mint an opportunity # and start tracking a potential deal.</div>`; return; }
+  const showOwner=canViewAll();
+  const stageChip=s=> s==='quoting'?'<span class="chip c-payable">Quoting</span>':s==='lost'?'<span class="chip c-held">Lost</span>':'<span class="chip c-maturing">Opportunity</span>';
+  const ageOf=a=>{const d=a.created_at?new Date(a.created_at):(a.updated_at?new Date(a.updated_at):null); if(!d||isNaN(d))return '—'; return Math.max(0,Math.floor((Date.now()-d)/86400000))+'d';};
+  const rows=list.map(a=>{
+    const isLost=a.stage==='lost';
+    const acts=can('editAgreements')?(isLost
+        ? `<button class="iconbtn" data-reopen="${a.id}">Reopen</button>`
+        : `<button class="iconbtn" data-oppedit="${a.id}">Edit</button> <button class="paidbtn" data-oppwin="${a.id}">Win</button>`):'';
+    return `<tr${isLost?' style="opacity:.6"':''}>
+      <td class="ag-no">${esc(a.opportunity_number||'—')}</td>
+      <td>${esc(a.customer_name||'—')}${isLost&&a.lost_reason?`<div style="font-size:10px;color:var(--muted)">${esc(a.lost_reason)}</div>`:''}</td>
+      <td>${stageChip(a.stage)}</td>
+      ${showOwner?`<td style="font-size:12px;color:var(--muted)">${esc(ownerKey(a))}</td>`:''}
+      <td class="num mono">${a.est_monthly_rmr?fmt(+a.est_monthly_rmr):'<span style="color:var(--none)">—</span>'}</td>
+      <td class="mono" style="color:var(--muted)">${esc(a.estimate_ref||'—')}</td>
+      <td class="mono" style="color:var(--muted)">${a.expected_close?esc(String(a.expected_close).slice(0,10)):'—'}</td>
+      <td class="mono">${ageOf(a)}</td>
+      <td>${acts}</td>
+    </tr>`;}).join('');
+  $('oppTableWrap').innerHTML=`<table><thead><tr><th>Opp #</th><th>Customer</th><th>Stage</th>${showOwner?'<th>Owner</th>':''}<th class="num">Est. MRR</th><th>Estimate #</th><th>Exp. close</th><th>Age</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('oppTableWrap').querySelectorAll('[data-oppedit]').forEach(b=>b.onclick=()=>openOpp(b.dataset.oppedit));
+  $('oppTableWrap').querySelectorAll('[data-oppwin]').forEach(b=>b.onclick=()=>winOpp(b.dataset.oppwin));
+  $('oppTableWrap').querySelectorAll('[data-reopen]').forEach(b=>b.onclick=()=>reopenOpp(b.dataset.reopen));
+}
 function readForm(){return{
   id:editingId||undefined,agreement_number:$('f_num').value.trim(),customer_name:$('f_cust').value.trim(),customer_number:$('f_custnum').value.trim()||null,site_number:$('f_sitenum').value.trim()||null,
   activation_date:$('f_date').value||null,contract_term:+$('f_term').value,monthly_rmr:+$('f_rmr').value||0,
@@ -1897,7 +2093,9 @@ function readForm(){return{
   owner_email:(canViewAll()&&$('ownerFld')&&$('ownerFld').style.display!=='none'&&$('f_owner').value)?$('f_owner').value:(editingId?((AGREEMENTS.find(a=>a.id===editingId)||{}).owner_email||CURRENT_EMAIL||null):(CURRENT_EMAIL||null)),
   autorenew:$('f_auto').checked,notes:$('f_notes').value.trim(),
   renewal_date:($('f_rendate')&&$('f_rendate').value)||null,
-  renewal_credit_month:($('f_rencredit')&&$('f_rencredit').value)||null};}
+  renewal_credit_month:($('f_rencredit')&&$('f_rencredit').value)||null,
+  stage:($('f_stage')&&$('f_stage').value)||null,
+  estimate_ref:($('f_estref')&&$('f_estref').value.trim())||null};}
 function updatePreview(){
   const row=readForm();const c=compute(row);
   const gm=c.grossMargin;
@@ -1940,7 +2138,7 @@ function updatePreview(){
 
 /* ---- view switching ---- */
 function switchView(v){
-  view=v;['quarter','agreements','renewals','forecast','history','reports','admin'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
+  view=v;['quarter','opportunities','agreements','renewals','forecast','history','reports','admin'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   render();
 }
@@ -2126,6 +2324,7 @@ $('qNext').onclick=()=>{selQI++;renderQuarter();};
 $('qToday').onclick=()=>{selQI=CUR_QI;renderQuarter();};
 $('qSelect').onchange=e=>{selQI=+e.target.value;renderQuarter();};
 $('tabQuarter').onclick=()=>switchView('quarter');
+$('tabOpportunities').onclick=()=>switchView('opportunities');
 $('tabAgreements').onclick=()=>switchView('agreements');
 $('tabRenewals').onclick=()=>switchView('renewals');
 ['renSearch','renSort','autoSearch','autoSort'].forEach(id=>{const el=$(id); if(el){el.addEventListener('input',renderRenewals);el.addEventListener('change',renderRenewals);}});
@@ -2140,6 +2339,13 @@ $('renScrim').onclick=e=>{if(e.target===$('renScrim'))closeRenew();};
 $('rn_custom').onchange=toggleRnBilling;
 $('rnSchedAdd').onclick=()=>addRnSchedRow(1,'',false);
 ['rn_date','rn_month','rn_rmr'].forEach(id=>{const el=$(id);if(el){el.addEventListener('input',updateRnPreview);el.addEventListener('change',updateRnPreview);}});
+$('oppClose').onclick=closeOpp; $('oppCancel').onclick=closeOpp;
+$('oppSave').onclick=saveOpp;
+$('oppLost').onclick=()=>markLost(editingOppId);
+$('oppScrim').onclick=e=>{if(e.target===$('oppScrim'))closeOpp();};
+$('oppAddBtn').onclick=()=>{ if(!sb){toast('Sign in first');return;} openOpp(null); };
+$('oppSearch').addEventListener('input',()=>{if(view==='opportunities')renderOpportunities();});
+$('oppFilter').addEventListener('change',()=>{if(view==='opportunities')renderOpportunities();});
 $('tabForecast').onclick=()=>switchView('forecast');
 $('fcTerm').onchange=renderForecast;
 $('fcExport').onclick=exportForecastCSV;
