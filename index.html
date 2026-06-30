@@ -867,7 +867,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-12';
+const APP_VERSION='P1RMR-13';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -903,9 +903,10 @@ function scopedAgreements(){ return scopeOwner(AGREEMENTS).filter(isLiveAgreemen
 function scopedOpps(){ return scopeOwner(AGREEMENTS).filter(isPipeline); }
 function pad3(n){return String(n).padStart(3,'0');}
 function yy2(){return String(new Date().getFullYear()).slice(-2);}
-function nextOppNumber(){   // SSE-NNN-YY, sequence runs continuously across all opportunities
-  let max=0; AGREEMENTS.forEach(a=>{const m=String(a.opportunity_number||'').match(/SSE-(\d+)-/i); if(m){const n=+m[1]; if(n>max)max=n;}});
-  return `SSE-${pad3(max+1)}-${yy2()}`;
+function nextOppNumber(){   // SSE-NNN-YY, sequence resets to 001 each calendar year
+  const yr=yy2(); let max=0;
+  AGREEMENTS.forEach(a=>{const m=String(a.opportunity_number||'').match(/SSE-(\d+)-(\d{2})$/i); if(m&&m[2]===yr){const n=+m[1]; if(n>max)max=n;}});
+  return `SSE-${pad3(max+1)}-${yr}`;
 }
 function nextAgreementNumber(){   // plain integers, reserved band starting at 200
   let max=199; AGREEMENTS.forEach(a=>{const s=String(a.agreement_number||'').trim(); if(/^\d+$/.test(s)){const n=+s; if(n>max)max=n;}});
