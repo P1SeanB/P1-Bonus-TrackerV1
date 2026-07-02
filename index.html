@@ -164,6 +164,10 @@
   .fld input,.fld select{border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:#fff;outline:none;width:100%}
   .fld input:focus,.fld select:focus{border-color:var(--orange);box-shadow:0 0 0 3px rgba(232,98,10,.15)}
   .fieldset-h{grid-column:1/-1;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--navy);margin-top:6px;padding-top:12px;border-top:1px solid var(--line)}
+  .modal-tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:16px;flex-wrap:wrap}
+  .modal-tabs button{background:none;border:none;padding:9px 15px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .modal-tabs button:hover{color:var(--ink)}
+  .modal-tabs button.active{color:var(--navy);border-bottom-color:var(--orange)}
   .bill-toggle{grid-column:1/-1;display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink);font-weight:500}
   .bill-wrap{grid-column:1/-1;display:none}
   .bill-wrap.show{display:block}
@@ -471,16 +475,22 @@
     <div class="modal-body">
       <input type="hidden" id="f_stage">
       <div id="oppLink" style="display:none;margin-bottom:12px;background:#fff3ea;border:1px solid #fbd6b8;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#8a4b1e"></div>
-      <div class="grid">
+      <div class="modal-tabs" id="agTabs">
+        <button data-tab="deal" class="active">Deal</button>
+        <button data-tab="comm">Commission</button>
+        <button data-tab="costs">Costs</button>
+        <button data-tab="renew">Renewal</button>
+        <button data-tab="bill">Billing &amp; Files</button>
+      </div>
+
+      <div class="grid agpane" data-pane="deal">
         <div class="fld"><label>Agreement #</label><input id="f_num" placeholder="e.g. 134"></div>
         <div class="fld"><label>Customer</label><input id="f_cust" placeholder="Customer name"></div>
         <div class="fld"><label>Customer # <span class="hint">reference</span></label><input id="f_custnum" placeholder="optional"></div>
         <div class="fld"><label>Site # <span class="hint">reference</span></label><input id="f_sitenum" placeholder="optional"></div>
         <div class="fld"><label>Signing / sale date <span class="hint">when it's sold — sets the initial commission quarter & renewal timing</span></label><input id="f_date" type="date"></div>
         <div class="fld"><label>First billing date <span class="hint">when invoicing starts — drives holdback & accelerator release; blank = same as signing</span></label><input id="f_billdate" type="date"></div>
-        <div class="fld" id="ownerFld"><label>Assigned to <span class="hint">sales rep / owner</span></label>
-          <select id="f_owner"></select>
-        </div>
+        <div class="fld" id="ownerFld"><label>Assigned to <span class="hint">sales rep / owner</span></label><select id="f_owner"></select></div>
         <div class="fld"><label>Contract term</label>
           <select id="f_term">
             <option value="0">Month-to-month</option>
@@ -491,9 +501,6 @@
             <option value="60">60 months (9% new · 6% renewal)</option>
           </select>
         </div>
-        <div class="fieldset-h">Revenue &amp; commission</div>
-        <div class="fld full"><label>Monthly RMR <span class="hint">$ / month — sets MRR; for custom billing, MRR = annual invoicing ÷ 12</span></label><input id="f_rmr" type="number" step="0.01" placeholder="264"></div>
-        <div class="fld full"><label style="color:var(--muted)">Commission = commissionable value (TCV = MRR × term months) × the term rate × the margin multiplier. New: 6 / 7 / 8 / 8.5 / 9%. Renewal: 4 / 5 / 5.5 / 5.75 / 6%.</label></div>
         <div class="fld full"><label>Agreement type <span class="hint">manual renews each cycle · auto pays one one-time renewal & skips Pending Renewals · one-time / month-to-month earn no renewal commission</span></label>
           <select id="f_type">
             <option value="manual">Manual Renewal</option>
@@ -501,7 +508,13 @@
             <option value="onetime">One-Time</option>
             <option value="m2m">Month-to-Month</option>
           </select></div>
+        <div class="fld full"><label>Estimate # <span class="hint">SSE quote reference — ties this agreement back to its opportunity</span></label><input id="f_estref" placeholder="e.g. SSE-045-26"></div>
+        <div class="fld full"><label>Notes</label><input id="f_notes" placeholder="Optional"></div>
+      </div>
 
+      <div class="grid agpane" data-pane="comm" style="display:none">
+        <div class="fld full"><label>Monthly RMR <span class="hint">$ / month — sets MRR; for custom billing, MRR = annual invoicing ÷ 12</span></label><input id="f_rmr" type="number" step="0.01" placeholder="264"></div>
+        <div class="fld full"><label style="color:var(--muted)">Commission = commissionable value (TCV = MRR × term months) × the term rate × the margin multiplier. New: 6 / 7 / 8 / 8.5 / 9%. Renewal: 4 / 5 / 5.5 / 5.75 / 6%.</label></div>
         <div class="fieldset-h">Billing schedule</div>
         <label class="bill-toggle"><input type="checkbox" id="f_custom"> Custom billing schedule (uneven / quarterly / prepaid)</label>
         <div class="bill-wrap" id="billWrap">
@@ -509,7 +522,10 @@
           <div id="schedRows"></div>
           <button type="button" class="sched-add" id="schedAdd">+ Add payment</button>
         </div>
-        <div class="fieldset-h">Direct costs — annual recurring (Margin Engine)</div>
+      </div>
+
+      <div class="grid agpane" data-pane="costs" style="display:none">
+        <div class="fld full"><label style="color:var(--muted)">Direct costs — annual recurring (drives the margin multiplier)</label></div>
         <div class="fld"><label>Loaded labor rate <span class="hint">$ / hour, fully burdened</span></label><input id="f_rate" type="number" step="0.01" placeholder="117"></div>
         <div class="fld"><label>Inspection frequency <span class="hint">per year</span></label>
           <select id="f_freq">
@@ -523,16 +539,18 @@
         <div class="fld"><label>Software licensing <span class="hint">$ / yr — licenses, hosted</span></label><input id="f_soft" type="number" step="0.01" placeholder="0"></div>
         <div class="fld"><label>Subcontractors <span class="hint">$ / yr — sprinkler, elevator</span></label><input id="f_sub" type="number" step="0.01" placeholder="0"></div>
         <div class="fld"><label>Other direct <span class="hint">$ / yr</span></label><input id="f_other" type="number" step="0.01" placeholder="0"></div>
-        <div class="fieldset-h">Margin</div>
         <div class="fld"><label>Target margin <span class="hint">% — optional, overrides the program target on this deal</span></label><input id="f_target" type="number" step="1" placeholder="(use program target)"></div>
-        <div class="fieldset-h">Renewal</div>
+      </div>
+
+      <div class="grid agpane" data-pane="renew" style="display:none">
         <div class="fld full" id="renStatusFld"><label style="color:var(--muted)" id="renStatusTxt">Not yet renewed — use the <b>Renew</b> button on Pending Renewals.</label></div>
         <div class="fld"><label>Renewal date <span class="hint">effective date once renewed</span></label><input id="f_rendate" type="date"></div>
         <div class="fld"><label>Renewal month <span class="hint">quarter the bonus credits to</span></label><input id="f_rencredit" type="month"></div>
         <div class="fld full"><div class="fieldset-h" style="margin-top:2px">Renewal history</div><div id="renHist" class="file-block"></div></div>
         <div class="fld full" id="renStatusFld2" style="display:none"></div>
-        <div class="fld full"><label>Estimate # <span class="hint">SSE quote reference — ties this agreement back to its opportunity</span></label><input id="f_estref" placeholder="e.g. SSE-045-26"></div>
-        <div class="fld full"><label>Notes</label><input id="f_notes" placeholder="Optional"></div>
+      </div>
+
+      <div class="grid agpane" data-pane="bill" style="display:none">
         <div class="fld full"><div class="fieldset-h" style="margin-top:2px">Files</div><div id="agFiles" class="file-block"></div></div>
         <div class="fld full">
           <div class="fieldset-h" id="blogToggle" style="margin-top:2px;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none">Billing log <span class="hint" id="blogHint" style="font-weight:500">▸ show</span></div>
@@ -543,8 +561,9 @@
             <div id="blogTableWrap"></div>
           </div>
         </div>
-        <div class="preview" id="mPreview"></div>
       </div>
+
+      <div class="preview" id="mPreview"></div>
     </div>
     <div id="mErr" style="display:none;margin:0 24px 4px;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#9a2a2a"></div>
     <div class="modal-foot">
@@ -1026,7 +1045,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-28';
+const APP_VERSION='P1RMR-29';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -2152,6 +2171,8 @@ function openModal(id,promote){
   }
   updatePreview();
   renderAttachments('agFiles', editingId, can('editAgreements'));
+  document.querySelectorAll('#agTabs button').forEach(x=>x.classList.toggle('active',x.dataset.tab==='deal'));
+  document.querySelectorAll('.agpane').forEach(p=>p.style.display=(p.dataset.pane==='deal')?'':'none');
   $('scrim').classList.add('show');
 }
 function closeModal(){$('scrim').classList.remove('show');editingId=null;}
@@ -2955,6 +2976,7 @@ $('f_custom').onchange=toggleBilling;
 $('schedAdd').onclick=()=>addSchedRow(1,'',false);
 $('blogToggle').onclick=()=>{const w=$('blogWrap');const open=w.style.display!=='none';w.style.display=open?'none':'block';$('blogHint').textContent=open?'▸ show':'▾ hide';if(!open)renderBillingLog();};
 $('blogGen').onclick=()=>{ if(EDIT_LOG.length && !confirm('Rebuild the billing log from the schedule?\n\nThis overwrites any manual dates, invoice numbers, and paid/unpaid marks.')) return; EDIT_LOG=generateBillingLog(readForm()); renderBillingLog(); };
+document.querySelectorAll('#agTabs button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('#agTabs button').forEach(x=>x.classList.toggle('active',x===b)); document.querySelectorAll('.agpane').forEach(p=>p.style.display=(p.dataset.pane===b.dataset.tab)?'':'none'); });
 $('marginFlag').onchange=()=>{const v=parseFloat($('marginFlag').value);if(!isNaN(v)&&v>=0&&v<=100){marginFlagPct=v;LS.set('rmr_margin_flag',String(v));renderAgreements();toast('Margin flag set to '+v+'%');}};
 $('agFilter').onchange=e=>{agFilter=(e.target.value==='all')?'all':+e.target.value;renderAgreements();};
 $('mClose').onclick=closeModal;$('mCancel').onclick=closeModal;
