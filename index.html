@@ -975,7 +975,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-22';
+const APP_VERSION='P1RMR-23';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -2530,12 +2530,26 @@ function exportQuarterPDF(details){
   const initials=[],renewalPays=[];
   scopedAgreements().forEach(a=>{
     const c=compute(a);
-    const fi=frozenAmount(a,'initial');
-    if(c.initialQI===selQI&&fi.amount>0)
-      initials.push({a,amount:fi.amount,paid:!!a.paid_initial,mult:c.initMult,frozen:fi.frozen});
-    const fr=frozenAmount(a,'renewal');
-    if(c.renewalQI===selQI&&fr.amount>0&&(a.autorenew||a.renewed))
-      renewalPays.push({a,amount:fr.amount,paid:!!a.renewal_paid,mult:c.renewMult,auto:!!a.autorenew,frozen:fr.frozen});
+    if(c.legacyFull){
+      const fi=frozenAmount(a,'initial');
+      if(c.initialQI===selQI&&fi.amount>0) initials.push({a,amount:fi.amount,paid:!!a.paid_initial,mult:c.initMult,frozen:fi.frozen,piece:'Initial'});
+    } else {
+      const fim=frozenAmount(a,'immediate');
+      if(c.initialQI===selQI&&fim.amount>0) initials.push({a,amount:fim.amount,paid:!!a.paid_immediate,mult:c.initMult,frozen:fim.frozen,piece:'Standard 75%'});
+      const fh=frozenAmount(a,'holdback');
+      if(c.holdbackQI===selQI&&fh.amount>0) initials.push({a,amount:fh.amount,paid:!!a.paid_holdback,mult:c.initMult,frozen:fh.frozen,piece:'Holdback 25%'});
+      const fa=frozenAmount(a,'accel');
+      if(c.acceleratorQI===selQI&&fa.amount>0) initials.push({a,amount:fa.amount,paid:!!a.paid_accel,mult:c.initMult,frozen:fa.frozen,piece:'Accelerator'});
+    }
+    if(a.autorenew){
+      const fr=frozenAmount(a,'renewal');
+      if(c.renewalQI===selQI&&fr.amount>0) renewalPays.push({a,amount:fr.amount,paid:!!a.renewal_paid,mult:c.renewMult,auto:true,frozen:fr.frozen});
+    } else if(hasLedgerRenewals(a)){
+      renewalCycles(a).forEach(r=>{ if(r.commission_amount!=null&&r.credit_qi===selQI&&(+r.commission_amount||0)>0) renewalPays.push({a,amount:+r.commission_amount,paid:!!r.paid,mult:c.renewMult,auto:false,frozen:!!r.paid,cycle:r.renewal_no}); });
+    } else if(a.renewed){
+      const fr=frozenAmount(a,'renewal');
+      if(c.renewalQI===selQI&&fr.amount>0) renewalPays.push({a,amount:fr.amount,paid:!!a.renewal_paid,mult:c.renewMult,auto:false,frozen:fr.frozen});
+    }
   });
   if(!initials.length&&!renewalPays.length){ toast('Nothing to export for '+qLabel(selQI)); return; }
 
@@ -2580,8 +2594,8 @@ function exportQuarterPDF(details){
     return sub;
   }
 
-  const subInit=section('Initial Commissions',initials,it=>`Initial · ${Math.round(it.mult*1000)/10}%`);
-  const subRnw=section('Renewal Commissions',renewalPays,it=>`Renewal · ${Math.round(it.mult*1000)/10}% · ${it.auto?'auto-renew':'manual'}`);
+  const subInit=section('Initial & Held Commissions',initials,it=>`${it.piece||'Initial'} · ${Math.round(it.mult*1000)/10}%`);
+  const subRnw=section('Renewal Commissions',renewalPays,it=>`Renewal${it.cycle?' cycle '+it.cycle:''} · ${Math.round(it.mult*1000)/10}% · ${it.auto?'auto-renew':'manual'}`);
   const grand=subInit+subRnw;
 
   if(y>262){doc.addPage();y=20;}
