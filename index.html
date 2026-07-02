@@ -488,7 +488,13 @@
         <div class="fieldset-h">Revenue &amp; commission</div>
         <div class="fld full"><label>Monthly RMR <span class="hint">$ / month — sets MRR; for custom billing, MRR = annual invoicing ÷ 12</span></label><input id="f_rmr" type="number" step="0.01" placeholder="264"></div>
         <div class="fld full"><label style="color:var(--muted)">Commission = commissionable value (TCV = MRR × term months) × the term rate × the margin multiplier. New: 6 / 7 / 8 / 8.5 / 9%. Renewal: 4 / 5 / 5.5 / 5.75 / 6%.</label></div>
-        <label class="bill-toggle" style="margin-top:6px"><input type="checkbox" id="f_auto"> Autorenewal — auto-renews &amp; auto-pays the renewal commission at the renewal date (off = manual renewal needed)</label>
+        <div class="fld full"><label>Agreement type <span class="hint">manual renews each cycle · auto pays one one-time renewal & skips Pending Renewals · one-time / month-to-month earn no renewal commission</span></label>
+          <select id="f_type">
+            <option value="manual">Manual Renewal</option>
+            <option value="auto">Auto-Renewal</option>
+            <option value="onetime">One-Time</option>
+            <option value="m2m">Month-to-Month</option>
+          </select></div>
 
         <div class="fieldset-h">Billing schedule</div>
         <label class="bill-toggle"><input type="checkbox" id="f_custom"> Custom billing schedule (uneven / quarterly / prepaid)</label>
@@ -569,13 +575,18 @@
       </div>
       <div id="rnQtr" style="font-size:12px;color:var(--muted);margin:2px 0 6px"></div>
       <div class="fieldset-h">Renewal value</div>
-      <div class="fld"><label>New monthly RMR <span class="hint">$ / month — update if the value changed at renewal</span></label><input id="rn_rmr" type="number" step="0.01" placeholder="keep current"></div>
+      <div class="grid2">
+        <div class="fld"><label>New monthly RMR <span class="hint">$ / month — update if it changed</span></label><input id="rn_rmr" type="number" step="0.01" placeholder="keep current"></div>
+        <div class="fld"><label>Renewal term <span class="hint">months — sets the renewal rate & next cycle</span></label>
+          <select id="rn_term"><option value="12">12 months</option><option value="24">24 months</option><option value="36">36 months</option><option value="48">48 months</option><option value="60">60 months</option></select></div>
+      </div>
       <label class="bill-toggle" style="margin-top:4px"><input type="checkbox" id="rn_custom"> Custom billing schedule (uneven / quarterly / prepaid)</label>
       <div class="bill-wrap" id="rnBillWrap">
         <div class="bill-note">Enter each payment by the month it bills and the amount. Commission still uses the Monthly RMR above; this only drives cash timing.</div>
         <div id="rnSchedRows"></div>
         <button type="button" class="sched-add" id="rnSchedAdd">+ Add payment</button>
       </div>
+      <div class="fld" style="margin-top:10px"><label>Notes <span class="hint">optional — recorded on this renewal</span></label><input id="rn_notes" placeholder="e.g. re-quoted, price increase, scope change"></div>
       <div class="preview" id="rnPreview" style="margin-top:12px"></div>
       <div id="rnErr" style="display:none;margin-top:8px;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#9a2a2a"></div>
     </div>
@@ -822,17 +833,21 @@ function compute(a,plan){
   const autoRenewalPct=autoRenewEligible?(pctFor(cfg.autoRenewalPct,term)||0):0;
   const newPct=pctFor(cfg.newPct,term);
   const renewalPct=isAuto?autoRenewalPct:manualRenewalPct;   // effective rate for THIS agreement
-  const renewalType= converted ? 'Auto-Renewal Converted to Manual Renewal'
+  const atype = a.agreement_type || (a.autorenew?'auto':(term>0?'manual':'m2m'));
+  const noRenewal = (atype==='onetime'||atype==='m2m');
+  const renewalType= atype==='onetime' ? 'One-Time'
+                    : atype==='m2m' ? 'Month-to-Month'
+                    : converted ? 'Auto-Renewal Converted to Manual Renewal'
                     : a.autorenew ? 'Auto-Renewal'
                     : (term>0 ? 'Manual Renewal' : 'Not Applicable');
   const baseCommissionNew=commissionableValue*newPct;
   const baseCommissionRenewal=commissionableValue*renewalPct;
   const initialCommission=baseCommissionNew*mm.mult;          // Final = Base × Margin Multiplier (§3.11)
-  const renewalCommission=baseCommissionRenewal*mm.mult;
+  const renewalCommission=noRenewal?0:baseCommissionRenewal*mm.mult;
   const netProfit=grossProfit-initialCommission;             // §4.14 annual gross profit less the commission
   // timing
   let initialQI=null,renewalDate=null,renewalQI=null;
-  if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad)){initialQI=qIndexFromYM(ad.getFullYear(),ad.getMonth());if(term>0){renewalDate=addMonths(ad,term);renewalQI=qIndexFromYM(renewalDate.getFullYear(),renewalDate.getMonth());}}}
+  if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad)){initialQI=qIndexFromYM(ad.getFullYear(),ad.getMonth());if(term>0&&!noRenewal){renewalDate=addMonths(ad,term);renewalQI=qIndexFromYM(renewalDate.getFullYear(),renewalDate.getMonth());}}}
   // Once renewed, the credited quarter follows the Renewal Month entered on the Renew form (not the activation+term math).
   if(a.renewed && a.renewal_credit_month){const m=String(a.renewal_credit_month).match(/^(\d{4})-(\d{2})$/);if(m){renewalQI=qIndexFromYM(+m[1],+m[2]-1);}}
   return {term,rmr:mrr,mrr,acv,tcv,months,commissionableValue,basis:cfg.basis,
@@ -843,7 +858,7 @@ function compute(a,plan){
           newPct,renewalPct,initMult:newPct,renewMult:renewalPct,
           isAuto,autoRenewEligible,manualRenewalPct,autoRenewalPct,renewalType,converted,
           baseCommissionNew,baseCommissionRenewal,initialCommission,renewalCommission,
-          initialQI,renewalDate,renewalQI,annualBilled,firstBill,scheduled:!!sched};
+          initialQI,renewalDate,renewalQI,annualBilled,firstBill,scheduled:!!sched,agreementType:atype,noRenewal};
 }
 function deferredStatus(c,selQI,paid){return 'none';}     // legacy no-op (deferred model removed)
 const STATUS_META={none:{cls:'c-none',label:'Paid upfront'},held:{cls:'c-held',label:'Deferred held'},maturing:{cls:'c-maturing',label:'Maturing'},payable:{cls:'c-payable',label:'Payable'},paid:{cls:'c-paid',label:'Paid'}};
@@ -890,7 +905,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-16';
+const APP_VERSION='P1RMR-17';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1832,7 +1847,7 @@ function openModal(id,promote){
   $('f_mat').value=v('material_cost_annual');$('f_mon').value=v('monitoring_cost_annual');
   $('f_soft').value=v('software_cost_annual');$('f_sub').value=v('subcontractor_annual_cost');$('f_other').value=v('other_direct_annual');
   $('f_target').value=(a&&a.target_margin!=null&&a.target_margin!=='')?Math.round(a.target_margin*100):'';
-  $('f_auto').checked=!!(a&&a.autorenew);
+  $('f_type').value=(a&&a.agreement_type)||((a&&a.autorenew)?'auto':'manual');
   // Renewal section — date/credit are editable once renewed; Revert appears only for renewed agreements
   const renewed=!!(a&&a.renewed);
   $('f_rendate').value=(a&&a.renewal_date)?String(a.renewal_date).slice(0,10):'';
@@ -1931,8 +1946,9 @@ function renewDraft(){
   const a=AGREEMENTS.find(x=>x.id===renewingId)||{};
   const custom=$('rn_custom').checked;
   const rmr=$('rn_rmr').value.trim()===''?(+a.monthly_rmr||0):(+$('rn_rmr').value||0);
+  const term=($('rn_term')&&$('rn_term').value)?+$('rn_term').value:(+a.contract_term||12);
   return {...a,renewed:true,renewal_credit_month:($('rn_month').value||todayISO().slice(0,7)),
-          monthly_rmr:rmr,custom_billing:custom,billing_schedule:custom?readRnSchedule():(a.billing_schedule||[])};
+          contract_term:term,monthly_rmr:rmr,custom_billing:custom,billing_schedule:custom?readRnSchedule():(a.billing_schedule||[])};
 }
 function updateRnPreview(){
   const c=compute(renewDraft());
@@ -1950,6 +1966,8 @@ function openRenew(id){
   $('rn_date').value=todayISO();
   $('rn_month').value=todayISO().slice(0,7);
   $('rn_rmr').value=(a.monthly_rmr!=null&&a.monthly_rmr!=='')?a.monthly_rmr:'';
+  if($('rn_term')) $('rn_term').value=String([12,24,36,48,60].includes(+a.contract_term)?+a.contract_term:12);
+  if($('rn_notes')) $('rn_notes').value='';
   $('rn_custom').checked=!!a.custom_billing;
   $('rnBillWrap').classList.toggle('show',!!a.custom_billing);
   $('rnSchedRows').innerHTML='';
@@ -1972,16 +1990,29 @@ async function saveRenew(){
   if(!(newRmr>0) && !(custom && newSched.some(r=>+r.amount>0))){ $('rnErr').textContent='Renewal value must be greater than 0.'; $('rnErr').style.display='block'; return; }
   const prior={monthly_rmr:(+a.monthly_rmr||0),custom_billing:!!a.custom_billing,billing_schedule:Array.isArray(a.billing_schedule)?a.billing_schedule:[]};
   const renewDate=$('rn_date').value||todayISO();
+  const newTerm=($('rn_term')&&$('rn_term').value)?+$('rn_term').value:(+a.contract_term||12);
+  const note=($('rn_notes')&&$('rn_notes').value.trim())||null;
   let res;
-  try{ res=await patchRenewalFields(a.id,{renewed:true,renewal_date:renewDate,renewal_credit_month:month,prerenewal_state:prior,monthly_rmr:newRmr,custom_billing:custom,billing_schedule:newSched}); }
+  try{ res=await patchRenewalFields(a.id,{renewed:true,renewal_date:renewDate,renewal_credit_month:month,prerenewal_state:prior,monthly_rmr:newRmr,contract_term:newTerm,custom_billing:custom,billing_schedule:newSched}); }
   catch(e){ $('rnErr').textContent=e.message||'Renewal failed'; $('rnErr').style.display='block'; return; }
-  Object.assign(a,{renewed:true,renewal_date:renewDate,renewal_credit_month:month,prerenewal_state:prior,monthly_rmr:newRmr,custom_billing:custom,billing_schedule:newSched});
+  Object.assign(a,{renewed:true,renewal_date:renewDate,renewal_credit_month:month,prerenewal_state:prior,monthly_rmr:newRmr,contract_term:newTerm,custom_billing:custom,billing_schedule:newSched});
+  const ledgered=await writeRenewalRow(a,{renewDate,month,term:newTerm,priorRmr:prior.monthly_rmr,newRmr,sched:newSched,note});
   const c=compute(a),mm=month.match(/^(\d{4})-(\d{2})$/);
   audit('Manual renewal recorded','Renewals',a.agreement_number,{monthly_rmr:prior.monthly_rmr,custom_billing:prior.custom_billing},
-    {agreement:a.agreement_number,customer:a.customer_name,renewal_date:renewDate,credits_to:mm?qLabel(qIndexFromYM(+mm[1],+mm[2]-1)):null,new_mrr:newRmr,renewal_commission:c.renewalCommission},null);
+    {agreement:a.agreement_number,customer:a.customer_name,renewal_date:renewDate,term:newTerm,note,credits_to:mm?qLabel(qIndexFromYM(+mm[1],+mm[2]-1)):null,new_mrr:newRmr,renewal_commission:c.renewalCommission},null);
   closeRenew();
   toast(res&&res.degraded?'Renewed — add the renewal columns in Supabase to store the date / credit quarter.':'Renewed — renewal commission now due');
   render();
+}
+async function writeRenewalRow(a,o){
+  try{
+    let no=1; try{ const {data}=await sb.from('rmr_renewals').select('id').eq('agreement_id',a.id); no=((data||[]).length)+1; }catch(_){}
+    const mm=String(o.month||'').match(/^(\d{4})-(\d{2})$/); const qi=mm?qIndexFromYM(+mm[1],+mm[2]-1):null;
+    const {error}=await sb.from('rmr_renewals').insert({agreement_id:a.id,renewal_no:no,renewal_date:o.renewDate,credit_qi:qi,credit_month:o.month,
+      term:o.term,new_term:o.term,previous_rmr:o.priorRmr,renewed_rmr:o.newRmr,billing_schedule:o.sched||null,status:'active',note:o.note||null,
+      created_by:CURRENT_EMAIL||null,created_at:new Date().toISOString()});
+    if(error) throw error; return true;
+  }catch(e){ return false; }   // ledger table may be unmigrated; renewal still succeeds via the lightweight fields
 }
 async function revertRenewal(id){
   if(!can('editAgreements')){ toast('Your role cannot revert renewals.'); return; }
@@ -1994,6 +2025,10 @@ async function revertRenewal(id){
   if(prior){ fields.monthly_rmr=(+prior.monthly_rmr||0); fields.custom_billing=!!prior.custom_billing; fields.billing_schedule=Array.isArray(prior.billing_schedule)?prior.billing_schedule:[]; }
   try{ await patchRenewalFields(id,fields); }
   catch(e){ toast(e.message||'Revert failed'); return; }
+  // reverse the most recent active renewal-ledger row (kept for history)
+  try{ const {data}=await sb.from('rmr_renewals').select('id').eq('agreement_id',id).eq('status','active').order('renewal_no',{ascending:false}).limit(1);
+    if(data&&data[0]) await sb.from('rmr_renewals').update({status:'reversed',reversed_at:new Date().toISOString()}).eq('id',data[0].id);
+  }catch(_){}
   Object.assign(a,{renewed:false,renewal_date:null,renewal_credit_month:null,prerenewal_state:null});
   if('renewal_paid' in fields){ a.renewal_paid=false; a.renewal_snapshot=null; }
   if(prior){ a.monthly_rmr=fields.monthly_rmr; a.custom_billing=fields.custom_billing; a.billing_schedule=fields.billing_schedule; }
@@ -2286,7 +2321,7 @@ function readForm(){return{
   software_cost_annual:+$('f_soft').value||0,subcontractor_annual_cost:+$('f_sub').value||0,other_direct_annual:+$('f_other').value||0,
   target_margin:($('f_target').value.trim()===''?null:(+$('f_target').value/100)),
   owner_email:(canViewAll()&&$('ownerFld')&&$('ownerFld').style.display!=='none'&&$('f_owner').value)?$('f_owner').value:(editingId?((AGREEMENTS.find(a=>a.id===editingId)||{}).owner_email||CURRENT_EMAIL||null):(CURRENT_EMAIL||null)),
-  autorenew:$('f_auto').checked,notes:$('f_notes').value.trim(),
+  autorenew:($('f_type').value==='auto'),agreement_type:$('f_type').value,notes:$('f_notes').value.trim(),
   renewal_date:($('f_rendate')&&$('f_rendate').value)||null,
   renewal_credit_month:($('f_rencredit')&&$('f_rencredit').value)||null,
   stage:($('f_stage')&&$('f_stage').value)||null,
@@ -2533,7 +2568,7 @@ $('rnSave').onclick=saveRenew;
 $('renScrim').onclick=e=>{if(e.target===$('renScrim'))closeRenew();};
 $('rn_custom').onchange=toggleRnBilling;
 $('rnSchedAdd').onclick=()=>addRnSchedRow(1,'',false);
-['rn_date','rn_month','rn_rmr'].forEach(id=>{const el=$(id);if(el){el.addEventListener('input',updateRnPreview);el.addEventListener('change',updateRnPreview);}});
+['rn_date','rn_month','rn_rmr','rn_term'].forEach(id=>{const el=$(id);if(el){el.addEventListener('input',updateRnPreview);el.addEventListener('change',updateRnPreview);}});
 $('oppClose').onclick=closeOpp; $('oppCancel').onclick=closeOpp;
 $('oppSave').onclick=saveOpp;
 $('oppLost').onclick=()=>markLost(editingOppId);
@@ -2561,7 +2596,7 @@ $('marginFlag').onchange=()=>{const v=parseFloat($('marginFlag').value);if(!isNa
 $('agFilter').onchange=e=>{agFilter=(e.target.value==='all')?'all':+e.target.value;renderAgreements();};
 $('mClose').onclick=closeModal;$('mCancel').onclick=closeModal;
 $('scrim').onclick=e=>{if(e.target===$('scrim'))closeModal();};
-['f_num','f_cust','f_date','f_term','f_rmr','f_rate','f_freq','f_hrs','f_mat','f_mon','f_soft','f_sub','f_other','f_target','f_auto'].forEach(id=>{const el=$(id);el.addEventListener('input',updatePreview);el.addEventListener('change',updatePreview);});
+['f_num','f_cust','f_date','f_term','f_rmr','f_rate','f_freq','f_hrs','f_mat','f_mon','f_soft','f_sub','f_other','f_target','f_type'].forEach(id=>{const el=$(id);el.addEventListener('input',updatePreview);el.addEventListener('change',updatePreview);});
 function validateForm(row){
   const e=[];
   if(!row.agreement_number) e.push('Agreement # is required.');
