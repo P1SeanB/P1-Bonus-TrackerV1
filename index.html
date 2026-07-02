@@ -668,17 +668,21 @@
       <p id="gdExample"></p>
 
       <h3>Renewal commission — manual vs auto</h3>
-      <p>When an agreement reaches its renewal date, you earn a renewal commission. There are two kinds, and they behave differently:</p>
+      <p>When an agreement reaches its renewal date, you may earn a renewal commission. It depends on the agreement type:</p>
       <div class="guide-legend">
-        <div class="row"><b>Manual renewal</b> — you actively renew it. Pays the higher manual rate, and pays <b>every time</b> it's renewed (e.g. a 12-month deal renewed each year earns a manual commission each year). Lives in the <b>Pending manual renewals</b> table.</div>
-        <div class="row"><b>Auto-renewal</b> — it renews automatically under the contract. Pays the lower auto rate <b>one time only</b>, and only on <b>12 / 24-month</b> agreements. Lives in the <b>Pending auto-renewals</b> table. Once it's paid, no further auto-renewal commission is earned.</div>
+        <div class="row"><b>Manual renewal</b> — you actively renew it. Pays the higher manual rate <b>every cycle</b>, with no limit: a 12-month deal renewed each year earns a manual commission each year. Each renewal is recorded separately with its own amount and bonus quarter, so past cycles stay frozen while the next one is still pending. Lives in the <b>Pending manual renewals</b> table, which re-surfaces the agreement each time it comes due.</div>
+        <div class="row"><b>Auto-renewal</b> — renews automatically. Pays the lower auto rate <b>one time only</b>, and only on <b>12 / 24-month</b> agreements. Lives in the <b>Pending auto-renewals</b> table. Once it's paid, no further auto-renewal commission is earned.</div>
+        <div class="row"><b>One-Time / Month-to-Month</b> — earn <b>no</b> renewal commission at all.</div>
       </div>
-      <p>Both still run through the margin multiplier, and a deal under <b id="gdFloorInline">45%</b> margin pays <b>$0</b> and is flagged <b>Management Approval Required</b>.</p>
+      <p>Renewal commission still runs through the margin multiplier, and a deal under <b id="gdFloorInline">45%</b> margin pays <b>$0</b> and is flagged <b>Management Approval Required</b>.</p>
 
-      <h3>Autorenewal toggle — on or off</h3>
+      <h3>Agreement type — four kinds</h3>
+      <p>Every agreement is one of four types, chosen when it's created. The type decides how (and whether) renewal commission is earned:</p>
       <div class="guide-legend">
-        <div class="row"><b>ON</b> — treated as an auto-renewal: the lower one-time rate (12/24-mo only), paid automatically in the quarter it renews.</div>
-        <div class="row"><b>OFF</b> — treated as a manual renewal: it appears in <b>Pending manual renewals</b> and shifts color (green → amber → red) as the date nears. You renew it there to release the (higher) manual commission.</div>
+        <div class="row"><b>Manual Renewal</b> — you actively renew it each cycle. Appears in <b>Pending manual renewals</b>, pays the higher manual rate, and can be renewed <b>indefinitely</b>: every cycle earns its own commission, lands in its own bonus quarter, and is kept in the agreement's <b>renewal history</b>.</div>
+        <div class="row"><b>Auto-Renewal</b> — renews automatically under the contract. Pays the lower auto rate <b>one time only</b> (12 / 24-month agreements only) and never appears in Pending Renewals.</div>
+        <div class="row"><b>One-Time</b> — a single engagement with no renewal. Earns <b>no renewal commission</b>.</div>
+        <div class="row"><b>Month-to-Month</b> — ongoing with no fixed renewal cycle. Earns <b>no renewal commission</b>.</div>
       </div>
 
       <h3>Renegotiated an auto-renewal? Convert it</h3>
@@ -929,7 +933,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-19';
+const APP_VERSION='P1RMR-20';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
