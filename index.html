@@ -449,6 +449,12 @@
       <div style="font-size:13px;color:var(--muted)">Edit the active commission plan. Changes apply <b style="color:var(--ink)">immediately</b> to unpaid calculations. Paid commissions are frozen and never recalculated (§5.6).</div>
     </div>
     <div id="adminWrap"></div>
+    <div class="panel" id="ledgerPanel" style="display:none;margin-top:18px">
+      <div class="panel-head"><h2>Commission ledger — Phase 1 parity check</h2><span class="qctx">builds the new event ledger and verifies it matches today's numbers</span></div>
+      <div style="padding:10px 16px 0;font-size:12.5px;color:var(--muted);line-height:1.5">Writes your commissions into the new <b>rmr_commission_events</b> table and checks each agreement's ledger total against the live model. This changes <b>no payouts and no other screens</b> — it's groundwork for the new engine. Already-paid commissions are backfilled as frozen <b>Paid</b> events and are never altered on re-runs.</div>
+      <div style="padding:12px 16px"><button class="btn-primary" id="ledgerBuildBtn">Build / refresh ledger</button></div>
+      <div id="ledgerReconWrap" style="padding:0 16px 16px"></div>
+    </div>
   </section>
 </main>
 </div>
@@ -884,7 +890,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-15';
+const APP_VERSION='P1RMR-16';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1161,7 +1167,7 @@ function renderScopeBar(){
     `<span class="scopecount">${n} agreement${n===1?'':'s'}</span>`;
   $('scopeSel').onchange=function(){ USER_FILTER=(this.value==='__all')?null:[this.value]; render(); };
 }
-function render(){ renderScopeBar(); if(view==='quarter')renderQuarter(); if(view==='opportunities')renderOpportunities(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='forecast')renderForecast(); if(view==='history')renderHistory(); if(view==='reports')renderReports(); if(view==='admin')renderAdmin(); renderLegend(); if($('guideScrim')&&$('guideScrim').classList.contains('show'))renderGuide(); }
+function render(){ renderScopeBar(); if(view==='quarter')renderQuarter(); if(view==='opportunities')renderOpportunities(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='forecast')renderForecast(); if(view==='history')renderHistory(); if(view==='reports')renderReports(); if(view==='admin'){renderAdmin(); const lp=$('ledgerPanel'); if(lp){ if(can('editConfig')){ lp.style.display=''; renderLedgerRecon(); } else lp.style.display='none'; } } renderLegend(); if($('guideScrim')&&$('guideScrim').classList.contains('show'))renderGuide(); }
 function renderQuarter(){
   buildQuarterOptions();$('qSelect').value=selQI;
   $('qCtx').textContent=selQI===CUR_QI?'Current quarter':(selQI<CUR_QI?'Past quarter':'Upcoming quarter');
@@ -1995,6 +2001,72 @@ async function revertRenewal(id){
   toast('Renewal reverted — back in Pending Renewals');
   render();
 }
+/* ---- Commission ledger — Phase 1 (mirror today's model into rmr_commission_events) ----
+   Generates the event set an agreement has TODAY (initial + optional renewal), so ledger
+   totals reconcile to the quarter view penny-for-penny. Holdback/accelerator split lands
+   in Phase 3. Paid events are frozen and never rewritten. */
+function buildEventsForAgreement(a){
+  const c=compute(a); const out=[];
+  const fi=frozenAmount(a,'initial');
+  if(c.initialQI!=null && fi.amount>0){
+    out.push({kind:'standard_initial', amount:fi.amount, status:a.paid_initial?'Paid':'Eligible',
+      bonus_qi:c.initialQI, paid_on:(a.paid_initial&&fi.snap&&fi.snap.paid_date)?fi.snap.paid_date:null, snapshot:fi.frozen?fi.snap:null});
+  }
+  const renewed=!!a.autorenew||!!a.renewed;
+  const fr=frozenAmount(a,'renewal');
+  if(renewed && c.renewalQI!=null && fr.amount>0){
+    out.push({kind:'renewal', amount:fr.amount, status:a.renewal_paid?'Paid':'Eligible',
+      bonus_qi:c.renewalQI, paid_on:(a.renewal_paid&&fr.snap&&fr.snap.paid_date)?fr.snap.paid_date:null, snapshot:fr.frozen?fr.snap:null});
+  }
+  return out;
+}
+async function syncLedger(){
+  if(!can('editConfig')){ toast('Administrator only.'); return; }
+  const btn=$('ledgerBuildBtn'); if(btn){btn.disabled=true;btn.textContent='Building…';}
+  try{
+    const {data,error}=await sb.from('rmr_commission_events').select('*'); if(error)throw error;
+    const byAgr={}; (data||[]).forEach(e=>{(byAgr[e.agreement_id]=byAgr[e.agreement_id]||[]).push(e);});
+    const now=new Date().toISOString(); const upserts=[], deletes=[];
+    AGREEMENTS.filter(isLiveAgreement).forEach(a=>{
+      const desired=buildEventsForAgreement(a); const existing=byAgr[a.id]||[]; const dk=desired.map(d=>d.kind);
+      desired.forEach(d=>{
+        const ex=existing.find(e=>e.kind===d.kind);
+        if(ex && ex.status==='Paid') return;               // immutable — never touch paid history
+        const row={ id: ex?ex.id:(crypto.randomUUID?crypto.randomUUID():(''+Date.now()+Math.random().toString(16).slice(2))),
+          agreement_id:a.id, kind:d.kind, amount:d.amount, status:d.status, bonus_qi:d.bonus_qi,
+          eligible_on:d.eligible_on||null, paid_on:d.paid_on||null, snapshot:d.snapshot||null, note:'phase1 backfill', updated_at:now };
+        if(!ex) row.created_at=now;
+        upserts.push(row);
+      });
+      existing.filter(e=>e.status!=='Paid' && !dk.includes(e.kind)).forEach(e=>deletes.push(e.id));
+    });
+    for(let i=0;i<upserts.length;i+=200){ const {error:ue}=await sb.from('rmr_commission_events').upsert(upserts.slice(i,i+200)); if(ue)throw ue; }
+    if(deletes.length){ const {error:de}=await sb.from('rmr_commission_events').delete().in('id',deletes); if(de)throw de; }
+    audit('Commission ledger built','Admin',null,null,{events_written:upserts.length,removed:deletes.length});
+    toast(`Ledger built — ${upserts.length} event${upserts.length===1?'':'s'} written`);
+  }catch(e){ toast(/rmr_commission_events|relation|does not exist|column/i.test(e.message||'')?'Run migration_v13 first to create the ledger tables.':(e.message||'Build failed')); }
+  if(btn){btn.disabled=false;btn.textContent='Build / refresh ledger';}
+  renderLedgerRecon();
+}
+async function renderLedgerRecon(){
+  const box=$('ledgerReconWrap'); if(!box) return;
+  box.innerHTML='<div style="color:var(--muted);font-size:13px">Loading ledger…</div>';
+  let events=[];
+  try{ const {data,error}=await sb.from('rmr_commission_events').select('*'); if(error)throw error; events=data||[]; }
+  catch(e){ box.innerHTML=`<div style="color:var(--muted);font-size:13px">${/rmr_commission_events|relation|does not exist|column/i.test(e.message||'')?'Run <b>migration_v13</b> to create the ledger tables, then click Build.':'Could not load ledger.'}</div>`; return; }
+  const byAgr={}; events.forEach(e=>{(byAgr[e.agreement_id]=byAgr[e.agreement_id]||[]).push(e);});
+  const live=AGREEMENTS.filter(isLiveAgreement);
+  let match=0,mismatch=0,built=0,rows='';
+  live.forEach(a=>{
+    const desired=buildEventsForAgreement(a); const liveTotal=desired.reduce((s,d)=>s+d.amount,0);
+    const evs=(byAgr[a.id]||[]).filter(e=>e.status!=='Reversed'); const ledgerTotal=evs.reduce((s,e)=>s+(+e.amount||0),0);
+    const has=evs.length>0; if(has)built++; const ok=Math.abs(liveTotal-ledgerTotal)<0.005; if(has){ ok?match++:mismatch++; }
+    rows+=`<tr><td class="ag-no">${esc(a.agreement_number||a.opportunity_number||'—')}</td><td>${esc(a.customer_name||'—')}</td><td class="num mono">${fmt(liveTotal)}</td><td class="num mono">${has?fmt(ledgerTotal):'<span style="color:var(--none)">—</span>'}</td><td>${!has?'<span style="color:var(--muted)">not built</span>':(ok?'<span style="color:var(--payable);font-weight:600">✓ match</span>':'<span style="color:var(--held);font-weight:600">✗ off</span>')}</td></tr>`;
+  });
+  const summary=`<b style="color:var(--payable)">${match}</b> reconcile${mismatch?` · <b style="color:var(--held)">${mismatch} mismatched</b>`:''} · ${built} of ${live.length} live agreements built`;
+  box.innerHTML=`<div class="qctx" style="padding:0 0 8px">${summary}</div><table><thead><tr><th>Agreement</th><th>Customer</th><th class="num">Live total</th><th class="num">Ledger total</th><th>Parity</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 /* ---- File attachments (Supabase Storage + rmr_attachments metadata) ----
    Keyed to the agreement row UUID, which is shared by the opportunity and the
    won agreement — so files carry over on conversion with no migration. */
@@ -2466,6 +2538,7 @@ $('oppClose').onclick=closeOpp; $('oppCancel').onclick=closeOpp;
 $('oppSave').onclick=saveOpp;
 $('oppLost').onclick=()=>markLost(editingOppId);
 $('oppDelete').onclick=()=>deleteOpp(editingOppId);
+if($('ledgerBuildBtn')) $('ledgerBuildBtn').onclick=syncLedger;
 $('oppScrim').onclick=e=>{if(e.target===$('oppScrim'))closeOpp();};
 $('oppAddBtn').onclick=()=>{ if(!sb){toast('Sign in first');return;} openOpp(null); };
 $('oppSearch').addEventListener('input',()=>{if(view==='opportunities')renderOpportunities();});
