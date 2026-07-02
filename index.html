@@ -471,7 +471,8 @@
         <div class="fld"><label>Customer</label><input id="f_cust" placeholder="Customer name"></div>
         <div class="fld"><label>Customer # <span class="hint">reference</span></label><input id="f_custnum" placeholder="optional"></div>
         <div class="fld"><label>Site # <span class="hint">reference</span></label><input id="f_sitenum" placeholder="optional"></div>
-        <div class="fld"><label>Activation / sale date</label><input id="f_date" type="date"></div>
+        <div class="fld"><label>Signing / sale date <span class="hint">when it's sold — sets the initial commission quarter & renewal timing</span></label><input id="f_date" type="date"></div>
+        <div class="fld"><label>First billing date <span class="hint">when invoicing starts — drives holdback & accelerator release; blank = same as signing</span></label><input id="f_billdate" type="date"></div>
         <div class="fld" id="ownerFld"><label>Assigned to <span class="hint">sales rep / owner</span></label>
           <select id="f_owner"></select>
         </div>
@@ -844,7 +845,7 @@ function compute(a,plan){
   const rate=+a.loaded_labor_rate||0;
   // billing schedule → annual billed → MRR (handles custom / uneven invoicing through the year)
   const sched=(a.custom_billing&&Array.isArray(a.billing_schedule)&&a.billing_schedule.length)?a.billing_schedule:null;
-  let actMonth0=0; if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad))actMonth0=ad.getMonth();}
+  let actMonth0=0; const billDateStr=a.first_billing_date||a.activation_date; if(billDateStr){const bd=new Date(billDateStr+'T00:00:00');if(!isNaN(bd))actMonth0=bd.getMonth();}
   const flatRmr=+a.monthly_rmr||0;
   function revAt(m){ if(!sched)return flatRmr; const since=m-1,cal=((actMonth0+since)%12)+1; let s=0; for(const r of sched){if((+r.month)===cal){if(r.once&&since>=12)continue; s+=(+r.amount||0);}} return s; }
   let annualBilled=0; for(let m=1;m<=12;m++)annualBilled+=revAt(m);
@@ -906,7 +907,8 @@ function compute(a,plan){
   // timing
   let initialQI=null,renewalDate=null,renewalQI=null,holdbackQI=null,acceleratorQI=null,holdbackReleaseDate=null,acceleratorReleaseDate=null;
   if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad)){initialQI=qIndexFromYM(ad.getFullYear(),ad.getMonth());if(term>0&&!noRenewal){renewalDate=addMonths(ad,term);renewalQI=qIndexFromYM(renewalDate.getFullYear(),renewalDate.getMonth());}
-    if(!legacyFull){ holdbackReleaseDate=addMonths(ad,holdbackReleaseMonth); holdbackQI=qIndexFromYM(holdbackReleaseDate.getFullYear(),holdbackReleaseDate.getMonth()); acceleratorReleaseDate=addMonths(ad,accelReleaseMonth); acceleratorQI=qIndexFromYM(acceleratorReleaseDate.getFullYear(),acceleratorReleaseDate.getMonth()); }
+    if(!legacyFull){ const bd=new Date((a.first_billing_date||a.activation_date)+'T00:00:00'); const rb=isNaN(bd)?ad:bd;   // releases measured from FIRST BILLING (revenue start)
+      holdbackReleaseDate=addMonths(rb,holdbackReleaseMonth); holdbackQI=qIndexFromYM(holdbackReleaseDate.getFullYear(),holdbackReleaseDate.getMonth()); acceleratorReleaseDate=addMonths(rb,accelReleaseMonth); acceleratorQI=qIndexFromYM(acceleratorReleaseDate.getFullYear(),acceleratorReleaseDate.getMonth()); }
   }}
   // Once renewed, the credited quarter follows the Renewal Month entered on the Renew form (not the activation+term math).
   if(a.renewed && a.renewal_credit_month){const m=String(a.renewal_credit_month).match(/^(\d{4})-(\d{2})$/);if(m){renewalQI=qIndexFromYM(+m[1],+m[2]-1);}}
@@ -975,7 +977,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-25';
+const APP_VERSION='P1RMR-26';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1170,7 +1172,7 @@ async function upsert(row){
   async function go(p){ if(p.id){const {error}=await sb.from('rmr_agreements').update(p).eq('id',p.id);if(error)throw error;} else {const {error}=await sb.from('rmr_agreements').insert(p);if(error)throw error;} }
   try{ await go(payload); }
   catch(e){ // ref columns not migrated yet → retry without them so saving still works
-    if(/customer_number|site_number|owner_email|converted_to_manual|conversion_|renewal_date|renewal_credit_month|prerenewal_state|stage|opportunity_number|estimate_ref|est_monthly_rmr|expected_close|lost_reason|agreement_type|legacy_full_pay|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,converted_to_manual,conversion_date,conversion_notes,conversion_ref,renewal_date,renewal_credit_month,prerenewal_state,stage,opportunity_number,estimate_ref,est_monthly_rmr,expected_close,lost_reason,agreement_type,legacy_full_pay,...rest}=payload; await go(rest); }
+    if(/customer_number|site_number|owner_email|converted_to_manual|conversion_|renewal_date|renewal_credit_month|prerenewal_state|stage|opportunity_number|estimate_ref|est_monthly_rmr|expected_close|lost_reason|agreement_type|legacy_full_pay|first_billing_date|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,converted_to_manual,conversion_date,conversion_notes,conversion_ref,renewal_date,renewal_credit_month,prerenewal_state,stage,opportunity_number,estimate_ref,est_monthly_rmr,expected_close,lost_reason,agreement_type,legacy_full_pay,first_billing_date,...rest}=payload; await go(rest); }
     else throw e;
   }
 }
@@ -1986,6 +1988,7 @@ function openModal(id,promote){
   const v=(k,d='')=>a?(a[k]??d):d;
   $('f_num').value=v('agreement_number');$('f_cust').value=v('customer_name');$('f_custnum').value=v('customer_number');$('f_sitenum').value=v('site_number');
   $('f_date').value=v('activation_date')||(a?'':todayISO());
+  $('f_billdate').value=(a&&a.first_billing_date)?String(a.first_billing_date).slice(0,10):'';
   $('f_term').value=a?String(a.contract_term):'12';
   $('f_rmr').value=v('monthly_rmr');
   $('f_custom').checked=!!(a&&a.custom_billing);
@@ -2504,7 +2507,7 @@ function renderOpportunities(){
 }
 function readForm(){return{
   id:editingId||undefined,agreement_number:$('f_num').value.trim(),customer_name:$('f_cust').value.trim(),customer_number:$('f_custnum').value.trim()||null,site_number:$('f_sitenum').value.trim()||null,
-  activation_date:$('f_date').value||null,contract_term:+$('f_term').value,monthly_rmr:+$('f_rmr').value||0,
+  activation_date:$('f_date').value||null,first_billing_date:$('f_billdate').value||null,contract_term:+$('f_term').value,monthly_rmr:+$('f_rmr').value||0,
   loaded_labor_rate:+$('f_rate').value||0,
   custom_billing:$('f_custom').checked,billing_schedule:readSchedule(),
   inspection_frequency:+$('f_freq').value,hours_per_inspection:+$('f_hrs').value||0,
@@ -2808,12 +2811,12 @@ $('marginFlag').onchange=()=>{const v=parseFloat($('marginFlag').value);if(!isNa
 $('agFilter').onchange=e=>{agFilter=(e.target.value==='all')?'all':+e.target.value;renderAgreements();};
 $('mClose').onclick=closeModal;$('mCancel').onclick=closeModal;
 $('scrim').onclick=e=>{if(e.target===$('scrim'))closeModal();};
-['f_num','f_cust','f_date','f_term','f_rmr','f_rate','f_freq','f_hrs','f_mat','f_mon','f_soft','f_sub','f_other','f_target','f_type'].forEach(id=>{const el=$(id);el.addEventListener('input',updatePreview);el.addEventListener('change',updatePreview);});
+['f_num','f_cust','f_date','f_billdate','f_term','f_rmr','f_rate','f_freq','f_hrs','f_mat','f_mon','f_soft','f_sub','f_other','f_target','f_type'].forEach(id=>{const el=$(id);el.addEventListener('input',updatePreview);el.addEventListener('change',updatePreview);});
 function validateForm(row){
   const e=[];
   if(!row.agreement_number) e.push('Agreement # is required.');
   if(!row.customer_name) e.push('Customer is required.');
-  if(!row.activation_date) e.push('Activation / sale date is required (it sets when the commission lands).');
+  if(!row.activation_date) e.push('Signing / sale date is required (it sets when the commission lands).');
   if(!(row.monthly_rmr>0) && !(row.custom_billing && (row.billing_schedule||[]).some(r=>+r.amount>0))) e.push('Monthly Recurring Revenue must be greater than 0.');
   if(row.monthly_rmr<0) e.push('Recurring revenue cannot be negative.');
   const costs={'Loaded labor rate':row.loaded_labor_rate,'Materials':row.material_cost_annual,'Monitoring':row.monitoring_cost_annual,'Software licensing':row.software_cost_annual,'Subcontractors':row.subcontractor_annual_cost,'Other direct':row.other_direct_annual};
