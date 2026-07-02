@@ -523,6 +523,8 @@
         <div class="fld full" id="renStatusFld"><label style="color:var(--muted)" id="renStatusTxt">Not yet renewed — use the <b>Renew</b> button on Pending Renewals.</label></div>
         <div class="fld"><label>Renewal date <span class="hint">effective date once renewed</span></label><input id="f_rendate" type="date"></div>
         <div class="fld"><label>Renewal month <span class="hint">quarter the bonus credits to</span></label><input id="f_rencredit" type="month"></div>
+        <div class="fld full"><div class="fieldset-h" style="margin-top:2px">Renewal history</div><div id="renHist" class="file-block"></div></div>
+        <div class="fld full" id="renStatusFld2" style="display:none"></div>
         <div class="fld full"><label>Estimate # <span class="hint">SSE quote reference — ties this agreement back to its opportunity</span></label><input id="f_estref" placeholder="e.g. SSE-045-26"></div>
         <div class="fld full"><label>Notes</label><input id="f_notes" placeholder="Optional"></div>
         <div class="fld full"><div class="fieldset-h" style="margin-top:2px">Files</div><div id="agFiles" class="file-block"></div></div>
@@ -905,7 +907,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-17';
+const APP_VERSION='P1RMR-18';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1859,6 +1861,7 @@ function openModal(id,promote){
     $('renStatusTxt').innerHTML='Not yet renewed — use the <b>Renew</b> button on Pending Renewals.';
   }
   $('mRevert').style.display=renewed?'inline-block':'none';
+  renderRenewalHistory(a?a.id:null);
   $('f_notes').value=v('notes');$('mDelete').style.display=a?'inline-block':'none';
   // Assigned-to / owner picker — only for roles that can see all users
   const ownerFld=$('ownerFld');
@@ -1996,8 +1999,8 @@ async function saveRenew(){
   try{ res=await patchRenewalFields(a.id,{renewed:true,renewal_date:renewDate,renewal_credit_month:month,prerenewal_state:prior,monthly_rmr:newRmr,contract_term:newTerm,custom_billing:custom,billing_schedule:newSched}); }
   catch(e){ $('rnErr').textContent=e.message||'Renewal failed'; $('rnErr').style.display='block'; return; }
   Object.assign(a,{renewed:true,renewal_date:renewDate,renewal_credit_month:month,prerenewal_state:prior,monthly_rmr:newRmr,contract_term:newTerm,custom_billing:custom,billing_schedule:newSched});
-  const ledgered=await writeRenewalRow(a,{renewDate,month,term:newTerm,priorRmr:prior.monthly_rmr,newRmr,sched:newSched,note});
   const c=compute(a),mm=month.match(/^(\d{4})-(\d{2})$/);
+  const ledgered=await writeRenewalRow(a,{renewDate,month,term:newTerm,priorRmr:prior.monthly_rmr,newRmr,sched:newSched,note,commission:c.renewalCommission});
   audit('Manual renewal recorded','Renewals',a.agreement_number,{monthly_rmr:prior.monthly_rmr,custom_billing:prior.custom_billing},
     {agreement:a.agreement_number,customer:a.customer_name,renewal_date:renewDate,term:newTerm,note,credits_to:mm?qLabel(qIndexFromYM(+mm[1],+mm[2]-1)):null,new_mrr:newRmr,renewal_commission:c.renewalCommission},null);
   closeRenew();
@@ -2005,14 +2008,18 @@ async function saveRenew(){
   render();
 }
 async function writeRenewalRow(a,o){
+  let no=1; try{ const {data}=await sb.from('rmr_renewals').select('id').eq('agreement_id',a.id); no=((data||[]).length)+1; }catch(_){}
+  const mm=String(o.month||'').match(/^(\d{4})-(\d{2})$/); const qi=mm?qIndexFromYM(+mm[1],+mm[2]-1):null;
+  const base={agreement_id:a.id,renewal_no:no,renewal_date:o.renewDate,credit_qi:qi,credit_month:o.month,
+    term:o.term,new_term:o.term,previous_rmr:o.priorRmr,renewed_rmr:o.newRmr,billing_schedule:o.sched||null,status:'active',note:o.note||null,
+    created_by:CURRENT_EMAIL||null,created_at:new Date().toISOString()};
+  const full={...base,commission_amount:(o.commission!=null?o.commission:null),paid:false};
   try{
-    let no=1; try{ const {data}=await sb.from('rmr_renewals').select('id').eq('agreement_id',a.id); no=((data||[]).length)+1; }catch(_){}
-    const mm=String(o.month||'').match(/^(\d{4})-(\d{2})$/); const qi=mm?qIndexFromYM(+mm[1],+mm[2]-1):null;
-    const {error}=await sb.from('rmr_renewals').insert({agreement_id:a.id,renewal_no:no,renewal_date:o.renewDate,credit_qi:qi,credit_month:o.month,
-      term:o.term,new_term:o.term,previous_rmr:o.priorRmr,renewed_rmr:o.newRmr,billing_schedule:o.sched||null,status:'active',note:o.note||null,
-      created_by:CURRENT_EMAIL||null,created_at:new Date().toISOString()});
-    if(error) throw error; return true;
-  }catch(e){ return false; }   // ledger table may be unmigrated; renewal still succeeds via the lightweight fields
+    let {error}=await sb.from('rmr_renewals').insert(full);
+    if(error && /commission_amount|paid|column/i.test(error.message||'')){ ({error}=await sb.from('rmr_renewals').insert(base)); }
+    if(error) throw error;
+    await loadRenewals(); return true;
+  }catch(e){ return false; }   // ledger table unmigrated; renewal still succeeds via the lightweight fields
 }
 async function revertRenewal(id){
   if(!can('editAgreements')){ toast('Your role cannot revert renewals.'); return; }
@@ -2036,6 +2043,19 @@ async function revertRenewal(id){
   toast('Renewal reverted — back in Pending Renewals');
   render();
 }
+function renderRenewalHistory(agreementId){
+  const box=$('renHist'); if(!box) return;
+  const rows=agreementId?renewalsFor(agreementId).slice().sort((a,b)=>(a.renewal_no||0)-(b.renewal_no||0)):[];
+  if(!rows.length){ box.innerHTML='<div class="file-hint">No renewals recorded yet.</div>'; return; }
+  box.innerHTML='<div class="file-list">'+rows.map(r=>{
+    const rev=r.status==='reversed';
+    const bits=[`#${r.renewal_no||'—'}`, r.renewal_date?esc(String(r.renewal_date).slice(0,10)):'—', ((r.term||r.new_term)?((r.term||r.new_term)+'mo'):''),
+      'RMR '+fmt(+r.renewed_rmr||0), (r.commission_amount!=null?('comm '+fmt(+r.commission_amount)):''), (r.credit_qi!=null?qLabel(r.credit_qi):''),
+      (r.paid?'✓ paid':''), (r.note?esc(r.note):'')].filter(Boolean).join(' · ');
+    return `<div class="file-row"${rev?' style="opacity:.55"':''}><div class="fr-meta" style="font-size:12px;color:var(--ink)">${bits}${rev?' · <b style="color:var(--held)">reversed</b>':''}</div></div>`;
+  }).join('')+'</div>';
+}
+
 /* ---- Commission ledger — Phase 1 (mirror today's model into rmr_commission_events) ----
    Generates the event set an agreement has TODAY (initial + optional renewal), so ledger
    totals reconcile to the quarter view penny-for-penny. Holdback/accelerator split lands
@@ -2059,6 +2079,26 @@ async function syncLedger(){
   if(!can('editConfig')){ toast('Administrator only.'); return; }
   const btn=$('ledgerBuildBtn'); if(btn){btn.disabled=true;btn.textContent='Building…';}
   try{
+    // Backfill renewal cycles: every renewed agreement gets a complete ledger row (commission + paid) it can be paid from per-cycle.
+    for(const a of AGREEMENTS.filter(isLiveAgreement)){
+      if(!a.renewed) continue;
+      const fr=frozenAmount(a,'renewal');
+      const mm=String(a.renewal_credit_month||'').match(/^(\d{4})-(\d{2})$/);
+      const qi=mm?qIndexFromYM(+mm[1],+mm[2]-1):compute(a).renewalQI;
+      const paidDate=(a.renewal_paid&&a.renewal_snapshot&&a.renewal_snapshot.paid_date)?a.renewal_snapshot.paid_date:null;
+      const rows=renewalsFor(a.id).filter(r=>r.status!=='reversed');
+      try{
+        if(!rows.length){
+          await sb.from('rmr_renewals').insert({agreement_id:a.id,renewal_no:1,renewal_date:a.renewal_date||null,credit_qi:qi,credit_month:a.renewal_credit_month||null,
+            term:+a.contract_term||null,new_term:+a.contract_term||null,previous_rmr:(a.prerenewal_state&&a.prerenewal_state.monthly_rmr)||null,renewed_rmr:+a.monthly_rmr||null,
+            commission_amount:fr.amount,paid:!!a.renewal_paid,paid_snapshot:a.renewal_snapshot||null,paid_date:paidDate,billing_schedule:a.billing_schedule||null,status:'active',created_by:CURRENT_EMAIL||null,created_at:new Date().toISOString()});
+        } else {
+          const r=rows[rows.length-1];
+          if(r.commission_amount==null) await sb.from('rmr_renewals').update({commission_amount:fr.amount,paid:!!a.renewal_paid,paid_snapshot:a.renewal_snapshot||null,paid_date:paidDate,credit_qi:r.credit_qi!=null?r.credit_qi:qi}).eq('id',r.id);
+        }
+      }catch(_){}
+    }
+    await loadRenewals();
     const {data,error}=await sb.from('rmr_commission_events').select('*'); if(error)throw error;
     const byAgr={}; (data||[]).forEach(e=>{(byAgr[e.agreement_id]=byAgr[e.agreement_id]||[]).push(e);});
     const now=new Date().toISOString(); const upserts=[], deletes=[];
