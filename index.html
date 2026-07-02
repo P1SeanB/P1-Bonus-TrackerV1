@@ -933,7 +933,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-20';
+const APP_VERSION='P1RMR-21';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -2588,8 +2588,8 @@ function renderGuide(){
   // 1 · deal value
   const dv=$('gdDealValue');
   if(dv) dv.innerHTML=acv
-    ? `Your plan uses <b>Annual Contract Value (ACV)</b> — your monthly RMR × 12. A $6,500/mo deal has an ACV of <b>$78,000</b>, no matter the contract length. <span style="color:var(--muted)">(An administrator can switch a plan to Total Contract Value — RMR × the full term — in the Admin tab.)</span>`
-    : `Your plan uses <b>Total Contract Value (TCV)</b> — your monthly RMR × the full length of the contract. A $6,500/mo deal on a 36-month contract has a TCV of <b>$234,000</b>. <span style="color:var(--muted)">(An administrator can switch a plan to Annual Contract Value — RMR × 12 — in the Admin tab.)</span>`;
+    ? `Your plan uses <b>Annual Contract Value (ACV)</b> — your monthly RMR × 12. A $100/mo deal has an ACV of <b>$1,200</b>, no matter the contract length. <span style="color:var(--muted)">(An administrator can switch a plan to Total Contract Value — RMR × the full term — in the Admin tab.)</span>`
+    : `Your plan uses <b>Total Contract Value (TCV)</b> — your monthly RMR × the full length of the contract. A $100/mo deal on a 36-month contract has a TCV of <b>$3,600</b>. <span style="color:var(--muted)">(An administrator can switch a plan to Annual Contract Value — RMR × 12 — in the Admin tab.)</span>`;
   // 2 · term percentage table
   const terms=[12,24,36,48,60];
   $('gdTermBody').innerHTML=terms.map(t=>{
@@ -2613,13 +2613,13 @@ function renderGuide(){
   if(note) note.innerHTML=`Below ${floor}% margin the deal <b>isn't eligible</b> — it pays <b>$0</b> until a manager approves an exception. <b>Margin affects your pay.</b>`;
   if($('gdFloorInline')) $('gdFloorInline').textContent=floor+'%';
   // worked example, computed under THIS plan
-  const base=acv?78000:234000;
+  const base=acv?1200:3600;
   const r36=pctFor(plan.newPct,36)||0;
   const top=tiers[0]||{mult:1,min:0};
   const std=tiers.find(t=>Math.abs(t.mult-1)<1e-9)||tiers.find(t=>t.mult>0&&t.mult<top.mult)||top;
   const money=n=>'$'+Math.round(n).toLocaleString();
   const ex=$('gdExample');
-  if(ex) ex.innerHTML=`A <b>$6,500/mo, 36-month</b> deal at <b>${pn(top.min)}%+ margin</b>:<br>`+
+  if(ex) ex.innerHTML=`A <b>$100/mo, 36-month</b> deal at <b>${pn(top.min)}%+ margin</b>:<br>`+
     `${money(base)} (${acv?'ACV':'TCV'}) × ${pc(r36)} (36-mo rate) × ${top.mult} (${pn(top.min)}%+ margin) = <b>${money(base*r36*top.mult)}</b>.<br>`+
     `The same deal at ${pn(std.min)}% margin would be ×${std.mult} = <b>${money(base*r36*std.mult)}</b>.`;
 }
