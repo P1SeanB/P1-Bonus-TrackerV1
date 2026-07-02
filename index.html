@@ -723,7 +723,7 @@
           <tr><td><b>Accelerator</b><div style="font-size:11px;color:var(--muted)">the high-margin bonus (the ×-above-1.0 part)</div></td><td>the margin bump</td><td>In <b>6-month pieces</b>, each released as that window's revenue is collected</td></tr>
         </tbody>
       </table>
-      <div class="guide-callout">Example — a <b>$100/mo, 12-month</b> deal at 62% margin earns <b>$90</b> total. You'd see <b>$54 now</b> (75%), <b>$18</b> once $300 is collected (~month 3), and the <b>$18 accelerator in two $9 pieces</b> at months 6 and 12. Same $90 — paid as the deal delivers.</div>
+      <div class="guide-callout" id="gdPayEx"></div>
       <p style="font-size:12.5px;color:var(--muted)">The holds protect against early cancellation and confirm profitability — if a payment is missed, that piece waits until enough is collected. <b>Renewals aren't held</b> — they pay in full when renewed. Deals sold <b>before 2026</b>, and anything already paid, pay 100% up front unchanged.</p>
 
       <h3>Where to see your money</h3>
@@ -1081,7 +1081,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-31';
+const APP_VERSION='P1RMR-32';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -2962,6 +2962,15 @@ function renderGuide(){
   if(ex) ex.innerHTML=`A <b>$100/mo, 36-month</b> deal at <b>${pn(top.min)}%+ margin</b>:<br>`+
     `${money(base)} (${acv?'ACV':'TCV'}) × ${pc(r36)} (36-mo rate) × ${top.mult} (${pn(top.min)}%+ margin) = <b>${money(base*r36*top.mult)}</b>.<br>`+
     `The same deal at ${pn(std.min)}% margin would be ×${std.mult} = <b>${money(base*r36*std.mult)}</b>.`;
+  // payout-over-time example — computed under THIS plan, for a 12-month deal (ACV = TCV at 12 months)
+  const rate12=pctFor(plan.newPct,12)||0, dealVal=1200;
+  const base12=dealVal*rate12;
+  const imPct=(plan.immediatePct!=null?plan.immediatePct:0.75), hbPct=(plan.holdbackPct!=null?plan.holdbackPct:0.25), hbThreshPct=(plan.holdbackThresholdPct!=null?plan.holdbackThresholdPct:0.25);
+  const std12=base12*Math.min(top.mult,1), imm=std12*imPct, hb=std12*hbPct, accel=base12*Math.max(top.mult-1,0), tot=base12*top.mult, per=accel/2;
+  const px=$('gdPayEx');
+  if(px) px.innerHTML = accel>0
+    ? `<b>Example (your plan)</b> — a <b>$100/mo, 12-month</b> deal at <b>${pn(top.min)}%+ margin</b> earns <b>${money(tot)}</b> total. You'd see <b>${money(imm)} now</b> (${Math.round(imPct*100)}%), <b>${money(hb)}</b> once <b>${money(dealVal*hbThreshPct)}</b> is collected (~month 3), then the <b>${money(accel)} accelerator</b> as two <b>${money(per)}</b> pieces at months 6 &amp; 12. Same ${money(tot)} — paid as the deal delivers.`
+    : `<b>Example (your plan)</b> — a <b>$100/mo, 12-month</b> deal at <b>${pn(top.min)}%+ margin</b> earns <b>${money(tot)}</b>: <b>${money(imm)} now</b> (${Math.round(imPct*100)}%) and <b>${money(hb)}</b> once <b>${money(dealVal*hbThreshPct)}</b> is collected (~month 3). At this margin there's no accelerator bump.`;
 }
 function openGuide(){ renderGuide(); $('guideScrim').classList.add('show');$('guideScrim').querySelector('.guide-body').scrollTop=0;}
 $('guideBtn').onclick=openGuide;
