@@ -701,35 +701,41 @@
       <h3>Put it together — an example</h3>
       <p id="gdExample"></p>
 
-      <h3>Renewal commission — manual vs auto</h3>
-      <p>When an agreement reaches its renewal date, you may earn a renewal commission. It depends on the agreement type:</p>
-      <div class="guide-legend">
-        <div class="row"><b>Manual renewal</b> — you actively renew it. Pays the higher manual rate <b>every cycle</b>, with no limit: a 12-month deal renewed each year earns a manual commission each year. Each renewal is recorded separately with its own amount and bonus quarter, so past cycles stay frozen while the next one is still pending. Lives in the <b>Pending manual renewals</b> table, which re-surfaces the agreement each time it comes due.</div>
-        <div class="row"><b>Auto-renewal</b> — renews automatically. Pays the lower auto rate <b>one time only</b>, and only on <b>12 / 24-month</b> agreements. Lives in the <b>Pending auto-renewals</b> table. Once it's paid, no further auto-renewal commission is earned.</div>
-        <div class="row"><b>One-Time / Month-to-Month</b> — earn <b>no</b> renewal commission at all.</div>
-      </div>
-      <p>Renewal commission still runs through the margin multiplier, and a deal under <b id="gdFloorInline">45%</b> margin pays <b>$0</b> and is flagged <b>Management Approval Required</b>.</p>
+      <h3>Renewals — how each agreement type behaves</h3>
+      <p>Every agreement is one of four types, set when it's created, which decides its renewal commission:</p>
+      <table class="guide-table">
+        <thead><tr><th>Type</th><th>Renewal commission</th></tr></thead>
+        <tbody>
+          <tr><td><b>Manual Renewal</b></td><td>Higher manual rate, <b>every cycle with no limit</b> — a 12-month deal renewed yearly pays every year. Each cycle is its own line with its own bonus quarter and full history, and it re-surfaces in <b>Pending manual renewals</b> each time it's due.</td></tr>
+          <tr><td><b>Auto-Renewal</b></td><td>Lower auto rate, <b>one time only</b> (12 / 24-month deals only). Never appears in Pending Renewals.</td></tr>
+          <tr><td><b>One-Time / Month-to-Month</b></td><td><b>No renewal commission.</b></td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12.5px;color:var(--muted)">Renegotiated an auto-renewal (new pricing, term, or a fresh signed agreement)? Use <b>Convert to manual</b> on the auto-renewals table — it switches that renewal to the higher manual rate, since you earned it. A deal under <b id="gdFloorInline">45%</b> margin pays <b>$0</b> and is flagged <b>Management Approval Required</b>.</p>
 
-      <h3>Agreement type — four kinds</h3>
-      <p>Every agreement is one of four types, chosen when it's created. The type decides how (and whether) renewal commission is earned:</p>
-      <div class="guide-legend">
-        <div class="row"><b>Manual Renewal</b> — you actively renew it each cycle. Appears in <b>Pending manual renewals</b>, pays the higher manual rate, and can be renewed <b>indefinitely</b>: every cycle earns its own commission, lands in its own bonus quarter, and is kept in the agreement's <b>renewal history</b>.</div>
-        <div class="row"><b>Auto-Renewal</b> — renews automatically under the contract. Pays the lower auto rate <b>one time only</b> (12 / 24-month agreements only) and never appears in Pending Renewals.</div>
-        <div class="row"><b>One-Time</b> — a single engagement with no renewal. Earns <b>no renewal commission</b>.</div>
-        <div class="row"><b>Month-to-Month</b> — ongoing with no fixed renewal cycle. Earns <b>no renewal commission</b>.</div>
-      </div>
+      <h3>When you get paid — your commission over time</h3>
+      <p>On a new agreement, your commission <b>doesn't all land at once.</b> It's split so your pay follows the deal actually performing. The <b>total is exactly the same</b> — it's just spread out:</p>
+      <table class="guide-table">
+        <thead><tr><th>Piece</th><th>How much</th><th>When it lands</th></tr></thead>
+        <tbody>
+          <tr><td><b>Standard — paid now</b></td><td>75% of the standard commission</td><td>The quarter you sell it</td></tr>
+          <tr><td><b>Standard holdback</b></td><td>25% of the standard commission</td><td>Once the customer has paid <b id="gdHbInline">25%</b> of the first year — about 3 months in on a steady deal</td></tr>
+          <tr><td><b>Accelerator</b><div style="font-size:11px;color:var(--muted)">the high-margin bonus (the ×-above-1.0 part)</div></td><td>the margin bump</td><td>In <b>6-month pieces</b>, each released as that window's revenue is collected</td></tr>
+        </tbody>
+      </table>
+      <div class="guide-callout">Example — a <b>$100/mo, 12-month</b> deal at 62% margin earns <b>$90</b> total. You'd see <b>$54 now</b> (75%), <b>$18</b> once $300 is collected (~month 3), and the <b>$18 accelerator in two $9 pieces</b> at months 6 and 12. Same $90 — paid as the deal delivers.</div>
+      <p style="font-size:12.5px;color:var(--muted)">The holds protect against early cancellation and confirm profitability — if a payment is missed, that piece waits until enough is collected. <b>Renewals aren't held</b> — they pay in full when renewed. Deals sold <b>before 2026</b>, and anything already paid, pay 100% up front unchanged.</p>
 
-      <h3>When you get paid — the two holdbacks</h3>
-      <p>On a <b>new agreement</b>, your commission doesn't all land at once. It's split so pay follows the deal actually performing:</p>
-      <div class="guide-legend">
-        <div class="row"><b>Standard commission — 75% now.</b> The bulk pays in the quarter the deal activates, same as always.</div>
-        <div class="row"><b>Standard holdback — 25% held.</b> The last quarter is held against early cancellation and releases once the customer has paid <b id="gdHbInline">25%</b> of the first year's revenue. On a $100/mo deal that's $300 collected — about three months in — then it lands in that quarter's bonus.</div>
-        <div class="row"><b>Accelerator — the high-margin bonus, held.</b> The extra you earn for a high-margin deal (the multiplier above 1.0×) is held until the deal proves profitable — when about <b id="gdAcInline">50%</b> of its revenue has been billed — then releases into that quarter. Longer contracts hold it longer.</div>
-      </div>
-      <p style="font-size:12.5px;color:var(--muted)">Your <b>total</b> commission is exactly the same as before — this only changes <b>when</b> each piece pays. Renewals aren't held: they pay in full when renewed. Agreements already in the system before this went live keep paying 100% up front.</p>
-
-      <h3>Renegotiated an auto-renewal? Convert it</h3>
-      <p>If you actively renegotiate an agreement that was set to auto-renew — new pricing, scope, term, or a fresh signed agreement — use <b>Convert to manual</b> on the auto-renewals table. It records your sales involvement and switches that renewal to the <b>higher manual rate</b>, since you earned it.</p>
+      <h3>Where to see your money</h3>
+      <table class="guide-table">
+        <thead><tr><th>Screen</th><th>What it shows</th></tr></thead>
+        <tbody>
+          <tr><td><b>Quarter view</b></td><td>What's payable this quarter, plus a <b>Releasing later</b> panel with held &amp; forecast amounts by future quarter.</td></tr>
+          <tr><td><b>Reports → Upcoming releases</b></td><td>Every held &amp; forecast piece, dated, soonest first — each accelerator installment and renewal with its amount and quarter.</td></tr>
+          <tr><td><b>Reports → Customer profitability</b></td><td>Click any customer for the full per-deal breakdown, with plain-language status on each piece.</td></tr>
+          <tr><td><b>Commission History</b></td><td>Everything you've earned, filterable by type, with status and quarter.</td></tr>
+        </tbody>
+      </table>
 
       <h3>Bonus Forecast &amp; Pending Renewals</h3>
       <p>The <b>Bonus Forecast</b> tab estimates your upcoming renewal bonuses with reminder dates — it's informational only and never creates a payout. <b>Pending Renewals</b> holds the two action tables (manual and auto) described above.</p>
@@ -1075,7 +1081,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-30';
+const APP_VERSION='P1RMR-31';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
