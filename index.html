@@ -791,6 +791,20 @@ function buildSnapshot(a,type){
           amount:isInit?c.initialCommission:c.renewalCommission};
 }
 // frozen amount if this payout is paid + has a snapshot, else the live figure
+async function patchRenewalPaid(rowId,val){
+  if(!can('editAgreements')){ toast('Your role cannot mark commissions paid.'); return; }
+  const r=RENEWALS.find(x=>x.id===rowId); if(!r)return;
+  const a=AGREEMENTS.find(x=>x.id===r.agreement_id);
+  const snap=val?{amount:+r.commission_amount||0,paid_date:todayISO(),rmr:+r.renewed_rmr||0,term:(r.term||r.new_term||null),credit_qi:r.credit_qi,cycle:r.renewal_no}:null;
+  const update={paid:!!val,paid_date:val?todayISO():null,paid_snapshot:snap,updated_at:new Date().toISOString()};
+  let {error}=await sb.from('rmr_renewals').update(update).eq('id',rowId);
+  if(error && /paid_snapshot|paid_date|paid|column/i.test(error.message||'')){ ({error}=await sb.from('rmr_renewals').update({paid:!!val}).eq('id',rowId)); }
+  if(error){ toast(error.message); return; }
+  Object.assign(r,{paid:!!val,paid_date:update.paid_date,paid_snapshot:snap});
+  audit(val?'Renewal commission paid':'Renewal commission un-paid','Commissions',a?a.agreement_number:null,null,
+    {agreement:a?a.agreement_number:null,customer:a?a.customer_name:null,cycle:r.renewal_no,amount:+r.commission_amount||0},null);
+  render();
+}
 function frozenAmount(a,type){
   const snap=type==='initial'?a.initial_snapshot:a.renewal_snapshot;
   const paid=type==='initial'?a.paid_initial:a.renewal_paid;
@@ -869,6 +883,14 @@ const STATUS_META={none:{cls:'c-none',label:'Paid upfront'},held:{cls:'c-held',l
 let sb=null,AGREEMENTS=[],selQI=CUR_QI,view='quarter',editingId=null,signedIn=false;
 let RENEWALS=[];
 function renewalsFor(id){return RENEWALS.filter(r=>r.agreement_id===id);}
+function renewalCycles(a){ return renewalsFor(a.id).filter(r=>r.status==='active').sort((x,y)=>(x.renewal_no||0)-(y.renewal_no||0)); }
+function hasLedgerRenewals(a){ return renewalCycles(a).some(r=>r.commission_amount!=null); }
+function nextDueDate(a){        // when the NEXT manual renewal is due (drives Pending Renewals re-appearance)
+  const cy=renewalCycles(a).filter(r=>r.commission_amount!=null);
+  if(cy.length){ const last=cy[cy.length-1]; const t=+(last.term||last.new_term||a.contract_term)||0; if(!last.renewal_date||!t)return null; const d=new Date(String(last.renewal_date).slice(0,10)+'T00:00:00'); return isNaN(d)?null:addMonths(d,t); }
+  if(!a.renewed){ const c=compute(a); return c.renewalDate||null; }   // never renewed → activation + term
+  return null;                                                        // renewed but not backfilled → not re-surfaced until Admin builds the ledger
+}
 // --- Phase 3: renewal + growth bonus calcs (comparison/forecast only; never live payouts) ---
 function renewalBonusTier(term){const t=+term;if(t===12)return 1.25;if(t===24)return 0.75;if(t>=36)return 0.50;return 0;}
 function renewalBonusOf(r,force){ // force=true ignores status (for forecasting potential)
@@ -907,7 +929,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-18';
+const APP_VERSION='P1RMR-19';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1195,16 +1217,21 @@ function renderQuarter(){
     const fi=frozenAmount(a,'initial');
     if(c.initialQI===selQI&&fi.amount>0)
       lines.push({a,c,type:'initial',amount:fi.amount,paid:!!a.paid_initial,field:'paid_initial',frozen:fi.frozen,snap:fi.snap});
-    if(c.renewalQI===selQI){
-      const renewed=!!a.autorenew||!!a.renewed;
-      const fr=frozenAmount(a,'renewal');
-      if(renewed&&fr.amount>0) lines.push({a,c,type:'renewal',amount:fr.amount,paid:!!a.renewal_paid,field:'renewal_paid',auto:!!a.autorenew,frozen:fr.frozen,snap:fr.snap});
+    if(a.autorenew){
+      // Auto-renewal: one-time renewal commission, unchanged
+      if(c.renewalQI===selQI){ const fr=frozenAmount(a,'renewal'); if(fr.amount>0) lines.push({a,c,type:'renewal',amount:fr.amount,paid:!!a.renewal_paid,field:'renewal_paid',auto:true,frozen:fr.frozen,snap:fr.snap}); }
+    } else if(hasLedgerRenewals(a)){
+      // Manual, ledger-driven: one payable line per renewal cycle credited to this quarter
+      renewalCycles(a).forEach(r=>{ if(r.commission_amount!=null && r.credit_qi===selQI && (+r.commission_amount||0)>0) lines.push({a,c,type:'renewal',amount:+r.commission_amount,paid:!!r.paid,renrow:r.id,cycle:r.renewal_no,auto:false,frozen:!!r.paid,snap:r.paid_snapshot||null}); });
+    } else if(a.renewed && c.renewalQI===selQI){
+      // Manual, not yet backfilled → lightweight single-cycle fallback (unchanged behavior)
+      const fr=frozenAmount(a,'renewal'); if(fr.amount>0) lines.push({a,c,type:'renewal',amount:fr.amount,paid:!!a.renewal_paid,field:'renewal_paid',auto:false,frozen:fr.frozen,snap:fr.snap});
     }
   });
   const total=lines.reduce((s,l)=>s+l.amount,0),paid=lines.filter(l=>l.paid).reduce((s,l)=>s+l.amount,0),owed=total-paid;
   const initCt=lines.filter(l=>l.type==='initial').length, renCt=lines.filter(l=>l.type==='renewal').length;
   // pending manual renewals coming due (autorenew OFF, not yet renewed, renewal in this quarter or earlier)
-  const pendingRenew=scopedAgreements().filter(a=>{const c=compute(a);return c.renewalCommission>0&&!a.autorenew&&!a.renewed&&c.renewalQI!=null&&c.renewalQI<=selQI;}).length;
+  const pendingRenew=scopedAgreements().filter(a=>{ if(a.autorenew)return false; const nd=nextDueDate(a); if(!nd)return false; return qIndexFromYM(nd.getFullYear(),nd.getMonth())<=selQI; }).length;
   const newRMR=scopedAgreements().reduce((s,a)=>{const c=compute(a);return s+(c.initialQI===selQI?c.mrr:0);},0);
   $('qCards').innerHTML=`
     <div class="stat accent"><div class="lbl">Due this quarter</div><div class="val">${fmt(total)}</div></div>
@@ -1219,12 +1246,14 @@ function renderQuarter(){
     const st=l.paid?'paid':'payable',meta=STATUS_META[st];
     const typeTag=l.type==='renewal'?'<span class="type-tag" style="background:#e7f3ee;color:var(--payable)">Renewal</span>':'<span class="type-tag">Initial</span>';
     const dateTxt=l.type==='renewal'
-      ? `${l.auto?'auto-renew':'manually renewed'} · ${Math.round(l.c.renewMult*1000)/10}%`
+      ? `${l.auto?'auto-renew':('manually renewed'+(l.cycle?` · cycle ${l.cycle}`:''))} · ${Math.round(l.c.renewMult*1000)/10}%`
       : `at activation · ${Math.round(l.c.initMult*1000)/10}%`;
     const btn=can('editAgreements')
-      ? `<button class="paidbtn ${l.paid?'is-paid':''}" data-paid="${l.a.id}" data-field="${l.field}" data-val="${l.paid?0:1}">${l.paid?'✓ Paid':'Mark paid'}</button>`
+      ? (l.renrow
+          ? `<button class="paidbtn ${l.paid?'is-paid':''}" data-renrow="${l.renrow}" data-val="${l.paid?0:1}">${l.paid?'✓ Paid':'Mark paid'}</button>`
+          : `<button class="paidbtn ${l.paid?'is-paid':''}" data-paid="${l.a.id}" data-field="${l.field}" data-val="${l.paid?0:1}">${l.paid?'✓ Paid':'Mark paid'}</button>`)
       : `<span class="chip ${l.paid?'c-paid':'c-payable'}">${l.paid?'Paid':'Payable'}</span>`;
-    const lockTag=l.frozen?` <span title="Frozen at mark-paid · plan ${esc(l.snap.plan_version)} · ${l.snap.paid_date} · rate ${Math.round(l.snap.rate*100)}%" style="font-size:9px;font-weight:700;color:var(--muted);background:#eee;border-radius:4px;padding:1px 4px">🔒 ${esc(l.snap.plan_version)}</span>`:'';
+    const lockTag=(l.frozen&&l.snap)?` <span title="Frozen at mark-paid${l.snap.plan_version?' · plan '+esc(l.snap.plan_version):''}${l.snap.paid_date?' · '+l.snap.paid_date:''}" style="font-size:9px;font-weight:700;color:var(--muted);background:#eee;border-radius:4px;padding:1px 4px">🔒${l.snap.plan_version?' '+esc(l.snap.plan_version):''}</span>`:'';
     return `<tr>
       <td class="ag-no">#${esc(l.a.agreement_number||'—')}</td>
       <td>${esc(l.a.customer_name||'—')}${lockTag}</td>
@@ -1236,6 +1265,7 @@ function renderQuarter(){
     </tr>`;}).join('');
   $('qTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Type</th><th class="num">Amount</th><th>Detail</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('qTableWrap').querySelectorAll('[data-paid]').forEach(b=>b.onclick=()=>patchPaid(b.dataset.paid,b.dataset.field,b.dataset.val==='1'));
+  $('qTableWrap').querySelectorAll('[data-renrow]').forEach(b=>b.onclick=()=>patchRenewalPaid(b.dataset.renrow,b.dataset.val==='1'));
 }
 function renderAgreements(){
   $('marginFlag').value=marginFlagPct;
@@ -1333,13 +1363,17 @@ function autoStatusLabel(x){           // §10 auto-renewal status options
 function statusChipClass(s){ return /Paid/.test(s)?'c-paid':(/Not Eligible|Approval/.test(s)?'c-held':(/Pending Auto/.test(s)?'c-none':'c-payable')); }
 let MANUAL_LIST=[], AUTO_LIST=[];
 function renderRenewals(){
-  const all=scopedAgreements().map(a=>({a,c:compute(a)}))
-    .map(x=>({...x,days:x.c.renewalDate?Math.ceil((x.c.renewalDate-new Date())/86400000):null}));
-  // MANUAL: effectively manual (autorenew OFF *or* converted), has a renewal commission, not yet renewed
-  let manual=all.filter(x=>!x.c.isAuto && x.c.renewMult>0 && !x.a.renewed && x.c.renewalDate);
-  // AUTO: still auto (not converted), term-eligible (12/24-mo), one-time, not yet paid.
-  // Low-margin ones are kept and shown as "Management Approval Required" (spec §9/§10), not hidden.
-  let auto=all.filter(x=>x.c.isAuto && x.c.autoRenewEligible && !x.a.renewal_paid && x.c.renewalDate);
+  const all=scopedAgreements().map(a=>({a,c:compute(a)}));
+  // MANUAL: not auto, has a renewal rate, and its NEXT cycle is due (re-appears each cycle via the ledger)
+  let manual=all.filter(x=>{
+    if(x.c.isAuto || x.c.noRenewal || !(x.c.renewMult>0)) return false;
+    const nd=nextDueDate(x.a); if(!nd) return false;
+    x.nextDue=nd; x.days=Math.ceil((nd-new Date())/86400000); x.cycleNo=renewalCycles(x.a).filter(r=>r.commission_amount!=null).length+1;
+    return true;
+  });
+  // AUTO: still auto, term-eligible (12/24-mo), one-time, not yet paid.
+  let auto=all.map(x=>({...x,days:x.c.renewalDate?Math.ceil((x.c.renewalDate-new Date())/86400000):null}))
+    .filter(x=>x.c.isAuto && x.c.autoRenewEligible && !x.a.renewal_paid && x.c.renewalDate);
 
   const sumManual=manual.filter(x=>x.days<=90).reduce((s,x)=>s+x.c.renewalCommission,0);
   const sumAuto=auto.reduce((s,x)=>s+x.c.renewalCommission,0);
@@ -1355,16 +1389,16 @@ function renderRenewals(){
   $('renCount').textContent=`${MANUAL_LIST.length} shown · ${manual.length} pending`;
   if(!MANUAL_LIST.length){ $('renTableWrap').innerHTML=`<div class="empty"><b>No manual renewals${mq?' match':' pending'}</b>Manual renewals (and auto-renewals converted to manual) appear here. They pay the manual rate every renewal cycle.</div>`; }
   else {
-    const rows=MANUAL_LIST.map(({a,c,days})=>`<tr style="${rowTint(days)}">
-      <td>${esc(a.customer_name||'—')}${c.converted?' <span class="chip c-maturing" style="font-size:9px">converted</span>':''}</td>
+    const rows=MANUAL_LIST.map((x)=>{const {a,c,days,nextDue,cycleNo}=x; return `<tr style="${rowTint(days)}">
+      <td>${esc(a.customer_name||'—')}${c.converted?' <span class="chip c-maturing" style="font-size:9px">converted</span>':''}${cycleNo>1?` <span class="chip c-payable" style="font-size:9px">cycle ${cycleNo}</span>`:''}</td>
       <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
       <td>${(+a.contract_term)}mo</td>
-      <td class="mono" style="color:var(--muted)">${fmtDate(c.renewalDate)}</td>
+      <td class="mono" style="color:var(--muted)">${fmtDate(nextDue||c.renewalDate)}</td>
       <td>${daysCell(days)}</td>
       <td class="num mono">${fmt(c.mrr)}</td>
       <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(c.renewalCommission)} <span style="font-size:10px;color:var(--muted)">(${Math.round(c.renewMult*1000)/10}%)</span></td>
       <td>${can('editAgreements')?`<button class="paidbtn" data-renew="${a.id}">Renew…</button>`:renewStatus(days)}</td>
-    </tr>`).join('');
+    </tr>`;}).join('');
     $('renTableWrap').innerHTML=`<table><thead><tr><th>Customer</th><th>Agr #</th><th>Term</th><th>Renews</th><th>Days left</th><th class="num">MRR</th><th class="num">Renewal comm.</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
     $('renTableWrap').querySelectorAll('[data-renew]').forEach(b=>b.onclick=()=>openRenew(b.dataset.renew));
   }
@@ -1860,7 +1894,7 @@ function openModal(id,promote){
   } else {
     $('renStatusTxt').innerHTML='Not yet renewed — use the <b>Renew</b> button on Pending Renewals.';
   }
-  $('mRevert').style.display=renewed?'inline-block':'none';
+  $('mRevert').style.display=(renewed||(a&&hasLedgerRenewals(a)))?'inline-block':'none';
   renderRenewalHistory(a?a.id:null);
   $('f_notes').value=v('notes');$('mDelete').style.display=a?'inline-block':'none';
   // Assigned-to / owner picker — only for roles that can see all users
@@ -2024,7 +2058,7 @@ async function writeRenewalRow(a,o){
 async function revertRenewal(id){
   if(!can('editAgreements')){ toast('Your role cannot revert renewals.'); return; }
   const a=AGREEMENTS.find(x=>x.id===id); if(!a)return;
-  if(!a.renewed){ toast('This agreement is not marked renewed.'); return; }
+  if(!a.renewed && !renewalCycles(a).length){ toast('This agreement is not marked renewed.'); return; }
   if(!confirm('Revert this renewal?\n\nIt returns to Pending Renewals, clears the renewal date / credit quarter, restores the prior RMR, and un-pays any renewal commission already marked paid.'))return;
   const prior=a.prerenewal_state||null;
   const fields={renewed:false,renewal_date:null,renewal_credit_month:null,prerenewal_state:null};
@@ -2035,6 +2069,7 @@ async function revertRenewal(id){
   // reverse the most recent active renewal-ledger row (kept for history)
   try{ const {data}=await sb.from('rmr_renewals').select('id').eq('agreement_id',id).eq('status','active').order('renewal_no',{ascending:false}).limit(1);
     if(data&&data[0]) await sb.from('rmr_renewals').update({status:'reversed',reversed_at:new Date().toISOString()}).eq('id',data[0].id);
+    await loadRenewals();
   }catch(_){}
   Object.assign(a,{renewed:false,renewal_date:null,renewal_credit_month:null,prerenewal_state:null});
   if('renewal_paid' in fields){ a.renewal_paid=false; a.renewal_snapshot=null; }
