@@ -886,6 +886,20 @@ function billingLogReleaseDate(log,threshold){   // date collection crosses thre
   for(const e of sorted){ if(e.status==='unpaid') continue; cum+=(+e.amount||0); if(cum>=threshold-1e-6) return new Date(String(e.date).slice(0,10)+'T00:00:00'); }
   return null;   // not enough collected yet → held until it catches up
 }
+async function patchAccelPiece(id,seq,val){
+  if(!can('editAgreements')){ toast('Your role cannot mark commissions paid.'); return; }
+  const a=AGREEMENTS.find(x=>x.id===id); if(!a)return;
+  const c=compute(a); const piece=(c.acceleratorPieces||[]).find(p=>String(p.seq)===String(seq));
+  const map=Object.assign({}, a.accel_paid||{});
+  if(val) map[seq]={paid:true,paid_date:todayISO(),snapshot:{amount:piece?piece.amount:0,paid_date:todayISO(),seq:+seq,plan_version:c.planVersion}};
+  else delete map[seq];
+  let {error}=await sb.from('rmr_agreements').update({accel_paid:map,updated_at:new Date().toISOString()}).eq('id',id);
+  if(error&&/accel_paid|column/i.test(error.message||'')){ toast('Run migration v18 to enable accelerator installments.'); return; }
+  if(error){ toast(error.message); return; }
+  a.accel_paid=map;
+  audit(`Accelerator installment ${seq} ${val?'paid':'un-paid'}`,'Commissions',a.agreement_number,null,{agreement:a.agreement_number,customer:a.customer_name,installment:+seq,amount:piece?piece.amount:0},null);
+  render();
+}
 function frozenAmount(a,type){
   const map={
     initial:['initial_snapshot','paid_initial','initialCommission'],
@@ -899,6 +913,13 @@ function frozenAmount(a,type){
   const c=compute(a), live=c[liveKey];
   const frozen=paid&&snap&&snap.amount!=null;
   return {amount:frozen?+snap.amount:live,frozen,snap:frozen?snap:null};
+}
+const HOLDBACK_START=new Date('2026-01-01T00:00:00');   // Q1 2026 — holdback & accelerator apply from here
+function isLegacyFull(a){
+  if(a.paid_initial) return true;                        // already paid 100% under the old model → leave alone
+  const s=a&&a.activation_date; if(!s) return a&&a.legacy_full_pay!==false;
+  const d=new Date(String(s).slice(0,10)+'T00:00:00'); if(isNaN(d)) return a.legacy_full_pay!==false;
+  return d < HOLDBACK_START;                             // before Q1 2026 → grandfathered; Q1 2026+ → split
 }
 function compute(a,plan){
   const cfg=plan||resolvePlan(a);
@@ -950,7 +971,7 @@ function compute(a,plan){
   const renewalCommission=noRenewal?0:baseCommissionRenewal*mm.mult;
   // ── Standard holdback (75/25, churn) + accelerator (margin upside, profitability) — INITIAL only ──
   // Grandfathered agreements (legacy_full_pay) keep paying 100% at activation, exactly as before.
-  const legacyFull = a.legacy_full_pay !== false;            // only explicit false opts into the split
+  const legacyFull = isLegacyFull(a);            // grandfathered unless activated Q1 2026+ (and not already paid 100%)
   const standardCommission   = baseCommissionNew * Math.min(mm.mult, 1.0);        // at-or-below-target portion
   const acceleratorCommission= baseCommissionNew * Math.max(mm.mult - 1.0, 0);    // the high-margin upside
   const imPct = (cfg.immediatePct!=null?cfg.immediatePct:0.75), hbPct=(cfg.holdbackPct!=null?cfg.holdbackPct:0.25);
@@ -966,14 +987,23 @@ function compute(a,plan){
   const holdbackReleaseMonth=releaseMonth(holdbackThreshold), accelReleaseMonth=releaseMonth(accelThreshold);
   const netProfit=grossProfit-initialCommission;             // §4.14 annual gross profit less the commission
   // timing
-  let initialQI=null,renewalDate=null,renewalQI=null,holdbackQI=null,acceleratorQI=null,holdbackReleaseDate=null,acceleratorReleaseDate=null;
+  let initialQI=null,renewalDate=null,renewalQI=null,holdbackQI=null,acceleratorQI=null,holdbackReleaseDate=null,acceleratorReleaseDate=null,acceleratorPieces=[];
   if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad)){initialQI=qIndexFromYM(ad.getFullYear(),ad.getMonth());if(term>0&&!noRenewal){renewalDate=addMonths(ad,term);renewalQI=qIndexFromYM(renewalDate.getFullYear(),renewalDate.getMonth());}
     if(!legacyFull){ const bd=new Date((a.first_billing_date||a.activation_date)+'T00:00:00'); const rb=isNaN(bd)?ad:bd;   // releases measured from FIRST BILLING (revenue start)
       const blog=(Array.isArray(a.billing_log)&&a.billing_log.length)?a.billing_log:null;
       holdbackReleaseDate = blog ? billingLogReleaseDate(blog,holdbackThreshold) : addMonths(rb,holdbackReleaseMonth);
-      acceleratorReleaseDate = blog ? billingLogReleaseDate(blog,accelThreshold) : addMonths(rb,accelReleaseMonth);
       holdbackQI = holdbackReleaseDate ? qIndexFromYM(holdbackReleaseDate.getFullYear(),holdbackReleaseDate.getMonth()) : null;
-      acceleratorQI = acceleratorReleaseDate ? qIndexFromYM(acceleratorReleaseDate.getFullYear(),acceleratorReleaseDate.getMonth()) : null; }
+      // Accelerator releases in 6-month installments, each piece sized to the revenue collected in that window.
+      if(acceleratorCommission>0 && (term||0)>0){
+        const N=Math.ceil(term/6); const cumThrough=m=>{let s=0;for(let k=1;k<=m;k++)s+=revAt(k);return s;}; let prev=0, sum=0;
+        for(let w=1;w<=N;w++){ const endM=Math.min(6*w,term); const cum=cumThrough(endM); const winRev=cum-prev; prev=cum;
+          let amt=totalRev>0?acceleratorCommission*(winRev/totalRev):acceleratorCommission/N; amt=Math.round(amt*100)/100; sum+=amt;
+          const relDate=blog?billingLogReleaseDate(blog,cum):(isNaN(rb)?null:addMonths(rb,endM));
+          acceleratorPieces.push({seq:w,endMonth:endM,amount:amt,threshold:cum,releaseDate:relDate,qi:relDate?qIndexFromYM(relDate.getFullYear(),relDate.getMonth()):null});
+        }
+        if(acceleratorPieces.length){ const last=acceleratorPieces[acceleratorPieces.length-1]; last.amount=Math.round((last.amount+(acceleratorCommission-sum))*100)/100; acceleratorReleaseDate=last.releaseDate; acceleratorQI=last.qi; }   // absorb rounding into the last piece; full maturity = last release
+      }
+    }
   }}
   // Once renewed, the credited quarter follows the Renewal Month entered on the Renew form (not the activation+term math).
   if(a.renewed && a.renewal_credit_month){const m=String(a.renewal_credit_month).match(/^(\d{4})-(\d{2})$/);if(m){renewalQI=qIndexFromYM(+m[1],+m[2]-1);}}
@@ -985,7 +1015,7 @@ function compute(a,plan){
           newPct,renewalPct,initMult:newPct,renewMult:renewalPct,
           isAuto,autoRenewEligible,manualRenewalPct,autoRenewalPct,renewalType,converted,
           baseCommissionNew,baseCommissionRenewal,initialCommission,renewalCommission,
-          legacyFull,standardCommission,acceleratorCommission,immediateCommission,holdbackCommission,acceleratorHeld,
+          legacyFull,standardCommission,acceleratorCommission,immediateCommission,holdbackCommission,acceleratorHeld,acceleratorPieces,
           holdbackQI,acceleratorQI,holdbackReleaseDate,acceleratorReleaseDate,holdbackReleaseMonth,accelReleaseMonth,
           billingCollected:(Array.isArray(a.billing_log)&&a.billing_log.length)?billingLogCollected(a.billing_log):null,
           billingExpected:(Array.isArray(a.billing_log)&&a.billing_log.length)?billingLogExpected(a.billing_log):totalRev,
@@ -1045,7 +1075,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-29';
+const APP_VERSION='P1RMR-30';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1240,7 +1270,7 @@ async function upsert(row){
   async function go(p){ if(p.id){const {error}=await sb.from('rmr_agreements').update(p).eq('id',p.id);if(error)throw error;} else {const {error}=await sb.from('rmr_agreements').insert(p);if(error)throw error;} }
   try{ await go(payload); }
   catch(e){ // ref columns not migrated yet → retry without them so saving still works
-    if(/customer_number|site_number|owner_email|converted_to_manual|conversion_|renewal_date|renewal_credit_month|prerenewal_state|stage|opportunity_number|estimate_ref|est_monthly_rmr|expected_close|lost_reason|agreement_type|legacy_full_pay|first_billing_date|billing_log|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,converted_to_manual,conversion_date,conversion_notes,conversion_ref,renewal_date,renewal_credit_month,prerenewal_state,stage,opportunity_number,estimate_ref,est_monthly_rmr,expected_close,lost_reason,agreement_type,legacy_full_pay,first_billing_date,billing_log,...rest}=payload; await go(rest); }
+    if(/customer_number|site_number|owner_email|converted_to_manual|conversion_|renewal_date|renewal_credit_month|prerenewal_state|stage|opportunity_number|estimate_ref|est_monthly_rmr|expected_close|lost_reason|agreement_type|legacy_full_pay|first_billing_date|billing_log|accel_paid|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,converted_to_manual,conversion_date,conversion_notes,conversion_ref,renewal_date,renewal_credit_month,prerenewal_state,stage,opportunity_number,estimate_ref,est_monthly_rmr,expected_close,lost_reason,agreement_type,legacy_full_pay,first_billing_date,billing_log,accel_paid,...rest}=payload; await go(rest); }
     else throw e;
   }
 }
@@ -1339,8 +1369,7 @@ function renderQuarter(){
       if(c.initialQI===selQI&&fim.amount>0) lines.push({a,c,type:'immediate',amount:fim.amount,paid:!!a.paid_immediate,field:'paid_immediate',frozen:fim.frozen,snap:fim.snap});
       const fh=frozenAmount(a,'holdback');
       if(c.holdbackQI===selQI&&fh.amount>0) lines.push({a,c,type:'holdback',amount:fh.amount,paid:!!a.paid_holdback,field:'paid_holdback',frozen:fh.frozen,snap:fh.snap});
-      const fa=frozenAmount(a,'accel');
-      if(c.acceleratorQI===selQI&&fa.amount>0) lines.push({a,c,type:'accelerator',amount:fa.amount,paid:!!a.paid_accel,field:'paid_accel',frozen:fa.frozen,snap:fa.snap});
+      (c.acceleratorPieces||[]).forEach(p=>{ if(p.qi===selQI){ const pd=(a.accel_paid&&a.accel_paid[p.seq])||null; const amt=(pd&&pd.paid&&pd.snapshot)?+pd.snapshot.amount:p.amount; if(amt>0) lines.push({a,c,type:'accelerator',amount:amt,paid:!!(pd&&pd.paid),accelseq:p.seq,cycle:p.seq,frozen:!!(pd&&pd.paid),snap:pd?pd.snapshot:null}); } });
     }
     if(a.autorenew){
       // Auto-renewal: one-time renewal commission, unchanged
@@ -1369,17 +1398,19 @@ function renderQuarter(){
   lines.sort((x,y)=>y.amount-x.amount);
   const rows=lines.map(l=>{
     const st=l.paid?'paid':'payable',meta=STATUS_META[st];
-    const TAGS={renewal:['Renewal','#e7f3ee','var(--payable)'],immediate:['Standard 75%','#eef1f6','var(--navy)'],holdback:['Holdback 25%','#fff4e8','var(--orange)'],accelerator:['Accelerator','#f0ecff','#5a3fb8'],initial:['Initial','','']};
+    const TAGS={renewal:['Renewal','#e7f3ee','var(--payable)'],immediate:['Standard 75%','#eef1f6','var(--navy)'],holdback:['Holdback 25%','#fff4e8','var(--orange)'],accelerator:[l.accelseq?`Accelerator ${l.accelseq}`:'Accelerator','#f0ecff','#5a3fb8'],initial:['Initial','','']};
     const tg=TAGS[l.type]||TAGS.initial;
     const typeTag=tg[1]?`<span class="type-tag" style="background:${tg[1]};color:${tg[2]}">${tg[0]}</span>`:`<span class="type-tag">${tg[0]}</span>`;
     const dateTxt=
       l.type==='renewal' ? `${l.auto?'auto-renew':('manually renewed'+(l.cycle?` · cycle ${l.cycle}`:''))} · ${Math.round(l.c.renewMult*1000)/10}%`
       : l.type==='immediate' ? `75% at activation · ${Math.round(l.c.initMult*1000)/10}%`
-      : l.type==='holdback' ? `held → releases ${l.c.holdbackQI!=null?qLabel(l.c.holdbackQI):'—'} · 25% of Yr-1 collected`
-      : l.type==='accelerator' ? `held → releases ${l.c.acceleratorQI!=null?qLabel(l.c.acceleratorQI):'—'} · 50% realized margin`
+      : l.type==='holdback' ? `held → releases ${l.c.holdbackQI!=null?qLabel(l.c.holdbackQI):'pending collection'} · 25% of Yr-1 collected`
+      : l.type==='accelerator' ? `installment ${l.accelseq} · released as revenue is collected`
       : `at activation · ${Math.round(l.c.initMult*1000)/10}%`;
     const btn=can('editAgreements')
-      ? (l.renrow
+      ? (l.accelseq!=null
+          ? `<button class="paidbtn ${l.paid?'is-paid':''}" data-accelid="${l.a.id}" data-accelseq="${l.accelseq}" data-val="${l.paid?0:1}">${l.paid?'✓ Paid':'Mark paid'}</button>`
+          : l.renrow
           ? `<button class="paidbtn ${l.paid?'is-paid':''}" data-renrow="${l.renrow}" data-val="${l.paid?0:1}">${l.paid?'✓ Paid':'Mark paid'}</button>`
           : `<button class="paidbtn ${l.paid?'is-paid':''}" data-paid="${l.a.id}" data-field="${l.field}" data-val="${l.paid?0:1}">${l.paid?'✓ Paid':'Mark paid'}</button>`)
       : `<span class="chip ${l.paid?'c-paid':'c-payable'}">${l.paid?'Paid':'Payable'}</span>`;
@@ -1396,6 +1427,7 @@ function renderQuarter(){
   $('qTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Type</th><th class="num">Amount</th><th>Detail</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('qTableWrap').querySelectorAll('[data-paid]').forEach(b=>b.onclick=()=>patchPaid(b.dataset.paid,b.dataset.field,b.dataset.val==='1'));
   $('qTableWrap').querySelectorAll('[data-renrow]').forEach(b=>b.onclick=()=>patchRenewalPaid(b.dataset.renrow,b.dataset.val==='1'));
+  $('qTableWrap').querySelectorAll('[data-accelseq]').forEach(b=>b.onclick=()=>patchAccelPiece(b.dataset.accelid,b.dataset.accelseq,b.dataset.val==='1'));
   renderQuarterUpcoming(selQI);
 }
 function renderAgreements(){
@@ -1753,7 +1785,7 @@ function renderReports(){
       else{
         body+=pieceLine('Standard 75% (now)',c.immediateCommission,rOf('immediate'));
         body+=pieceLine('Standard holdback 25%',c.holdbackCommission,rOf('holdback'));
-        if(c.acceleratorHeld>0) body+=pieceLine('Accelerator',c.acceleratorHeld,rOf('accel'));
+        if(c.acceleratorHeld>0) rows.filter(r=>r.piece==='accel').forEach(r=>{ body+=pieceLine(r.type,r.amount,r); });
       }
       const renRows=rows.filter(r=>r.piece==='renewal');
       if(renRows.length) renRows.forEach(r=>{ body+=pieceLine(r.type,r.amount,r); });
@@ -1820,7 +1852,8 @@ function historyLedger(){
     } else {
       if(c.immediateCommission>0||a.paid_immediate) rows.push(mkLedgerRow(a,c,'Standard 75%','Standard','immediate',(a.paid_immediate&&a.immediate_snapshot)?a.immediate_snapshot:null,!!a.paid_immediate,c.initialQI,iso(a.activation_date),c.immediateCommission,c.newPct,false));
       if(c.holdbackCommission>0||a.paid_holdback) rows.push(mkLedgerRow(a,c,'Holdback 25%','Holdback','holdback',(a.paid_holdback&&a.holdback_snapshot)?a.holdback_snapshot:null,!!a.paid_holdback,c.holdbackQI,iso(c.holdbackReleaseDate),c.holdbackCommission,c.newPct,false));
-      if(c.acceleratorHeld>0||a.paid_accel) rows.push(mkLedgerRow(a,c,'Accelerator','Accelerator','accel',(a.paid_accel&&a.accel_snapshot)?a.accel_snapshot:null,!!a.paid_accel,c.acceleratorQI,iso(c.acceleratorReleaseDate),c.acceleratorHeld,c.newPct,false));
+      (c.acceleratorPieces||[]).forEach(p=>{ const pd=(a.accel_paid&&a.accel_paid[p.seq])||null; const paid=!!(pd&&pd.paid); const amt=(paid&&pd.snapshot)?+pd.snapshot.amount:p.amount;
+        if(amt>0||paid) rows.push({a,type:`Accelerator ${p.seq}`,cat:'Accelerator',piece:'accel',paid,frozen:paid,pending:false,date:paid?(pd.paid_date):(p.releaseDate?iso(p.releaseDate):null),qi:p.qi,term:c.term,commissionable:null,margin:c.grossMargin,rate:c.newPct,mult:c.marginMultiplier,amount:amt,plan:c.planVersion,seq:p.seq}); });
     }
     // ---- renewal pieces ----
     if(a.autorenew){
@@ -2336,7 +2369,7 @@ function refreshBlogSummary(){
   if(c.legacyFull){ box.innerHTML=`This agreement is grandfathered — it pays 100% up front, so the billing log doesn't gate any holdback.`; return; }
   const collected=billingLogCollected(EDIT_LOG), expected=billingLogExpected(EDIT_LOG);
   const hb=c.holdbackReleaseDate?fmtDate(c.holdbackReleaseDate):'<b style="color:var(--orange)">held (pending collection)</b>';
-  const ac=(c.acceleratorHeld>0)?(c.acceleratorReleaseDate?fmtDate(c.acceleratorReleaseDate):'<b style="color:var(--orange)">held (pending collection)</b>'):'—';
+  const ac=(c.acceleratorHeld>0)?`${(c.acceleratorPieces||[]).length} installments, released as revenue is collected`:'—';
   box.innerHTML=`Collected <b class="mono">${fmt(collected)}</b> of <b class="mono">${fmt(expected)}</b> expected · Holdback (25% = ${fmt(c.holdbackThreshold)}) releases <b>${hb}</b> · Accelerator (50% = ${fmt(c.accelThreshold)}) releases <b>${ac}</b>`;
 }
 function renderBillingLog(){
@@ -2723,7 +2756,7 @@ function updatePreview(){
     ${!c.legacyFull?`<div style="grid-column:1/-1;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.03em;text-transform:uppercase;margin-top:2px">Payout schedule — new-agreement holdback</div>
     <div><span>Standard 75% <span style="color:var(--none)">now · ${initWhen.replace('pays ','')}</span></span><b style="color:var(--payable);font-size:15px">${fmt(c.immediateCommission)}</b></div>
     <div><span>Holdback 25% <span style="color:var(--none)">→ ${c.holdbackQI!=null?qLabel(c.holdbackQI):'set date'} · 25% of Yr-1</span></span><b style="font-size:15px;color:var(--orange)">${fmt(c.holdbackCommission)}</b></div>
-    ${c.acceleratorHeld>0?`<div><span>Accelerator <span style="color:var(--none)">→ ${c.acceleratorQI!=null?qLabel(c.acceleratorQI):'set date'} · 50% margin</span></span><b style="font-size:15px;color:#5a3fb8">${fmt(c.acceleratorHeld)}</b></div><div><span style="color:var(--none)">held until profitable</span><b></b></div>`:''}`:''}
+    ${c.acceleratorHeld>0?`<div><span>Accelerator <span style="color:var(--none)">${(c.acceleratorPieces||[]).length} installments, released as collected</span></span><b style="font-size:15px;color:#5a3fb8">${fmt(c.acceleratorHeld)}</b></div><div><span style="color:var(--none)">held for profitability</span><b></b></div>`:''}`:''}
     <div><span>Renewal: base ${Math.round(c.renewalPct*1000)/10}%</span><b style="font-size:13px;color:var(--muted)">${fmt(c.baseCommissionRenewal)}</b></div>
     <div><span>Renewal commission</span><b style="font-size:16px">${fmt(c.renewalCommission)}</b></div>
     <div><span>Renews</span><b style="font-size:13px">${renWhen}</b></div>
@@ -2763,8 +2796,7 @@ function exportQuarterPDF(details){
       if(c.initialQI===selQI&&fim.amount>0) initials.push({a,amount:fim.amount,paid:!!a.paid_immediate,mult:c.initMult,frozen:fim.frozen,piece:'Standard 75%'});
       const fh=frozenAmount(a,'holdback');
       if(c.holdbackQI===selQI&&fh.amount>0) initials.push({a,amount:fh.amount,paid:!!a.paid_holdback,mult:c.initMult,frozen:fh.frozen,piece:'Holdback 25%'});
-      const fa=frozenAmount(a,'accel');
-      if(c.acceleratorQI===selQI&&fa.amount>0) initials.push({a,amount:fa.amount,paid:!!a.paid_accel,mult:c.initMult,frozen:fa.frozen,piece:'Accelerator'});
+      (c.acceleratorPieces||[]).forEach(p=>{ if(p.qi===selQI){ const pd=(a.accel_paid&&a.accel_paid[p.seq])||null; const amt=(pd&&pd.paid&&pd.snapshot)?+pd.snapshot.amount:p.amount; if(amt>0) initials.push({a,amount:amt,paid:!!(pd&&pd.paid),mult:c.initMult,frozen:!!(pd&&pd.paid),piece:`Accelerator ${p.seq}`}); } });
     }
     if(a.autorenew){
       const fr=frozenAmount(a,'renewal');
