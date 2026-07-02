@@ -310,6 +310,10 @@
       <div class="panel-head"><h2>Payouts landing this quarter</h2><span class="qctx" id="qRangeTxt"></span></div>
       <div id="qTableWrap"></div>
     </div>
+    <div class="panel" id="qUpcomingPanel" style="margin-top:16px;display:none">
+      <div class="panel-head"><h2>Releasing later</h2><span class="qctx">held &amp; forecast commission by future quarter</span></div>
+      <div id="qUpcomingWrap"></div>
+    </div>
     <div style="margin-top:20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
       <div class="legend" id="legend" style="margin:0"></div>
       <button class="guide-link" id="guideLink">What do these mean? →</button>
@@ -442,6 +446,7 @@
     </div>
     <div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Commission by quarter</h2><span class="qctx">paid + scheduled</span></div><div class="admin-body" id="repQuarterChart"></div></div>
     <div class="panel"><div class="panel-head"><h2>Customer profitability</h2><span class="qctx" id="repCustCount"></span></div><div id="repCustWrap"></div></div>
+    <div class="panel" style="margin-top:16px"><div class="panel-head"><h2>Upcoming releases</h2><span class="qctx" id="repRelCount"></span><button class="iconbtn" id="repRelExport" style="margin-left:auto">Export CSV</button></div><div id="repRelWrap"></div></div>
   </section>
 
   <section id="view-admin" style="display:none">
@@ -1021,7 +1026,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-27';
+const APP_VERSION='P1RMR-28';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1372,6 +1377,7 @@ function renderQuarter(){
   $('qTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Type</th><th class="num">Amount</th><th>Detail</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('qTableWrap').querySelectorAll('[data-paid]').forEach(b=>b.onclick=()=>patchPaid(b.dataset.paid,b.dataset.field,b.dataset.val==='1'));
   $('qTableWrap').querySelectorAll('[data-renrow]').forEach(b=>b.onclick=()=>patchRenewalPaid(b.dataset.renrow,b.dataset.val==='1'));
+  renderQuarterUpcoming(selQI);
 }
 function renderAgreements(){
   $('marginFlag').value=marginFlagPct;
@@ -1597,6 +1603,63 @@ function exportForecastCSV(){
     lines.push(cells.map(v=>{v=String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(','));});
   const blob=new Blob([lines.join('\n')],{type:'text/csv'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=`bonus-forecast-${todayISO()}.csv`; a.click(); URL.revokeObjectURL(u);
 }
+function upcomingReleases(){
+  const out=[];
+  historyLedger().forEach(r=>{
+    if(r.paid) return;
+    if(r.piece==='holdback') out.push({date:r.date,qi:r.qi,amount:r.amount,type:'Holdback',certainty:'collection',pending:r.qi==null,a:r.a});
+    else if(r.piece==='accel') out.push({date:r.date,qi:r.qi,amount:r.amount,type:'Accelerator',certainty:'collection',pending:r.qi==null,a:r.a});
+    else if(r.piece==='renewal') out.push({date:r.date,qi:r.qi,amount:r.amount,type:'Renewal',certainty:'signed',pending:false,a:r.a});
+  });
+  scopedAgreements().forEach(a=>{ const c=compute(a); if(c.noRenewal||!(c.renewMult>0)||a.autorenew) return;
+    let nd=nextDueDate(a); if(!nd) return; const horizon=addMonths(new Date(),60); let g=0;
+    while(nd&&nd<=horizon&&g<12){ out.push({date:nd.toISOString().slice(0,10),qi:qIndexFromYM(nd.getFullYear(),nd.getMonth()),amount:c.renewalCommission,type:'Renewal',certainty:'forecast',pending:false,a}); nd=addMonths(nd,c.term||12); g++; }
+  });
+  return out.sort((x,y)=>String(x.date||'zzzz').localeCompare(String(y.date||'zzzz')));
+}
+function renderQuarterUpcoming(selQI){
+  const panel=$('qUpcomingPanel'), wrap=$('qUpcomingWrap'); if(!wrap) return;
+  const rel=upcomingReleases().filter(r=>r.pending || (r.qi!=null && r.qi>selQI));
+  if(!rel.length){ panel.style.display='none'; return; }
+  panel.style.display='';
+  const groups={}; rel.forEach(r=>{ const k=r.pending?'pending':r.qi; (groups[k]=groups[k]||[]).push(r); });
+  const keys=Object.keys(groups).filter(k=>k!=='pending').map(Number).sort((a,b)=>a-b);
+  const card=(label,list,note)=>{ const by={Holdback:0,Accelerator:0,Renewal:0}; list.forEach(r=>by[r.type]+=r.amount);
+    const parts=Object.entries(by).filter(([,v])=>v>0).map(([k,v])=>`${k} ${fmt(v)}`).join(' · '); const tot=list.reduce((s,r)=>s+r.amount,0);
+    return `<div class="stat" style="min-width:200px"><div class="lbl">${label}</div><div class="val" style="font-size:20px">${fmt(tot)}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">${parts}${note?` · <span style="color:var(--orange)">${note}</span>`:''}</div></div>`;
+  };
+  let html='<div class="cards" style="margin-bottom:0">';
+  keys.slice(0,6).forEach(qi=>{ html+=card(qLabel(qi),groups[qi]); });
+  if(groups.pending) html+=card('Pending collection',groups.pending,'not yet collected');
+  html+='</div><div style="font-size:11px;color:var(--muted);margin-top:8px">Renewals beyond the current cycle are <b>forecast</b> (a rep still signs them); holdback &amp; accelerator are <b>collection-driven</b>. Full itemized list in Reports → Upcoming releases.</div>';
+  wrap.innerHTML=html;
+}
+function renderUpcomingReleases(){
+  const wrap=$('repRelWrap'); if(!wrap) return;
+  const rel=upcomingReleases();
+  $('repRelCount').textContent=`${rel.length} release${rel.length===1?'':'s'} · held & forecast, soonest first`;
+  if(!rel.length){ wrap.innerHTML=`<div class="empty"><b>Nothing upcoming</b>Held and forecast releases appear here once agreements have holdbacks, accelerators, or renewals ahead.</div>`; return; }
+  const tag=c=>c==='collection'?'<span class="chip c-payable" style="font-size:9px">collection-driven</span>':c==='signed'?'<span class="chip c-paid" style="font-size:9px">signed</span>':'<span class="chip c-maturing" style="font-size:9px">forecast</span>';
+  const typeChip=t=>{const M={Holdback:['#fff4e8','var(--orange)'],Accelerator:['#f0ecff','#5a3fb8'],Renewal:['#e7f3ee','var(--payable)']};const m=M[t]||['','var(--ink)'];return `<span class="chip" style="background:${m[0]};color:${m[1]};font-size:10px">${t}</span>`;};
+  const rows=rel.map(r=>`<tr>
+    <td class="mono" style="color:var(--muted)">${r.pending?'<span style="color:var(--orange)">pending</span>':esc(String(r.date||'').slice(0,10))}</td>
+    <td class="ag-no">#${esc(r.a.agreement_number||'—')}</td>
+    <td>${esc(r.a.customer_name||'—')}</td>
+    <td>${typeChip(r.type)}</td>
+    <td>${tag(r.certainty)}</td>
+    <td class="num mono" style="font-weight:700">${fmt(r.amount)}</td>
+    <td class="mono">${r.qi!=null?qLabel(r.qi):'—'}</td>
+  </tr>`).join('');
+  wrap.innerHTML=`<table><thead><tr><th>Release date</th><th>Agr #</th><th>Customer</th><th>Type</th><th>Certainty</th><th class="num">Amount</th><th>Credits to</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function exportUpcomingCSV(){
+  const rel=upcomingReleases();
+  const head=['Release Date','Agreement','Customer','Type','Certainty','Amount','Credited Quarter'];
+  const lines=[head.join(',')];
+  rel.forEach(r=>{const cells=[r.pending?'pending':String(r.date||'').slice(0,10),r.a.agreement_number||'',r.a.customer_name||'',r.type,r.certainty,Math.round(r.amount),r.qi!=null?qLabel(r.qi):''];
+    lines.push(cells.map(v=>{v=String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(','));});
+  const blob=new Blob([lines.join('\n')],{type:'text/csv'});const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=`upcoming-releases-${todayISO()}.csv`;a.click();URL.revokeObjectURL(u);
+}
 function customerProfitability(){
   const map={};
   scopedAgreements().forEach(a=>{const c=compute(a);const k=a.customer_name||'—';
@@ -1700,6 +1763,7 @@ function renderReports(){
   </tr><tr class="cust-detail" data-detail="${i}" style="display:none"><td colspan="10" style="background:#f7f7f8;padding:12px 14px">${detailFor(o)}</td></tr>`;}).join('');
   $('repCustWrap').innerHTML=`<table><thead><tr><th>Customer</th><th class="num">Agmts</th><th class="num">MRR</th><th class="num">Yr-1 rev</th><th class="num">Gross profit</th><th>Avg margin</th><th class="num">Commission</th><th class="num">Paid</th><th class="num">Held</th><th>Next renewal</th></tr></thead><tbody>${body}</tbody></table>`;
   $('repCustWrap').querySelectorAll('.cust-row').forEach(row=>row.onclick=()=>{const d=$('repCustWrap').querySelector(`[data-detail="${row.dataset.cust}"]`); if(d){const open=d.style.display!=='none'; d.style.display=open?'none':'table-row'; row.querySelector('td').innerHTML=row.querySelector('td').innerHTML.replace(open?'▾':'▸',open?'▸':'▾');}});
+  renderUpcomingReleases();
 }
 function exportProfitabilityCSV(){
   const cust=customerProfitability();
@@ -2880,6 +2944,7 @@ $('fcExport').onclick=exportForecastCSV;
 $('tabHistory').onclick=()=>switchView('history');
 $('tabReports').onclick=()=>switchView('reports');
 $('repExport').onclick=exportProfitabilityCSV;
+if($('repRelExport')) $('repRelExport').onclick=exportUpcomingCSV;
 $('histSearch').addEventListener('input',renderHistory);
 $('histType').addEventListener('change',renderHistory);
 $('histStatus').addEventListener('change',renderHistory);
