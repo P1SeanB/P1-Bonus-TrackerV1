@@ -529,6 +529,15 @@
         <div class="fld full"><label>Estimate # <span class="hint">SSE quote reference — ties this agreement back to its opportunity</span></label><input id="f_estref" placeholder="e.g. SSE-045-26"></div>
         <div class="fld full"><label>Notes</label><input id="f_notes" placeholder="Optional"></div>
         <div class="fld full"><div class="fieldset-h" style="margin-top:2px">Files</div><div id="agFiles" class="file-block"></div></div>
+        <div class="fld full">
+          <div class="fieldset-h" id="blogToggle" style="margin-top:2px;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none">Billing log <span class="hint" id="blogHint" style="font-weight:500">▸ show</span></div>
+          <div id="blogWrap" style="display:none">
+            <div style="font-size:11.5px;color:var(--muted);margin-bottom:6px;line-height:1.5">Expected invoices from the first-billing date &amp; schedule. Each auto-marks <b>paid</b> once its date passes; un-mark any the customer didn't actually pay. <b>Collected</b> invoices (not the schedule) drive the holdback &amp; accelerator release.</div>
+            <div id="blogSummary" style="font-size:12px;color:var(--muted);margin-bottom:8px"></div>
+            <div style="margin-bottom:8px"><button type="button" class="sched-add" id="blogGen">⟳ Generate / rebuild from schedule</button></div>
+            <div id="blogTableWrap"></div>
+          </div>
+        </div>
         <div class="preview" id="mPreview"></div>
       </div>
     </div>
@@ -825,6 +834,34 @@ async function patchRenewalPaid(rowId,val){
     {agreement:a?a.agreement_number:null,customer:a?a.customer_name:null,cycle:r.renewal_no,amount:+r.commission_amount||0},null);
   render();
 }
+/* ---- Billing log: expected invoices from first-billing date + schedule; auto-marked paid
+   once their date passes, un-markable by hand. Collected invoices (not the schedule
+   assumption) drive the holdback & accelerator release once a log exists. ---- */
+function scheduledInvoiceAmounts(a){
+  const term=+a.contract_term||12;
+  const sched=(a.custom_billing&&Array.isArray(a.billing_schedule)&&a.billing_schedule.length)?a.billing_schedule:null;
+  const flatRmr=+a.monthly_rmr||0;
+  const billStr=a.first_billing_date||a.activation_date;
+  let month0=0; if(billStr){const d=new Date(String(billStr).slice(0,10)+'T00:00:00'); if(!isNaN(d))month0=d.getMonth();}
+  const revAt=m=>{ if(!sched)return flatRmr; const since=m-1,cal=((month0+since)%12)+1; let s=0; for(const r of sched){if((+r.month)===cal){if(r.once&&since>=12)continue; s+=(+r.amount||0);}} return s; };
+  const out=[]; for(let m=1;m<=term;m++){ const amt=revAt(m); if(amt>0) out.push({m,amount:Math.round(amt*100)/100}); }
+  return out;
+}
+function generateBillingLog(a){
+  const billStr=a.first_billing_date||a.activation_date; if(!billStr) return [];
+  const base=new Date(String(billStr).slice(0,10)+'T00:00:00'); if(isNaN(base)) return [];
+  return scheduledInvoiceAmounts(a).map(x=>{ const d=addMonths(base,x.m-1); return {date:d.toISOString().slice(0,10),amount:x.amount,invoice_no:'',status:'auto'}; });
+}
+function logEffectivePaid(e){ if(!e)return false; if(e.status==='paid')return true; if(e.status==='unpaid')return false; return String(e.date||'').slice(0,10)<=todayISO(); }  // 'auto' → paid once its date passes
+function billingLogCollected(log){ return (log||[]).reduce((s,e)=>s+(logEffectivePaid(e)?(+e.amount||0):0),0); }        // collected so far
+function billingLogExpected(log){ return (log||[]).reduce((s,e)=>s+(+e.amount||0),0); }
+function billingLogReleaseDate(log,threshold){   // date collection crosses threshold; missed (unpaid) invoices skipped, future assumed paid
+  if(!(threshold>0)) return null;
+  const sorted=[...(log||[])].filter(e=>e&&e.date).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  let cum=0;
+  for(const e of sorted){ if(e.status==='unpaid') continue; cum+=(+e.amount||0); if(cum>=threshold-1e-6) return new Date(String(e.date).slice(0,10)+'T00:00:00'); }
+  return null;   // not enough collected yet → held until it catches up
+}
 function frozenAmount(a,type){
   const map={
     initial:['initial_snapshot','paid_initial','initialCommission'],
@@ -908,7 +945,11 @@ function compute(a,plan){
   let initialQI=null,renewalDate=null,renewalQI=null,holdbackQI=null,acceleratorQI=null,holdbackReleaseDate=null,acceleratorReleaseDate=null;
   if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad)){initialQI=qIndexFromYM(ad.getFullYear(),ad.getMonth());if(term>0&&!noRenewal){renewalDate=addMonths(ad,term);renewalQI=qIndexFromYM(renewalDate.getFullYear(),renewalDate.getMonth());}
     if(!legacyFull){ const bd=new Date((a.first_billing_date||a.activation_date)+'T00:00:00'); const rb=isNaN(bd)?ad:bd;   // releases measured from FIRST BILLING (revenue start)
-      holdbackReleaseDate=addMonths(rb,holdbackReleaseMonth); holdbackQI=qIndexFromYM(holdbackReleaseDate.getFullYear(),holdbackReleaseDate.getMonth()); acceleratorReleaseDate=addMonths(rb,accelReleaseMonth); acceleratorQI=qIndexFromYM(acceleratorReleaseDate.getFullYear(),acceleratorReleaseDate.getMonth()); }
+      const blog=(Array.isArray(a.billing_log)&&a.billing_log.length)?a.billing_log:null;
+      holdbackReleaseDate = blog ? billingLogReleaseDate(blog,holdbackThreshold) : addMonths(rb,holdbackReleaseMonth);
+      acceleratorReleaseDate = blog ? billingLogReleaseDate(blog,accelThreshold) : addMonths(rb,accelReleaseMonth);
+      holdbackQI = holdbackReleaseDate ? qIndexFromYM(holdbackReleaseDate.getFullYear(),holdbackReleaseDate.getMonth()) : null;
+      acceleratorQI = acceleratorReleaseDate ? qIndexFromYM(acceleratorReleaseDate.getFullYear(),acceleratorReleaseDate.getMonth()) : null; }
   }}
   // Once renewed, the credited quarter follows the Renewal Month entered on the Renew form (not the activation+term math).
   if(a.renewed && a.renewal_credit_month){const m=String(a.renewal_credit_month).match(/^(\d{4})-(\d{2})$/);if(m){renewalQI=qIndexFromYM(+m[1],+m[2]-1);}}
@@ -922,6 +963,9 @@ function compute(a,plan){
           baseCommissionNew,baseCommissionRenewal,initialCommission,renewalCommission,
           legacyFull,standardCommission,acceleratorCommission,immediateCommission,holdbackCommission,acceleratorHeld,
           holdbackQI,acceleratorQI,holdbackReleaseDate,acceleratorReleaseDate,holdbackReleaseMonth,accelReleaseMonth,
+          billingCollected:(Array.isArray(a.billing_log)&&a.billing_log.length)?billingLogCollected(a.billing_log):null,
+          billingExpected:(Array.isArray(a.billing_log)&&a.billing_log.length)?billingLogExpected(a.billing_log):totalRev,
+          holdbackThreshold,accelThreshold,
           initialQI,renewalDate,renewalQI,annualBilled,firstBill,scheduled:!!sched,agreementType:atype,noRenewal};
 }
 function deferredStatus(c,selQI,paid){return 'none';}     // legacy no-op (deferred model removed)
@@ -977,7 +1021,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-26';
+const APP_VERSION='P1RMR-27';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1172,7 +1216,7 @@ async function upsert(row){
   async function go(p){ if(p.id){const {error}=await sb.from('rmr_agreements').update(p).eq('id',p.id);if(error)throw error;} else {const {error}=await sb.from('rmr_agreements').insert(p);if(error)throw error;} }
   try{ await go(payload); }
   catch(e){ // ref columns not migrated yet → retry without them so saving still works
-    if(/customer_number|site_number|owner_email|converted_to_manual|conversion_|renewal_date|renewal_credit_month|prerenewal_state|stage|opportunity_number|estimate_ref|est_monthly_rmr|expected_close|lost_reason|agreement_type|legacy_full_pay|first_billing_date|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,converted_to_manual,conversion_date,conversion_notes,conversion_ref,renewal_date,renewal_credit_month,prerenewal_state,stage,opportunity_number,estimate_ref,est_monthly_rmr,expected_close,lost_reason,agreement_type,legacy_full_pay,first_billing_date,...rest}=payload; await go(rest); }
+    if(/customer_number|site_number|owner_email|converted_to_manual|conversion_|renewal_date|renewal_credit_month|prerenewal_state|stage|opportunity_number|estimate_ref|est_monthly_rmr|expected_close|lost_reason|agreement_type|legacy_full_pay|first_billing_date|billing_log|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,converted_to_manual,conversion_date,conversion_notes,conversion_ref,renewal_date,renewal_credit_month,prerenewal_state,stage,opportunity_number,estimate_ref,est_monthly_rmr,expected_close,lost_reason,agreement_type,legacy_full_pay,first_billing_date,billing_log,...rest}=payload; await go(rest); }
     else throw e;
   }
 }
@@ -2015,6 +2059,9 @@ function openModal(id,promote){
   }
   $('mRevert').style.display=(renewed||(a&&hasLedgerRenewals(a)))?'inline-block':'none';
   renderRenewalHistory(a?a.id:null);
+  EDIT_LOG=(a&&Array.isArray(a.billing_log)&&a.billing_log.length)?JSON.parse(JSON.stringify(a.billing_log)):[];
+  if($('blogWrap')){ $('blogWrap').style.display='none'; if($('blogHint'))$('blogHint').textContent='▸ show'; }
+  renderBillingLog();
   $('f_notes').value=v('notes');$('mDelete').style.display=a?'inline-block':'none';
   // Assigned-to / owner picker — only for roles that can see all users
   const ownerFld=$('ownerFld');
@@ -2196,6 +2243,39 @@ async function revertRenewal(id){
   audit('Renewal reverted','Renewals',a.agreement_number,{renewed:true},{agreement:a.agreement_number,customer:a.customer_name,restored_rmr:prior?prior.monthly_rmr:null},null);
   toast('Renewal reverted — back in Pending Renewals');
   render();
+}
+let EDIT_LOG=[];
+function refreshBlogSummary(){
+  const box=$('blogSummary'); if(!box) return;
+  const row=readForm(); const c=compute(row);
+  if(c.legacyFull){ box.innerHTML=`This agreement is grandfathered — it pays 100% up front, so the billing log doesn't gate any holdback.`; return; }
+  const collected=billingLogCollected(EDIT_LOG), expected=billingLogExpected(EDIT_LOG);
+  const hb=c.holdbackReleaseDate?fmtDate(c.holdbackReleaseDate):'<b style="color:var(--orange)">held (pending collection)</b>';
+  const ac=(c.acceleratorHeld>0)?(c.acceleratorReleaseDate?fmtDate(c.acceleratorReleaseDate):'<b style="color:var(--orange)">held (pending collection)</b>'):'—';
+  box.innerHTML=`Collected <b class="mono">${fmt(collected)}</b> of <b class="mono">${fmt(expected)}</b> expected · Holdback (25% = ${fmt(c.holdbackThreshold)}) releases <b>${hb}</b> · Accelerator (50% = ${fmt(c.accelThreshold)}) releases <b>${ac}</b>`;
+}
+function renderBillingLog(){
+  const wrap=$('blogTableWrap'); if(!wrap) return;
+  if(!EDIT_LOG.length){ wrap.innerHTML=`<div class="file-hint">No billing log yet. Set the first-billing date, term and RMR, then click <b>Generate</b> to list the expected invoices.</div>`; refreshBlogSummary(); return; }
+  const rows=EDIT_LOG.map((e,i)=>{
+    const paid=logEffectivePaid(e);
+    const st = e.status==='unpaid'?'<span style="color:var(--held);font-weight:600">Missed</span>' : (paid?`<span style="color:var(--payable);font-weight:600">Paid${e.status!=='paid'?' · auto':''}</span>`:'<span style="color:var(--muted)">Scheduled</span>');
+    return `<tr>
+      <td class="mono" style="color:var(--muted)">${i+1}</td>
+      <td><input class="blog-date" data-i="${i}" type="date" value="${esc(String(e.date||'').slice(0,10))}" style="border:1px solid var(--line);border-radius:6px;padding:3px 5px;font-size:12px"></td>
+      <td class="num"><input class="blog-amt" data-i="${i}" type="number" step="0.01" value="${e.amount!=null?e.amount:''}" style="width:88px;border:1px solid var(--line);border-radius:6px;padding:3px 5px;font-size:12px;text-align:right"></td>
+      <td><input class="blog-inv" data-i="${i}" placeholder="—" value="${esc(e.invoice_no||'')}" style="width:104px;border:1px solid var(--line);border-radius:6px;padding:3px 5px;font-size:12px"></td>
+      <td>${st}</td>
+      <td style="white-space:nowrap"><button type="button" class="blog-pay iconbtn" data-i="${i}">${paid?'Mark unpaid':'Mark paid'}</button>${e.status!=='auto'?` <button type="button" class="blog-auto iconbtn" data-i="${i}" title="follow schedule" style="color:var(--muted)">auto</button>`:''}</td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML=`<div style="max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px"><table style="font-size:12px"><thead><tr><th>#</th><th>Date</th><th class="num">Amount</th><th>Invoice #</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  wrap.querySelectorAll('.blog-date').forEach(el=>el.addEventListener('input',()=>{EDIT_LOG[+el.dataset.i].date=el.value;refreshBlogSummary();}));
+  wrap.querySelectorAll('.blog-amt').forEach(el=>el.addEventListener('input',()=>{EDIT_LOG[+el.dataset.i].amount=+el.value||0;refreshBlogSummary();}));
+  wrap.querySelectorAll('.blog-inv').forEach(el=>el.addEventListener('input',()=>{EDIT_LOG[+el.dataset.i].invoice_no=el.value;}));
+  wrap.querySelectorAll('.blog-pay').forEach(b=>b.onclick=()=>{const e=EDIT_LOG[+b.dataset.i];e.status=logEffectivePaid(e)?'unpaid':'paid';renderBillingLog();});
+  wrap.querySelectorAll('.blog-auto').forEach(b=>b.onclick=()=>{EDIT_LOG[+b.dataset.i].status='auto';renderBillingLog();});
+  refreshBlogSummary();
 }
 function renderRenewalHistory(agreementId){
   const box=$('renHist'); if(!box) return;
@@ -2520,7 +2600,8 @@ function readForm(){return{
   renewal_credit_month:($('f_rencredit')&&$('f_rencredit').value)||null,
   stage:($('f_stage')&&$('f_stage').value)||null,
   estimate_ref:($('f_estref')&&$('f_estref').value.trim())||null,
-  legacy_full_pay: (editingId ? (((AGREEMENTS.find(a=>a.id===editingId)||{}).legacy_full_pay)!==false) : false)};}
+  legacy_full_pay: (editingId ? (((AGREEMENTS.find(a=>a.id===editingId)||{}).legacy_full_pay)!==false) : false),
+  billing_log: (EDIT_LOG&&EDIT_LOG.length)?EDIT_LOG:null};}
 function updatePreview(){
   const row=readForm();const c=compute(row);
   const gm=c.grossMargin;
@@ -2807,6 +2888,8 @@ $('tabAdmin').onclick=()=>switchView('admin');
 $('addBtn').onclick=()=>{ if(!sb){toast('Sign in first');return;} openModal(null); };
 $('f_custom').onchange=toggleBilling;
 $('schedAdd').onclick=()=>addSchedRow(1,'',false);
+$('blogToggle').onclick=()=>{const w=$('blogWrap');const open=w.style.display!=='none';w.style.display=open?'none':'block';$('blogHint').textContent=open?'▸ show':'▾ hide';if(!open)renderBillingLog();};
+$('blogGen').onclick=()=>{ if(EDIT_LOG.length && !confirm('Rebuild the billing log from the schedule?\n\nThis overwrites any manual dates, invoice numbers, and paid/unpaid marks.')) return; EDIT_LOG=generateBillingLog(readForm()); renderBillingLog(); };
 $('marginFlag').onchange=()=>{const v=parseFloat($('marginFlag').value);if(!isNaN(v)&&v>=0&&v<=100){marginFlagPct=v;LS.set('rmr_margin_flag',String(v));renderAgreements();toast('Margin flag set to '+v+'%');}};
 $('agFilter').onchange=e=>{agFilter=(e.target.value==='all')?'all':+e.target.value;renderAgreements();};
 $('mClose').onclick=closeModal;$('mCancel').onclick=closeModal;
