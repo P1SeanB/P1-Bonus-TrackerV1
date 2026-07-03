@@ -1131,7 +1131,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-44';
+const APP_VERSION='P1RMR-45';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -2038,22 +2038,21 @@ function renderHistory(){
   $('histCount').textContent=`${rows.length} commission event${rows.length===1?'':'s'}`;
   const badge=st=>{const m={'Paid':'c-paid','Pending':'c-payable','Forecast':'c-maturing','Not eligible':'c-held'};return `<span class="chip ${m[st]||''}">${st}</span>`;};
   if(!rows.length){$('histTableWrap').innerHTML=`<div class="empty"><b>No commission events</b>As agreements are added and paid, every initial and renewal commission is logged here with the plan it was calculated under.</div>`;return;}
-  const body=rows.map(r=>{
-    const mPct=r.margin==null?'—':`${Math.round(r.margin*1000)/10}%`;
-    return `<tr>
-      <td class="mono" style="color:var(--muted)">${r.date||'—'}</td>
-      <td>${esc(r.a.customer_name||'—')}${r.a.site_number?`<div style="font-size:10px;color:var(--muted)">Site #${esc(r.a.site_number)}</div>`:''}</td>
-      <td class="ag-no">#${esc(r.a.agreement_number||'—')}</td>
-      <td>${(()=>{const M={Renewal:['#e7f3ee','var(--payable)'],Standard:['#eef1f6','var(--navy)'],Holdback:['#fff4e8','var(--orange)'],Accelerator:['#f0ecff','#5a3fb8'],Initial:['','']};const m=M[r.cat]||M.Initial;return m[0]?`<span class="chip" style="background:${m[0]};color:${m[1]};font-size:10px">${esc(r.type)}</span>`:`<span class="type-tag">${esc(r.type)}</span>`;})()}</td>
-      <td>${r.term?r.term+'mo':'—'}</td>
-      <td class="num mono">${r.commissionable!=null?fmt(r.commissionable):'—'}</td>
-      <td class="mono">${mPct}</td>
-      <td class="mono">${Math.round(r.rate*1000)/10}% ×${(+r.mult).toFixed(2)}</td>
-      <td class="num mono" style="font-weight:700">${fmt2(r.amount)}</td>
-      <td>${r.frozen?`<span title="frozen ${esc(r.plan)}">🔒 ${esc(r.plan)}</span>`:`<span style="color:var(--muted)">${esc(r.plan)}</span>`}</td>
-      <td><span title="${esc(r.statusLabel||'')}">${badge(r.status)}</span></td>
-    </tr>`;}).join('');
-  $('histTableWrap').innerHTML=`<table><thead><tr><th>Date</th><th>Customer</th><th>Agr #</th><th>Type</th><th>Term</th><th class="num">Commissionable</th><th>Margin</th><th>Rate</th><th class="num">Final</th><th>Plan</th><th>Status</th></tr></thead><tbody>${body}</tbody></table>`;
+  const typeChip=r=>{const M={Renewal:['#e7f3ee','var(--payable)'],Standard:['#eef1f6','var(--navy)'],Holdback:['#fff4e8','var(--orange)'],Accelerator:['#f0ecff','#5a3fb8'],Initial:['','']};const m=M[r.cat]||M.Initial;return m[0]?`<span class="chip" style="background:${m[0]};color:${m[1]};font-size:10px">${esc(r.type)}</span>`:`<span class="type-tag">${esc(r.type)}</span>`;};
+  const cols=[
+    {key:'num',label:'Agr #',type:'num',get:r=>{const m=String(r.a.agreement_number||'').match(/\d+/);return m?+m[0]:null;},cell:r=>`<td class="ag-no">#${esc(r.a.agreement_number||'—')}</td>`},
+    {key:'date',label:'Date',type:'date',get:r=>r.date||null,cell:r=>`<td class="mono" style="color:var(--muted)">${r.date||'—'}</td>`},
+    {key:'cust',label:'Customer',type:'text',get:r=>String(r.a.customer_name||'').toLowerCase(),cell:r=>`<td>${esc(r.a.customer_name||'—')}${r.a.site_number?`<div style="font-size:10px;color:var(--muted)">Site #${esc(r.a.site_number)}</div>`:''}</td>`},
+    {key:'type',label:'Type',type:'text',get:r=>String(r.cat||r.type||''),cell:r=>`<td>${typeChip(r)}</td>`},
+    {key:'margin',label:'Margin',type:'num',get:r=>r.margin==null?null:r.margin,cell:r=>`<td class="mono">${r.margin==null?'—':`${Math.round(r.margin*1000)/10}%`}</td>`},
+    {key:'term',label:'Term',type:'num',get:r=>r.term||null,cell:r=>`<td>${r.term?r.term+'mo':'—'}</td>`},
+    {key:'comm',label:'Commissionable',type:'num',num:true,get:r=>r.commissionable==null?null:r.commissionable,cell:r=>`<td class="num mono">${r.commissionable!=null?fmt(r.commissionable):'—'}</td>`},
+    {key:'rate',label:'Rate',type:'num',get:r=>r.rate,cell:r=>`<td class="mono">${Math.round(r.rate*1000)/10}% ×${(+r.mult).toFixed(2)}</td>`},
+    {key:'final',label:'Final',type:'num',num:true,get:r=>r.amount,cell:r=>`<td class="num mono" style="font-weight:700">${fmt2(r.amount)}</td>`},
+    {key:'plan',label:'Plan',type:'text',get:r=>String(r.plan||''),cell:r=>`<td>${r.frozen?`<span title="frozen ${esc(r.plan)}">🔒 ${esc(r.plan)}</span>`:`<span style="color:var(--muted)">${esc(r.plan)}</span>`}</td>`},
+    {key:'status',label:'Status',type:'text',get:r=>String(r.status||''),cell:r=>`<td><span title="${esc(r.statusLabel||'')}">${badge(r.status)}</span></td>`}
+  ];
+  tsortRender('histTableWrap','history',cols,rows,renderHistory);
 }
 function exportHistoryCSV(){
   const rows=historyLedger();
