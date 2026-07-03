@@ -1072,6 +1072,7 @@ function renewalTotalsFor(agreementId){
 let marginFlagPct=(()=>{const v=parseFloat(LS.get('rmr_margin_flag'));return isNaN(v)?40:v;})();
 let agFilter='all';
 let agSort=null; // {key,dir}
+let AG_OPEN=null; const AG_CALC_BASIS={};   // agreements row-expand: which row is open + its per-row ACV/TCV view
 const AG_SORT={
   num:a=>{const m=String(a.agreement_number||'').match(/\d+/);return m?+m[0]:Infinity;},
   cust:a=>String(a.customer_name||'').toLowerCase(),
@@ -1131,7 +1132,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-45';
+const APP_VERSION='P1RMR-46';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1533,7 +1534,7 @@ function renderAgreements(){
   const totalRMR=list.reduce((s,a)=>s+compute(a).mrr,0);
   $('agShown').textContent=`${list.length} agreement${list.length===1?'':'s'}`;
   $('agRmrTotal').textContent=fmt(totalRMR);
-  $('agCount').textContent=`${list.length} of ${_sa.length}`;
+  $('agCount').textContent=`${list.length} of ${_sa.length}${canViewAll()?' · click a row for the full calculation':''}`;
   if(!list.length){$('agTableWrap').innerHTML=`<div class="empty"><b>No agreements ${agFilter==='all'?'yet':'activated in '+qLabel(agFilter)}</b>${agFilter==='all'?'Add your first RMR agreement to start tracking maturity.':'Try a different quarter or All time.'}</div>`;return;}
   const showOwner=canViewAll() && !(USER_FILTER&&USER_FILTER.length===1);
   const rows=list.map(a=>{
@@ -1549,7 +1550,7 @@ function renderAgreements(){
     const autoTag=(c.renewMult>0&&c.term>0)?(a.autorenew
       ?'<span class="chip c-payable" style="font-size:10px">auto</span>'
       :(a.renewed?'<span class="chip c-paid" style="font-size:10px">renewed</span>':'<span class="chip c-maturing" style="font-size:10px">manual</span>')):'';
-    return `<tr>
+    return `<tr class="${canViewAll()?'exp-row':''}" ${canViewAll()?`data-agexp="${a.id}"`:''}>
       <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
       <td>${esc(a.customer_name||'—')}${(a.customer_number||a.site_number)?`<div style="font-size:10px;color:var(--muted)">${a.customer_number?'Cust #'+esc(a.customer_number):''}${a.customer_number&&a.site_number?' · ':''}${a.site_number?'Site #'+esc(a.site_number):''}</div>`:''}${showOwner?`<div style="font-size:10px;color:var(--orange);font-weight:600;margin-top:2px">${esc(a.owner_email||'(unassigned)')}<span style="color:var(--muted);font-weight:500"> · plan ${esc(c.planVersion||'—')}</span></div>`:''}</td>
       <td class="mono">${fmt(c.mrr)}${c.scheduled?'<div style="font-size:10px;color:var(--orange);font-weight:600;letter-spacing:.03em">SCHEDULED</div>':''}</td>
@@ -1559,7 +1560,7 @@ function renderAgreements(){
       <td class="num mono">${renewTxt}</td>
       <td>${autoTag}</td>
       <td>${can('editAgreements')?`<button class="iconbtn" data-edit="${a.id}">Edit</button>`:'<span class="qctx">view</span>'}</td>
-    </tr>`;}).join('');
+    </tr>${(canViewAll()&&AG_OPEN===a.id)?`<tr class="ag-detail"><td colspan="9" style="background:#f7f7f8;padding:14px 18px">${calcPanelHTML(c, AG_CALC_BASIS[a.id]||'ACV', a, 'agcvacv_'+a.id, 'agcvtcv_'+a.id)}</td></tr>`:''}`;}).join('');
   const th=(key,label,numCls)=>{
     const active=agSort&&agSort.key===key;
     const arrow=active?(agSort.dir==='asc'?' ▲':' ▼'):' ↕';
@@ -1572,7 +1573,9 @@ function renderAgreements(){
     else{agSort={key:k,dir:'asc'};}
     renderAgreements();
   });
-  $('agTableWrap').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openModal(b.dataset.edit));
+  $('agTableWrap').querySelectorAll('[data-edit]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();openModal(b.dataset.edit);});
+  $('agTableWrap').querySelectorAll('[data-agexp]').forEach(row=>row.onclick=(e)=>{ if(e.target.closest('button,input,a,select'))return; const id=row.dataset.agexp; AG_OPEN=(AG_OPEN===id?null:id); renderAgreements(); });
+  if(AG_OPEN){ const acv=$('agcvacv_'+AG_OPEN), tcv=$('agcvtcv_'+AG_OPEN); if(acv)acv.onclick=()=>{AG_CALC_BASIS[AG_OPEN]='ACV';renderAgreements();}; if(tcv)tcv.onclick=()=>{AG_CALC_BASIS[AG_OPEN]='TCV';renderAgreements();}; }
 }
 /* ---- Pending Renewals (manual-renewal agreements approaching their renewal date) ---- */
 function addMonths(d,n){const x=new Date(d.getTime());x.setMonth(x.getMonth()+n);return x;}
@@ -2881,8 +2884,7 @@ function readForm(){return{
   legacy_full_pay: (editingId ? (((AGREEMENTS.find(a=>a.id===editingId)||{}).legacy_full_pay)!==false) : false),
   billing_log: (EDIT_LOG&&EDIT_LOG.length)?EDIT_LOG:null};}
 let PREVIEW_BASIS='ACV';   // view-only deal-value basis for the live calculation panel (commission always uses the plan basis)
-function updatePreview(){
-  const row=readForm();const c=compute(row);
+function calcPanelHTML(c, B, row, acvId, tcvId){
   const gm=c.grossMargin;
   const mPct=gm==null?'—':`${Math.round(gm*1000)/10}%`;
   const target=c.targetMargin||0.50,minM=c.minMargin||0.45;
@@ -2898,11 +2900,11 @@ function updatePreview(){
   let alert='';
   if(gm!=null&&gm<minM) alert=`<div style="grid-column:1/-1;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:7px 10px;font-size:12px;color:#9a2a2a"><b>⚠ Does not meet minimum profitability (${Math.round(minM*100)}%).</b> Increase recurring revenue or reduce direct costs. Management approval required to pay.</div>`;
   else if(gm!=null&&gm<target) alert=`<div style="grid-column:1/-1;background:#fff4e8;border:1px solid #f3d4ad;border-radius:8px;padding:7px 10px;font-size:12px;color:#8a5a17">Below the ${Math.round(target*100)}% target — commission is reduced. Consider raising RMR or trimming costs.</div>`;
-  const pvVal=PREVIEW_BASIS==='ACV'?c.acv:c.tcv, pvLabel=PREVIEW_BASIS==='ACV'?'ACV (×12)':`TCV (×${c.months}mo)`, pvNote=PREVIEW_BASIS===c.basis?'commissionable':`view only · commission on ${c.basis}`;
-  const vRev=PREVIEW_BASIS==='ACV'?c.acv:c.tcv, vDirect=PREVIEW_BASIS==='ACV'?c.directCosts:c.totalDirectCosts, vGP=vRev-vDirect, vOH=PREVIEW_BASIS==='ACV'?(c.acv*c.overheadPct):c.overhead, vNet=vRev-vDirect-c.initialCommission-vOH;
-  const vRevLabel=PREVIEW_BASIS==='ACV'?'Annual revenue (ACV)':`Contract revenue (TCV · ${c.months}mo)`, vDirNote=PREVIEW_BASIS==='ACV'?'annual':'full term';
+  const pvVal=B==='ACV'?c.acv:c.tcv, pvLabel=B==='ACV'?'ACV (×12)':`TCV (×${c.months}mo)`, pvNote=B===c.basis?'commissionable':`view only · commission on ${c.basis}`;
+  const vRev=B==='ACV'?c.acv:c.tcv, vDirect=B==='ACV'?c.directCosts:c.totalDirectCosts, vGP=vRev-vDirect, vOH=B==='ACV'?(c.acv*c.overheadPct):c.overhead, vNet=vRev-vDirect-c.initialCommission-vOH;
+  const vRevLabel=B==='ACV'?'Annual revenue (ACV)':`Contract revenue (TCV · ${c.months}mo)`, vDirNote=B==='ACV'?'annual':'full term';
   const tbtn=(id,l,on)=>`<button type="button" id="${id}" style="border:1px solid var(--line);background:${on?'var(--navy)':'#fff'};color:${on?'#fff':'var(--muted)'};border-radius:6px;padding:1px 8px;font-size:11px;font-weight:600;cursor:pointer">${l}</button>`;
-  $('mPreview').innerHTML=`<h4 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">Live calculation <span style="font-weight:500;color:var(--none);font-size:11px">plan ${esc(c.planVersion)} · ${c.basis} basis</span><span style="margin-left:auto;font-weight:500;font-size:11px;color:var(--muted)">view: ${tbtn('pvACV','ACV',PREVIEW_BASIS==='ACV')}${tbtn('pvTCV','TCV',PREVIEW_BASIS==='TCV')}</span></h4>
+  return `<h4 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">Live calculation <span style="font-weight:500;color:var(--none);font-size:11px">plan ${esc(c.planVersion)} · ${c.basis} basis</span><span style="margin-left:auto;font-weight:500;font-size:11px;color:var(--muted)">view: ${tbtn(acvId,'ACV',B==='ACV')}${tbtn(tcvId,'TCV',B==='TCV')}</span></h4>
   <div class="pgrid">
     <div><span>MRR <span style="color:var(--none)">(annual billing ÷ 12)</span></span><b style="font-size:15px">${fmt2(c.mrr)}</b></div>
     <div><span>${pvLabel} <span style="color:var(--none)">${pvNote}</span></span><b style="font-size:15px">${fmt(pvVal)}</b></div>
@@ -2912,8 +2914,8 @@ function updatePreview(){
     <div><span>Gross profit</span><b style="font-size:14px">${fmt(vGP)}</b></div>
     <div><span>Gross margin <span style="color:var(--none)">(${esc(c.marginStatus||'—')}${tgtTxt?' · '+tgtTxt:''})</span></span><b style="color:${mColor};font-size:15px">${mDot} ${mPct}</b></div>
     <div><span>Margin multiplier</span><b style="color:${multColor};font-size:15px">×${c.marginMultiplier.toFixed(2)}</b></div>
-    <div><span>Overhead <span style="color:var(--none)">(${Math.round(c.overheadPct*100)}% of ${PREVIEW_BASIS} ${fmt(vRev)})</span></span><b style="font-size:14px;color:var(--held)">−${fmt(vOH)}</b></div>
-    <div><span>Net profit <span style="color:var(--none)">(${PREVIEW_BASIS==='ACV'?'annual':'full contract'} · after costs · commission · overhead)</span></span><b style="font-size:15px;color:${vNet<0?'var(--held)':'var(--paid)'}">${fmt(vNet)}</b></div>
+    <div><span>Overhead <span style="color:var(--none)">(${Math.round(c.overheadPct*100)}% of ${B} ${fmt(vRev)})</span></span><b style="font-size:14px;color:var(--held)">−${fmt(vOH)}</b></div>
+    <div><span>Net profit <span style="color:var(--none)">(${B==='ACV'?'annual':'full contract'} · after costs · commission · overhead)</span></span><b style="font-size:15px;color:${vNet<0?'var(--held)':'var(--paid)'}">${fmt(vNet)}</b></div>
     ${alert}
     <div style="grid-column:1/-1;border-top:1px solid var(--line);margin-top:2px;padding-top:6px"></div>
     <div><span>New: base ${Math.round(c.newPct*1000)/10}%</span><b style="font-size:13px;color:var(--muted)">${fmt(c.baseCommissionNew)}</b></div>
@@ -2928,6 +2930,10 @@ function updatePreview(){
     <div><span>Renews</span><b style="font-size:13px">${renWhen}</b></div>
     ${c.scheduled?`<div><span>Annual billed <span style="color:var(--none)">(custom schedule)</span></span><b style="font-size:14px">${fmt(c.annualBilled)}</b></div>`:''}
   </div>`;
+}
+function updatePreview(){
+  const row=readForm();const c=compute(row);
+  $('mPreview').innerHTML=calcPanelHTML(c, PREVIEW_BASIS, row, 'pvACV','pvTCV');
   if($('pvACV')) $('pvACV').onclick=()=>{PREVIEW_BASIS='ACV';updatePreview();};
   if($('pvTCV')) $('pvTCV').onclick=()=>{PREVIEW_BASIS='TCV';updatePreview();};
 }
