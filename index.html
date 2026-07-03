@@ -811,6 +811,7 @@ const DEFAULT_CONFIG={
   holdbackPct:0.25,                                         // §3 standard commission held for churn
   holdbackThresholdPct:0.25,                                // §3 release once 25% of Year-1 revenue is collected
   accelReleasePct:0.50,                                     // §4 accelerator releases at 50% realized margin (≈50% of revenue billed)
+  overheadPct:0.28,                                         // company overhead as % of total contract value (net-profit only)
   newPct:{12:0.06,24:0.07,36:0.08,48:0.085,60:0.09},        // §3.6 new-agreement matrix
   renewalPct:{12:0.04,24:0.05,36:0.055,48:0.0575,60:0.06},  // §3.6 manual renewal matrix (every renewal)
   autoRenewalPct:{12:0.02,24:0.025},                        // auto-renewal: lower rate, ONE-TIME, only 12/24-mo
@@ -995,6 +996,10 @@ function compute(a,plan){
   const accelThreshold   =(cfg.accelReleasePct!=null?cfg.accelReleasePct:0.50)*totalRev;
   const holdbackReleaseMonth=releaseMonth(holdbackThreshold), accelReleaseMonth=releaseMonth(accelThreshold);
   const netProfit=grossProfit-initialCommission;             // §4.14 annual gross profit less the commission
+  const overheadPct=(cfg.overheadPct!=null?cfg.overheadPct:0.28);        // company overhead as % of total contract value
+  const overhead=tcv*overheadPct;
+  const totalDirectCosts=directCosts*((term||12)/12);                    // annual direct costs across the full term
+  const contractNet=tcv-totalDirectCosts-initialCommission-overhead;     // full-contract net after costs, commission & overhead
   // timing
   let initialQI=null,renewalDate=null,renewalQI=null,holdbackQI=null,acceleratorQI=null,holdbackReleaseDate=null,acceleratorReleaseDate=null,acceleratorPieces=[];
   if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad)){initialQI=qIndexFromYM(ad.getFullYear(),ad.getMonth());if(term>0&&!noRenewal){renewalDate=addMonths(ad,term);renewalQI=qIndexFromYM(renewalDate.getFullYear(),renewalDate.getMonth());}
@@ -1019,7 +1024,7 @@ function compute(a,plan){
   return {term,rmr:mrr,mrr,acv,tcv,months,commissionableValue,basis:cfg.basis,
           planVersion:cfg.planVersion,minMargin:cfg.minMargin,targetMargin:cfg.targetMargin,
           laborHours,laborCost,materialCost,monitoringCost,softwareCost,subCost,otherCost,directCosts,
-          grossProfit,grossMargin,laborPctRevenue,netProfit,
+          grossProfit,grossMargin,laborPctRevenue,netProfit,overheadPct,overhead,totalDirectCosts,contractNet,
           marginMultiplier:mm.mult,marginLabel:mm.label,marginStatus:mm.status,eligible,
           newPct,renewalPct,initMult:newPct,renewMult:renewalPct,
           isAuto,autoRenewEligible,manualRenewalPct,autoRenewalPct,renewalType,converted,
@@ -1126,7 +1131,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-42';
+const APP_VERSION='P1RMR-44';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1260,7 +1265,7 @@ async function loadUsers(){
   KNOWN_USERS=[...set].filter(Boolean).sort();
 }
 let ACTIVE_PLAN_ID=null;
-function normalizeConfig(j){ j=j||{}; if(j.targetMargin==null)j.targetMargin=0.50; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='2026 v1.0'; if(!j.basis)j.basis='TCV'; if(!j.autoRenewalPct)j.autoRenewalPct={12:0.02,24:0.025}; if(j.immediatePct==null)j.immediatePct=0.75; if(j.holdbackPct==null)j.holdbackPct=0.25; if(j.holdbackThresholdPct==null)j.holdbackThresholdPct=0.25; if(j.accelReleasePct==null)j.accelReleasePct=0.50; return j; }
+function normalizeConfig(j){ j=j||{}; if(j.targetMargin==null)j.targetMargin=0.50; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='2026 v1.0'; if(!j.basis)j.basis='TCV'; if(!j.autoRenewalPct)j.autoRenewalPct={12:0.02,24:0.025}; if(j.immediatePct==null)j.immediatePct=0.75; if(j.holdbackPct==null)j.holdbackPct=0.25; if(j.holdbackThresholdPct==null)j.holdbackThresholdPct=0.25; if(j.accelReleasePct==null)j.accelReleasePct=0.50; if(j.overheadPct==null)j.overheadPct=0.28; return j; }
 async function loadPlans(){   // load EVERY saved plan; pick a default for the editor + fallback. Graceful if table absent.
   try{
     const {data,error}=await sb.from('rmr_commission_plans').select('*').order('modified_at',{ascending:false});
@@ -2895,18 +2900,21 @@ function updatePreview(){
   if(gm!=null&&gm<minM) alert=`<div style="grid-column:1/-1;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:7px 10px;font-size:12px;color:#9a2a2a"><b>⚠ Does not meet minimum profitability (${Math.round(minM*100)}%).</b> Increase recurring revenue or reduce direct costs. Management approval required to pay.</div>`;
   else if(gm!=null&&gm<target) alert=`<div style="grid-column:1/-1;background:#fff4e8;border:1px solid #f3d4ad;border-radius:8px;padding:7px 10px;font-size:12px;color:#8a5a17">Below the ${Math.round(target*100)}% target — commission is reduced. Consider raising RMR or trimming costs.</div>`;
   const pvVal=PREVIEW_BASIS==='ACV'?c.acv:c.tcv, pvLabel=PREVIEW_BASIS==='ACV'?'ACV (×12)':`TCV (×${c.months}mo)`, pvNote=PREVIEW_BASIS===c.basis?'commissionable':`view only · commission on ${c.basis}`;
+  const vRev=PREVIEW_BASIS==='ACV'?c.acv:c.tcv, vDirect=PREVIEW_BASIS==='ACV'?c.directCosts:c.totalDirectCosts, vGP=vRev-vDirect, vOH=PREVIEW_BASIS==='ACV'?(c.acv*c.overheadPct):c.overhead, vNet=vRev-vDirect-c.initialCommission-vOH;
+  const vRevLabel=PREVIEW_BASIS==='ACV'?'Annual revenue (ACV)':`Contract revenue (TCV · ${c.months}mo)`, vDirNote=PREVIEW_BASIS==='ACV'?'annual':'full term';
   const tbtn=(id,l,on)=>`<button type="button" id="${id}" style="border:1px solid var(--line);background:${on?'var(--navy)':'#fff'};color:${on?'#fff':'var(--muted)'};border-radius:6px;padding:1px 8px;font-size:11px;font-weight:600;cursor:pointer">${l}</button>`;
   $('mPreview').innerHTML=`<h4 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">Live calculation <span style="font-weight:500;color:var(--none);font-size:11px">plan ${esc(c.planVersion)} · ${c.basis} basis</span><span style="margin-left:auto;font-weight:500;font-size:11px;color:var(--muted)">view: ${tbtn('pvACV','ACV',PREVIEW_BASIS==='ACV')}${tbtn('pvTCV','TCV',PREVIEW_BASIS==='TCV')}</span></h4>
   <div class="pgrid">
     <div><span>MRR <span style="color:var(--none)">(annual billing ÷ 12)</span></span><b style="font-size:15px">${fmt2(c.mrr)}</b></div>
     <div><span>${pvLabel} <span style="color:var(--none)">${pvNote}</span></span><b style="font-size:15px">${fmt(pvVal)}</b></div>
     <div style="grid-column:1/-1;font-weight:700;color:var(--muted);font-size:11px;letter-spacing:.04em;text-transform:uppercase;margin-top:2px">Margin Engine</div>
-    <div><span>Annual revenue</span><b style="font-size:14px">${fmt(c.acv)}</b></div>
-    <div><span>Direct costs <span style="color:var(--none)">(labor ${fmt(c.laborCost)})</span></span><b style="font-size:14px">${fmt(c.directCosts)}</b></div>
-    <div><span>Gross profit</span><b style="font-size:14px">${fmt(c.grossProfit)}</b></div>
+    <div><span>${vRevLabel}</span><b style="font-size:14px">${fmt(vRev)}</b></div>
+    <div><span>Direct costs <span style="color:var(--none)">(${vDirNote} · labor ${fmt(c.laborCost)})</span></span><b style="font-size:14px">${fmt(vDirect)}</b></div>
+    <div><span>Gross profit</span><b style="font-size:14px">${fmt(vGP)}</b></div>
     <div><span>Gross margin <span style="color:var(--none)">(${esc(c.marginStatus||'—')}${tgtTxt?' · '+tgtTxt:''})</span></span><b style="color:${mColor};font-size:15px">${mDot} ${mPct}</b></div>
     <div><span>Margin multiplier</span><b style="color:${multColor};font-size:15px">×${c.marginMultiplier.toFixed(2)}</b></div>
-    <div><span>Net profit <span style="color:var(--none)">(after commission)</span></span><b style="font-size:14px;color:${c.netProfit<0?'var(--held)':'var(--ink)'}">${fmt(c.netProfit)}</b></div>
+    <div><span>Overhead <span style="color:var(--none)">(${Math.round(c.overheadPct*100)}% of ${PREVIEW_BASIS} ${fmt(vRev)})</span></span><b style="font-size:14px;color:var(--held)">−${fmt(vOH)}</b></div>
+    <div><span>Net profit <span style="color:var(--none)">(${PREVIEW_BASIS==='ACV'?'annual':'full contract'} · after costs · commission · overhead)</span></span><b style="font-size:15px;color:${vNet<0?'var(--held)':'var(--paid)'}">${fmt(vNet)}</b></div>
     ${alert}
     <div style="grid-column:1/-1;border-top:1px solid var(--line);margin-top:2px;padding-top:6px"></div>
     <div><span>New: base ${Math.round(c.newPct*1000)/10}%</span><b style="font-size:13px;color:var(--muted)">${fmt(c.baseCommissionNew)}</b></div>
