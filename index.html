@@ -1122,7 +1122,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-38';
+const APP_VERSION='P1RMR-39';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1762,22 +1762,48 @@ function upcomingReleases(){
   });
   return out.sort((x,y)=>String(x.date||'zzzz').localeCompare(String(y.date||'zzzz')));
 }
+let QUP_OPEN=null;
+function qUpcomingDetail(key, list){
+  if(!list||!list.length) return '';
+  const label=key==='pending'?'Pending collection':qLabel(+key);
+  const tot=list.reduce((s,r)=>s+r.amount,0);
+  const typeChip=t=>{const M={Holdback:['#fff4e8','var(--orange)'],Accelerator:['#f0ecff','#5a3fb8'],Renewal:['#e7f3ee','var(--payable)']};const m=M[t]||['','var(--ink)'];return `<span class="chip" style="background:${m[0]};color:${m[1]};font-size:10px">${t}</span>`;};
+  const tag=c=>c==='collection'?'<span class="chip c-payable" style="font-size:9px">collection-driven</span>':c==='signed'?'<span class="chip c-paid" style="font-size:9px">signed</span>':'<span class="chip c-maturing" style="font-size:9px">forecast</span>';
+  const src=r=>r.type==='Holdback'?'releases once 25% of Year-1 is collected':r.type==='Accelerator'?'released as revenue is collected':'renewal — a rep still signs it';
+  const rows=list.slice().sort((a,b)=>b.amount-a.amount).map(r=>`<div style="display:flex;align-items:baseline;gap:10px;padding:5px 0;border-top:1px dashed var(--line);flex-wrap:wrap">
+    <span class="ag-no" style="min-width:52px">#${esc(r.a.agreement_number||'—')}</span>
+    <span style="flex:1;min-width:150px">${esc(r.a.customer_name||'—')}</span>
+    <span style="min-width:104px">${typeChip(r.type)}</span>
+    <span style="flex:1;min-width:170px;color:var(--muted);font-size:11px">${src(r)} · ${r.pending?'<span style="color:var(--orange)">pending collection</span>':esc(String(r.date||'').slice(0,10))}</span>
+    ${tag(r.certainty)}
+    <b class="mono" style="min-width:70px;text-align:right">${fmt(r.amount)}</b>
+  </div>`).join('');
+  return `<div style="background:#f7f7f8;border-radius:10px;padding:12px 16px;margin-top:12px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px"><b>${label} — where it comes from</b><b class="mono">${fmt(tot)}</b></div>
+    ${rows}</div>`;
+}
 function renderQuarterUpcoming(selQI){
   const panel=$('qUpcomingPanel'), wrap=$('qUpcomingWrap'); if(!wrap) return;
   const rel=upcomingReleases().filter(r=>r.pending || (r.qi!=null && r.qi>selQI));
-  if(!rel.length){ panel.style.display='none'; return; }
+  if(!rel.length){ panel.style.display='none'; QUP_OPEN=null; return; }
   panel.style.display='';
   const groups={}; rel.forEach(r=>{ const k=r.pending?'pending':r.qi; (groups[k]=groups[k]||[]).push(r); });
-  const keys=Object.keys(groups).filter(k=>k!=='pending').map(Number).sort((a,b)=>a-b);
-  const card=(label,list,note)=>{ const by={Holdback:0,Accelerator:0,Renewal:0}; list.forEach(r=>by[r.type]+=r.amount);
+  const keys=Object.keys(groups).filter(k=>k!=='pending').map(Number).sort((a,b)=>a-b).slice(0,6);
+  const validKeys=keys.map(String).concat(groups.pending?['pending']:[]);
+  if(QUP_OPEN!=null && !validKeys.includes(String(QUP_OPEN))) QUP_OPEN=null;
+  const card=(key,label,list,note)=>{ const by={Holdback:0,Accelerator:0,Renewal:0}; list.forEach(r=>by[r.type]+=r.amount);
     const parts=Object.entries(by).filter(([,v])=>v>0).map(([k,v])=>`${k} ${fmt(v)}`).join(' · '); const tot=list.reduce((s,r)=>s+r.amount,0);
-    return `<div class="stat" style="min-width:200px"><div class="lbl">${label}</div><div class="val" style="font-size:20px">${fmt(tot)}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">${parts}${note?` · <span style="color:var(--orange)">${note}</span>`:''}</div></div>`;
+    const active=String(QUP_OPEN)===String(key);
+    return `<div class="stat" data-qcard="${key}" style="min-width:200px;cursor:pointer${active?';outline:2px solid var(--orange);outline-offset:-1px':''}"><div class="lbl">${label} <span style="color:var(--orange)">${active?'▾':'▸'}</span></div><div class="val" style="font-size:20px">${fmt(tot)}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">${parts}${note?` · <span style="color:var(--orange)">${note}</span>`:''}</div></div>`;
   };
   let html='<div class="cards" style="margin-bottom:0">';
-  keys.slice(0,6).forEach(qi=>{ html+=card(qLabel(qi),groups[qi]); });
-  if(groups.pending) html+=card('Pending collection',groups.pending,'not yet collected');
-  html+='</div><div style="font-size:11px;color:var(--muted);margin-top:8px">Renewals beyond the current cycle are <b>forecast</b> (a rep still signs them); holdback &amp; accelerator are <b>collection-driven</b>. Full itemized list in Reports → Upcoming releases.</div>';
+  keys.forEach(qi=>{ html+=card(qi,qLabel(qi),groups[qi]); });
+  if(groups.pending) html+=card('pending','Pending collection',groups.pending,'not yet collected');
+  html+='</div>';
+  html+=`<div id="qUpDetail">${QUP_OPEN!=null?qUpcomingDetail(QUP_OPEN,groups[QUP_OPEN]):''}</div>`;
+  html+='<div style="font-size:11px;color:var(--muted);margin-top:8px">Click a quarter to see the agreements behind it. Renewals beyond the current cycle are <b>forecast</b> (a rep still signs them); holdback &amp; accelerator are <b>collection-driven</b>. Full itemized list in Reports → Upcoming releases.</div>';
   wrap.innerHTML=html;
+  wrap.querySelectorAll('[data-qcard]').forEach(c=>c.onclick=()=>{ const k=c.dataset.qcard; QUP_OPEN=(String(QUP_OPEN)===String(k))?null:k; renderQuarterUpcoming(selQI); });
 }
 function renderUpcomingReleases(){
   const wrap=$('repRelWrap'); if(!wrap) return;
