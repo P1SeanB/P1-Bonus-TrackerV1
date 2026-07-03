@@ -1122,7 +1122,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-37';
+const APP_VERSION='P1RMR-38';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1477,6 +1477,7 @@ function renderQuarter(){
     {key:'cust',label:'Customer',type:'text',get:g=>String(g.a.customer_name||'').toLowerCase()},
     {key:'signed',label:'Signed',type:'date',get:g=>g.a.activation_date?String(g.a.activation_date).slice(0,10):null},
     {key:'billing',label:'1st billing',type:'date',get:g=>g.a.first_billing_date?String(g.a.first_billing_date).slice(0,10):null},
+    {key:'rmr',label:'RMR /mo',type:'num',num:true,get:g=>+g.a.monthly_rmr||0},
     {key:'total',label:'Total this qtr',type:'num',num:true,get:g=>g.total},
     {key:'bd',label:'Breakdown — pays this quarter',get:null},
     {key:'st',label:'Status',get:null}
@@ -1492,10 +1493,11 @@ function renderQuarter(){
       <td style="vertical-align:top;padding-top:12px">${esc(g.a.customer_name||'—')}</td>
       <td class="mono" style="vertical-align:top;padding-top:12px;color:var(--muted);white-space:nowrap">${signed}</td>
       <td class="mono" style="vertical-align:top;padding-top:12px;color:var(--muted);white-space:nowrap">${billing}</td>
+      <td class="num mono" style="vertical-align:top;padding-top:12px">${fmt(+g.a.monthly_rmr||0)}<span style="font-size:10px;color:var(--muted)">/mo</span></td>
       <td class="num mono" style="vertical-align:top;padding-top:12px;font-weight:700;font-size:16px">${fmt2(g.total)}</td>
       <td style="padding:6px 12px">${g.items.map(pieceRow).join('')}</td>
       <td style="vertical-align:top;padding-top:12px"><span class="chip ${ometa.cls}">${ometa.label}</span></td>
-    </tr><tr class="exp-detail" data-expd="${i}" style="display:none"><td colspan="7" style="background:#f7f7f8;padding:12px 16px">${payoutScheduleHTML(g.a)}</td></tr>`;
+    </tr><tr class="exp-detail" data-expd="${i}" style="display:none"><td colspan="8" style="background:#f7f7f8;padding:12px 16px">${payoutScheduleHTML(g.a)}</td></tr>`;
   }).join('');
   $('qTableWrap').innerHTML=`<table>${qThead}<tbody>${rows}</tbody></table>`;
   tsortBind('qTableWrap', renderQuarter);
