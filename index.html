@@ -1115,7 +1115,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-35';
+const APP_VERSION='P1RMR-36';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1465,18 +1465,33 @@ function renderQuarter(){
   const byAgr={};
   lines.forEach(l=>{ (byAgr[l.a.id]=byAgr[l.a.id]||{a:l.a,items:[]}).items.push(l); });
   const groups=Object.values(byAgr).map(g=>({...g,total:g.items.reduce((s,l)=>s+l.amount,0)})).sort((x,y)=>y.total-x.total);
-  const rows=groups.map(g=>{
+  const qCols=[
+    {key:'num',label:'Agr #',type:'num',get:g=>{const m=String(g.a.agreement_number||'').match(/\d+/);return m?+m[0]:null;}},
+    {key:'cust',label:'Customer',type:'text',get:g=>String(g.a.customer_name||'').toLowerCase()},
+    {key:'signed',label:'Signed',type:'date',get:g=>g.a.activation_date?String(g.a.activation_date).slice(0,10):null},
+    {key:'billing',label:'1st billing',type:'date',get:g=>g.a.first_billing_date?String(g.a.first_billing_date).slice(0,10):null},
+    {key:'total',label:'Total this qtr',type:'num',num:true,get:g=>g.total},
+    {key:'bd',label:'Breakdown — pays this quarter',get:null},
+    {key:'st',label:'Status',get:null}
+  ];
+  const {thead:qThead,arr:qGroups}=tsortApply('quarter',qCols,groups);
+  const rows=qGroups.map(g=>{
     const allPaid=g.items.every(l=>l.paid), nonePaid=g.items.every(l=>!l.paid);
     const ometa=allPaid?{cls:'c-paid',label:'Paid'}:nonePaid?{cls:'c-payable',label:'Payable'}:{cls:'c-maturing',label:`Partial ${g.items.filter(l=>l.paid).length}/${g.items.length}`};
+    const signed=g.a.activation_date?fmtDate(new Date(String(g.a.activation_date).slice(0,10)+'T00:00:00')):'—';
+    const billing=g.a.first_billing_date?fmtDate(new Date(String(g.a.first_billing_date).slice(0,10)+'T00:00:00')):'<span style="color:var(--none)">—</span>';
     return `<tr>
       <td class="ag-no" style="vertical-align:top;padding-top:12px">#${esc(g.a.agreement_number||'—')}</td>
       <td style="vertical-align:top;padding-top:12px">${esc(g.a.customer_name||'—')}</td>
+      <td class="mono" style="vertical-align:top;padding-top:12px;color:var(--muted);white-space:nowrap">${signed}</td>
+      <td class="mono" style="vertical-align:top;padding-top:12px;color:var(--muted);white-space:nowrap">${billing}</td>
       <td class="num mono" style="vertical-align:top;padding-top:12px;font-weight:700;font-size:16px">${fmt2(g.total)}</td>
       <td style="padding:6px 12px">${g.items.map(pieceRow).join('')}</td>
       <td style="vertical-align:top;padding-top:12px"><span class="chip ${ometa.cls}">${ometa.label}</span></td>
     </tr>`;
   }).join('');
-  $('qTableWrap').innerHTML=`<table><thead><tr><th>Agr #</th><th>Customer</th><th class="num">Total this qtr</th><th>Breakdown — pays this quarter</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('qTableWrap').innerHTML=`<table>${qThead}<tbody>${rows}</tbody></table>`;
+  tsortBind('qTableWrap', renderQuarter);
   $('qTableWrap').querySelectorAll('[data-paid]').forEach(b=>b.onclick=()=>patchPaid(b.dataset.paid,b.dataset.field,b.dataset.val==='1'));
   $('qTableWrap').querySelectorAll('[data-renrow]').forEach(b=>b.onclick=()=>patchRenewalPaid(b.dataset.renrow,b.dataset.val==='1'));
   $('qTableWrap').querySelectorAll('[data-accelseq]').forEach(b=>b.onclick=()=>patchAccelPiece(b.dataset.accelid,b.dataset.accelseq,b.dataset.val==='1'));
