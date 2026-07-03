@@ -291,7 +291,7 @@
   <button data-view="opportunities" id="tabOpportunities">Opportunities</button>
   <button data-view="agreements" id="tabAgreements">Agreements</button>
   <button data-view="renewals" id="tabRenewals">Pending Renewals</button>
-  <button data-view="forecast" id="tabForecast">Bonus Forecast</button>
+  <button data-view="forecast" id="tabForecast">Renewal Forecast</button>
   <button data-view="history" id="tabHistory">Commission History</button>
   <button data-view="reports" id="tabReports">Reports</button>
   <button data-view="admin" id="tabAdmin">⚙ Admin</button>
@@ -740,8 +740,8 @@
         </tbody>
       </table>
 
-      <h3>Bonus Forecast &amp; Pending Renewals</h3>
-      <p>The <b>Bonus Forecast</b> tab estimates your upcoming renewal bonuses with reminder dates — it's informational only and never creates a payout. <b>Pending Renewals</b> holds the two action tables (manual and auto) described above.</p>
+      <h3>Renewal Forecast &amp; Pending Renewals</h3>
+      <p>The <b>Renewal Forecast</b> tab shows what each upcoming renewal is worth — the estimated bonus, the math behind it, and reminder dates. It's informational only and never creates a payout. <b>Pending Renewals</b> is where you actually renew: it holds the two action tables (manual and auto) with the Renew button.</p>
 
       <h3>What the colors mean</h3>
       <div class="guide-legend">
@@ -1126,7 +1126,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-40';
+const APP_VERSION='P1RMR-41';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1735,12 +1735,13 @@ function renderForecast(){
   const within180=rows.filter(x=>x.days<=180).length;
   const within90=rows.filter(x=>x.days<=90).length;
   $('fcCards').innerHTML=`
-    <div class="stat accent"><div class="lbl">Forecasted bonus liability</div><div class="val">${fmt(total)}</div></div>
+    <div class="stat accent"><div class="lbl">Forecasted renewal bonus liability</div><div class="val">${fmt(total)}</div></div>
     <div class="stat orange"><div class="lbl">Renewing ≤180 days</div><div class="val">${within180}</div></div>
     <div class="stat"><div class="lbl">Renewing ≤90 days</div><div class="val">${within90}</div></div>`;
   $('fcCount').textContent=`${rows.length} opportunit${rows.length===1?'y':'ies'} · click a row for the bonus breakdown`;
   if(!rows.length){$('fcTableWrap').innerHTML=`<div class="empty"><b>No upcoming renewals</b>Active term agreements with a future renewal date and a renewal commission appear here as a forecast.</div>`;return;}
   const stColor=s=>s==='Past due'?'c-held':(s.startsWith('Final')?'c-maturing':(s==='Future'?'c-none':'c-payable'));
+  const statusTip=s=>({'Past due':'The renewal date has already passed — renew it now.','Final — 7 days':'Renewal is within 7 days — act now.','Reminder — 30 days':'Renewal is within 30 days.','Reminder — 90 days':'Renewal is within 90 days — start planning.','Reminder — 180 days':'Renewal is within 180 days — on the horizon.','Future':'Renewal is more than 180 days out — informational only.'}[s]||'');
   const cols=[
     {key:'num',label:'Agr #',type:'num',get:x=>{const m=String(x.a.agreement_number||'').match(/\d+/);return m?+m[0]:null;},cell:x=>`<td class="ag-no">#${esc(x.a.agreement_number||'—')}</td>`},
     {key:'cust',label:'Customer',type:'text',get:x=>String(x.a.customer_name||'').toLowerCase(),cell:x=>`<td>${esc(x.a.customer_name||'—')}${x.a.site_number?`<div style="font-size:10px;color:var(--muted)">Site #${esc(x.a.site_number)}</div>`:''}</td>`},
@@ -1750,7 +1751,7 @@ function renderForecast(){
     {key:'margin',label:'Current margin',type:'num',get:x=>x.c.grossMargin==null?null:x.c.grossMargin,cell:x=>`<td class="mono">${x.c.grossMargin==null?'—':`${Math.round(x.c.grossMargin*1000)/10}%`}</td>`},
     {key:'bonus',label:'Est. bonus',type:'num',num:true,get:x=>x.c.renewalCommission,cell:x=>`<td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(x.c.renewalCommission)}</td>`},
     {key:'reminder',label:'Next reminder',type:'date',get:x=>x.reminderDate?x.reminderDate.toISOString().slice(0,10):null,cell:x=>`<td class="mono" style="color:var(--muted)">${x.reminderDate?fmtDate(x.reminderDate):'—'}</td>`},
-    {key:'status',label:'Forecast status',get:null,cell:x=>`<td><span class="chip ${stColor(x.status)}" style="font-size:10px">${x.status}</span> ${x.a.autorenew?'<span class="chip c-paid" style="font-size:10px">auto</span>':'<span class="chip c-maturing" style="font-size:10px">manual</span>'}</td>`}
+    {key:'status',label:'Forecast status',get:null,cell:x=>`<td><span class="chip ${stColor(x.status)}" style="font-size:10px;cursor:help" title="${esc(statusTip(x.status))}">${x.status}</span> ${x.a.autorenew?'<span class="chip c-paid" style="font-size:10px;cursor:help" title="Auto-renewal — renews automatically; pays the lower auto rate one time, on 12/24-month agreements only.">auto</span>':'<span class="chip c-maturing" style="font-size:10px;cursor:help" title="Manual renewal — you actively renew it each cycle; pays the higher manual rate every cycle.">manual</span>'}</td>`}
   ];
   tsortRender('fcTableWrap','forecast',cols,rows,renderForecast,null,forecastRenewalHTML);
 }
