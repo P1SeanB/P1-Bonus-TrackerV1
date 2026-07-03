@@ -287,14 +287,14 @@
 </header>
 
 <nav class="tabs">
-  <button class="active" data-view="quarter" id="tabQuarter">Quarter view</button>
-  <button data-view="opportunities" id="tabOpportunities">Opportunities</button>
-  <button data-view="agreements" id="tabAgreements">Agreements</button>
-  <button data-view="renewals" id="tabRenewals">Pending Renewals</button>
-  <button data-view="forecast" id="tabForecast">Renewal Forecast</button>
-  <button data-view="history" id="tabHistory">Commission History</button>
-  <button data-view="reports" id="tabReports">Reports</button>
-  <button data-view="admin" id="tabAdmin">⚙ Admin</button>
+  <button class="active" data-view="quarter" id="tabQuarter" title="What pays out this quarter: each agreement's commission for the selected quarter (75% standard, holdbacks, accelerator installments, renewals), plus a 'Releasing later' forecast. Export payroll from here.">Quarter view</button>
+  <button data-view="opportunities" id="tabOpportunities" title="Your sales pipeline of potential deals not yet signed. Track stage, estimated value, and close date; 'Win' an opportunity to turn it into an agreement.">Opportunities</button>
+  <button data-view="agreements" id="tabAgreements" title="Every active RMR agreement with its RMR, term, margin, and commission. Managers can click a row to see the full live calculation (ACV/TCV, overhead, net) or Edit the deal.">Agreements</button>
+  <button data-view="renewals" id="tabRenewals" title="Renewals due now or soon that you need to act on. Manual renewals pay every cycle (Renew button); auto-renewals pay once. Rows color green→amber→red as the date nears.">Pending Renewals</button>
+  <button data-view="forecast" id="tabForecast" title="What upcoming renewals are worth — the estimated renewal bonus, the math behind it, and reminder dates. Planning only; it doesn't create commissions.">Renewal Forecast</button>
+  <button data-view="history" id="tabHistory" title="A full ledger of every commission event — initial, holdback, accelerator, and renewal — with amount, plan, and paid/pending status. Sortable and exportable.">Commission History</button>
+  <button data-view="reports" id="tabReports" title="Analytics across all agreements: customer profitability with per-deal breakdowns, and an itemized list of every upcoming held & forecast release.">Reports</button>
+  <button data-view="admin" id="tabAdmin" title="Admin tools: manage users and roles, commission plans, and build/verify the commission ledger. Restricted to administrators.">⚙ Admin</button>
 </nav>
 <div id="scopeBar" class="scopebar" style="display:none"></div>
 
@@ -1132,7 +1132,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-46';
+const APP_VERSION='P1RMR-47';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
