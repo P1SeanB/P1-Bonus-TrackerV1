@@ -1126,7 +1126,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-41';
+const APP_VERSION='P1RMR-42';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -2351,6 +2351,7 @@ function openModal(id,promote){
     if(!a.activation_date) $('f_date').value=todayISO();
     if(a.estimate_ref) $('f_estref').value=a.estimate_ref;
   }
+  PREVIEW_BASIS='ACV';
   updatePreview();
   renderAttachments('agFiles', editingId, can('editAgreements'));
   document.querySelectorAll('#agTabs button').forEach(x=>x.classList.toggle('active',x.dataset.tab==='deal'));
@@ -2875,6 +2876,7 @@ function readForm(){return{
   estimate_ref:($('f_estref')&&$('f_estref').value.trim())||null,
   legacy_full_pay: (editingId ? (((AGREEMENTS.find(a=>a.id===editingId)||{}).legacy_full_pay)!==false) : false),
   billing_log: (EDIT_LOG&&EDIT_LOG.length)?EDIT_LOG:null};}
+let PREVIEW_BASIS='ACV';   // view-only deal-value basis for the live calculation panel (commission always uses the plan basis)
 function updatePreview(){
   const row=readForm();const c=compute(row);
   const gm=c.grossMargin;
@@ -2892,10 +2894,12 @@ function updatePreview(){
   let alert='';
   if(gm!=null&&gm<minM) alert=`<div style="grid-column:1/-1;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:7px 10px;font-size:12px;color:#9a2a2a"><b>⚠ Does not meet minimum profitability (${Math.round(minM*100)}%).</b> Increase recurring revenue or reduce direct costs. Management approval required to pay.</div>`;
   else if(gm!=null&&gm<target) alert=`<div style="grid-column:1/-1;background:#fff4e8;border:1px solid #f3d4ad;border-radius:8px;padding:7px 10px;font-size:12px;color:#8a5a17">Below the ${Math.round(target*100)}% target — commission is reduced. Consider raising RMR or trimming costs.</div>`;
-  $('mPreview').innerHTML=`<h4>Live calculation <span style="font-weight:500;color:var(--none);font-size:11px">plan ${esc(c.planVersion)} · ${c.basis} basis</span></h4>
+  const pvVal=PREVIEW_BASIS==='ACV'?c.acv:c.tcv, pvLabel=PREVIEW_BASIS==='ACV'?'ACV (×12)':`TCV (×${c.months}mo)`, pvNote=PREVIEW_BASIS===c.basis?'commissionable':`view only · commission on ${c.basis}`;
+  const tbtn=(id,l,on)=>`<button type="button" id="${id}" style="border:1px solid var(--line);background:${on?'var(--navy)':'#fff'};color:${on?'#fff':'var(--muted)'};border-radius:6px;padding:1px 8px;font-size:11px;font-weight:600;cursor:pointer">${l}</button>`;
+  $('mPreview').innerHTML=`<h4 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">Live calculation <span style="font-weight:500;color:var(--none);font-size:11px">plan ${esc(c.planVersion)} · ${c.basis} basis</span><span style="margin-left:auto;font-weight:500;font-size:11px;color:var(--muted)">view: ${tbtn('pvACV','ACV',PREVIEW_BASIS==='ACV')}${tbtn('pvTCV','TCV',PREVIEW_BASIS==='TCV')}</span></h4>
   <div class="pgrid">
     <div><span>MRR <span style="color:var(--none)">(annual billing ÷ 12)</span></span><b style="font-size:15px">${fmt2(c.mrr)}</b></div>
-    <div><span>${c.basis==='ACV'?'ACV (×12)':'TCV (×'+c.months+'mo)'} <span style="color:var(--none)">commissionable</span></span><b style="font-size:15px">${fmt(c.commissionableValue)}</b></div>
+    <div><span>${pvLabel} <span style="color:var(--none)">${pvNote}</span></span><b style="font-size:15px">${fmt(pvVal)}</b></div>
     <div style="grid-column:1/-1;font-weight:700;color:var(--muted);font-size:11px;letter-spacing:.04em;text-transform:uppercase;margin-top:2px">Margin Engine</div>
     <div><span>Annual revenue</span><b style="font-size:14px">${fmt(c.acv)}</b></div>
     <div><span>Direct costs <span style="color:var(--none)">(labor ${fmt(c.laborCost)})</span></span><b style="font-size:14px">${fmt(c.directCosts)}</b></div>
@@ -2917,6 +2921,8 @@ function updatePreview(){
     <div><span>Renews</span><b style="font-size:13px">${renWhen}</b></div>
     ${c.scheduled?`<div><span>Annual billed <span style="color:var(--none)">(custom schedule)</span></span><b style="font-size:14px">${fmt(c.annualBilled)}</b></div>`:''}
   </div>`;
+  if($('pvACV')) $('pvACV').onclick=()=>{PREVIEW_BASIS='ACV';updatePreview();};
+  if($('pvTCV')) $('pvTCV').onclick=()=>{PREVIEW_BASIS='TCV';updatePreview();};
 }
 
 /* ---- view switching ---- */
