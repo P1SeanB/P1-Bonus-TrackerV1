@@ -624,12 +624,14 @@
         <button type="button" class="sched-add" id="rnSchedAdd">+ Add payment</button>
       </div>
       <div class="fld" style="margin-top:10px"><label>Notes <span class="hint">optional — recorded on this renewal</span></label><input id="rn_notes" placeholder="e.g. re-quoted, price increase, scope change"></div>
+      <div id="rnConfirmBanner" style="display:none;margin:0 0 10px;background:#eafaf1;border:1px solid #b7e4c7;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#1b5e37"></div>
       <div class="preview" id="rnPreview" style="margin-top:12px"></div>
       <div id="rnErr" style="display:none;margin-top:8px;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#9a2a2a"></div>
     </div>
     <div class="modal-foot">
       <div style="display:flex;gap:10px;margin-left:auto">
         <button class="btn-ghost" id="rnCancel">Cancel</button>
+        <button class="btn-ghost" id="rnRevert" style="display:none;color:var(--held);border-color:#f3c0c0">Revert renewal</button>
         <button class="btn-primary" id="rnSave">Confirm renewal</button>
       </div>
     </div>
@@ -1037,6 +1039,8 @@ let sb=null,AGREEMENTS=[],selQI=CUR_QI,view='quarter',editingId=null,signedIn=fa
 let RENEWALS=[];
 function renewalsFor(id){return RENEWALS.filter(r=>r.agreement_id===id);}
 function renewalCycles(a){ return renewalsFor(a.id).filter(r=>r.status==='active').sort((x,y)=>(x.renewal_no||0)-(y.renewal_no||0)); }
+function latestCycle(a){ const cy=renewalCycles(a).filter(r=>r.commission_amount!=null); return cy.length?cy[cy.length-1]:null; }
+function isRenewalConfirmed(a){ const last=latestCycle(a); if(!last||last.credit_qi==null)return false; const n=new Date(); return qIndexFromYM(n.getFullYear(),n.getMonth())<=last.credit_qi; }  // renewed & credited quarter hasn't passed
 function hasLedgerRenewals(a){ return renewalCycles(a).some(r=>r.commission_amount!=null); }
 function nextDueDate(a){        // when the NEXT manual renewal is due (drives Pending Renewals re-appearance)
   const cy=renewalCycles(a).filter(r=>r.commission_amount!=null);
@@ -1122,7 +1126,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-39';
+const APP_VERSION='P1RMR-40';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1607,39 +1611,49 @@ function renderRenewals(){
   // MANUAL: not auto, has a renewal rate, and its NEXT cycle is due (re-appears each cycle via the ledger)
   let manual=all.filter(x=>{
     if(x.c.isAuto || x.c.noRenewal || !(x.c.renewMult>0)) return false;
+    if(isRenewalConfirmed(x.a)){   // just renewed — keep visible as "Renewal confirmed" until its credited quarter passes
+      const last=latestCycle(x.a);
+      x.confirmed=true; x.confCycle=last; x.confAmount=+last.commission_amount||0; x.confQI=last.credit_qi;
+      x.dispDate=last.renewal_date?new Date(String(last.renewal_date).slice(0,10)+'T00:00:00'):null;
+      x.days=x.dispDate?Math.ceil((x.dispDate-new Date())/86400000):0;
+      x.cycleNo=renewalCycles(x.a).filter(r=>r.commission_amount!=null).length;
+      return true;
+    }
     const nd=nextDueDate(x.a); if(!nd) return false;
-    x.nextDue=nd; x.days=Math.ceil((nd-new Date())/86400000); x.cycleNo=renewalCycles(x.a).filter(r=>r.commission_amount!=null).length+1;
+    x.confirmed=false; x.nextDue=nd; x.dispDate=nd; x.days=Math.ceil((nd-new Date())/86400000);
+    x.cycleNo=renewalCycles(x.a).filter(r=>r.commission_amount!=null).length+1;
     return true;
   });
   // AUTO: still auto, term-eligible (12/24-mo), one-time, not yet paid.
   let auto=all.map(x=>({...x,days:x.c.renewalDate?Math.ceil((x.c.renewalDate-new Date())/86400000):null}))
     .filter(x=>x.c.isAuto && x.c.autoRenewEligible && !x.a.renewal_paid && x.c.renewalDate);
 
-  const sumManual=manual.filter(x=>x.days<=90).reduce((s,x)=>s+x.c.renewalCommission,0);
+  const pendManual=manual.filter(x=>!x.confirmed), confManual=manual.filter(x=>x.confirmed);
+  const sumManual=pendManual.filter(x=>x.days<=90).reduce((s,x)=>s+x.c.renewalCommission,0);
   const sumAuto=auto.reduce((s,x)=>s+x.c.renewalCommission,0);
   $('renQuickCards').innerHTML=`
     <div class="stat accent"><div class="lbl">Manual commission to claim (≤90d)</div><div class="val">${fmt(sumManual)}</div></div>
-    <div class="stat orange"><div class="lbl">Manual renewals pending</div><div class="val">${manual.length}</div></div>
+    <div class="stat orange"><div class="lbl">Manual renewals pending</div><div class="val">${pendManual.length}</div></div>
     <div class="stat green"><div class="lbl">Auto-renewals pending</div><div class="val">${auto.length}</div></div>
     <div class="stat"><div class="lbl">Auto commission (one-time)</div><div class="val">${fmt(sumAuto)}</div></div>`;
 
   // ---- manual table ----
   const mq=($('renSearch')&&$('renSearch').value)||'', mk=($('renSort')&&$('renSort').value)||'days';
   MANUAL_LIST=renewSort(manual.filter(x=>renewSearchMatch(x,mq)),mk);
-  $('renCount').textContent=`${MANUAL_LIST.length} shown · ${manual.length} pending`;
+  $('renCount').textContent=`${MANUAL_LIST.length} shown · ${pendManual.length} pending${confManual.length?` · ${confManual.length} confirmed`:''}`;
   if(!MANUAL_LIST.length){ $('renTableWrap').innerHTML=`<div class="empty"><b>No manual renewals${mq?' match':' pending'}</b>Manual renewals (and auto-renewals converted to manual) appear here. They pay the manual rate every renewal cycle.</div>`; }
   else {
     const cols=[
       {key:'num',label:'Agr #',type:'num',get:x=>{const m=String(x.a.agreement_number||'').match(/\d+/);return m?+m[0]:null;},cell:x=>`<td class="ag-no">#${esc(x.a.agreement_number||'—')}</td>`},
-      {key:'cust',label:'Customer',type:'text',get:x=>String(x.a.customer_name||'').toLowerCase(),cell:x=>`<td>${esc(x.a.customer_name||'—')}${x.c.converted?' <span class="chip c-maturing" style="font-size:9px">converted</span>':''}${x.cycleNo>1?` <span class="chip c-payable" style="font-size:9px">cycle ${x.cycleNo}</span>`:''}</td>`},
+      {key:'cust',label:'Customer',type:'text',get:x=>String(x.a.customer_name||'').toLowerCase(),cell:x=>`<td>${esc(x.a.customer_name||'—')}${x.confirmed?' <span class="chip c-paid" style="font-size:9px">✓ renewal confirmed</span>':''}${x.c.converted?' <span class="chip c-maturing" style="font-size:9px">converted</span>':''}${x.cycleNo>1&&!x.confirmed?` <span class="chip c-payable" style="font-size:9px">cycle ${x.cycleNo}</span>`:''}${x.confirmed&&x.cycleNo>0?` <span class="chip c-payable" style="font-size:9px">cycle ${x.cycleNo}</span>`:''}</td>`},
       {key:'term',label:'Term',type:'num',get:x=>+x.a.contract_term||0,cell:x=>`<td>${(+x.a.contract_term)}mo</td>`},
-      {key:'renews',label:'Renews',type:'date',get:x=>{const d=x.nextDue||x.c.renewalDate;return d?d.toISOString().slice(0,10):null;},cell:x=>`<td class="mono" style="color:var(--muted)">${fmtDate(x.nextDue||x.c.renewalDate)}</td>`},
-      {key:'days',label:'Days left',type:'num',get:x=>x.days,cell:x=>`<td>${daysCell(x.days)}</td>`},
+      {key:'renews',label:'Renews',type:'date',get:x=>{const d=x.dispDate;return d?d.toISOString().slice(0,10):null;},cell:x=>`<td class="mono" style="color:var(--muted)">${x.confirmed?`renewed ${fmtDate(x.dispDate)}`:fmtDate(x.dispDate)}</td>`},
+      {key:'days',label:'Days left',type:'num',get:x=>x.days,cell:x=>`<td>${x.confirmed?`<span class="chip c-paid" style="font-size:10px">credits ${x.confQI!=null?qLabel(x.confQI):'—'}</span>`:daysCell(x.days)}</td>`},
       {key:'mrr',label:'MRR',type:'num',num:true,get:x=>x.c.mrr,cell:x=>`<td class="num mono">${fmt(x.c.mrr)}</td>`},
-      {key:'comm',label:'Renewal comm.',type:'num',num:true,get:x=>x.c.renewalCommission,cell:x=>`<td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(x.c.renewalCommission)} <span style="font-size:10px;color:var(--muted)">(${Math.round(x.c.renewMult*1000)/10}%)</span></td>`},
-      {key:'status',label:'Status',get:null,cell:x=>`<td>${can('editAgreements')?`<button class="paidbtn" data-renew="${x.a.id}">Renew…</button>`:renewStatus(x.days)}</td>`}
+      {key:'comm',label:'Renewal comm.',type:'num',num:true,get:x=>x.confirmed?x.confAmount:x.c.renewalCommission,cell:x=>`<td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(x.confirmed?x.confAmount:x.c.renewalCommission)} <span style="font-size:10px;color:var(--muted)">(${Math.round(x.c.renewMult*1000)/10}%)</span></td>`},
+      {key:'status',label:'Status',get:null,cell:x=>`<td>${can('editAgreements')?(x.confirmed?`<button class="paidbtn is-paid" data-renew="${x.a.id}">✓ Renewal confirmed</button>`:`<button class="paidbtn" data-renew="${x.a.id}">Renew…</button>`):(x.confirmed?'<span class="chip c-paid">Renewed</span>':renewStatus(x.days))}</td>`}
     ];
-    tsortRender('renTableWrap','renManual',cols,MANUAL_LIST,renderRenewals,x=>`style="${rowTint(x.days)}"`);
+    tsortRender('renTableWrap','renManual',cols,MANUAL_LIST,renderRenewals,x=>`style="${x.confirmed?'background:#eafaf1':rowTint(x.days)}"`);
     $('renTableWrap').querySelectorAll('[data-renew]').forEach(b=>b.onclick=()=>openRenew(b.dataset.renew));
   }
 
@@ -2430,6 +2444,18 @@ function openRenew(id){
   if(sch.length) sch.forEach(r=>addRnSchedRow(r.month,r.amount,r.once));
   else if(a.custom_billing) addRnSchedRow(1,'',false);
   $('rnErr').style.display='none';
+  const confirmed=isRenewalConfirmed(a), last=confirmed?latestCycle(a):null;
+  if(confirmed){
+    $('rnTitle').textContent=`Renewal confirmed — #${a.agreement_number||''}`;
+    $('rnConfirmBanner').style.display='block';
+    $('rnConfirmBanner').innerHTML=`<b>✓ Renewed ${last.renewal_date?fmtDate(new Date(String(last.renewal_date).slice(0,10)+'T00:00:00')):''}</b> — ${fmt(+last.commission_amount||0)} credits to ${last.credit_qi!=null?qLabel(last.credit_qi):'—'}. To change it, <b>Revert renewal</b> below, then renew again with the corrected details.`;
+    $('rnRevert').style.display='inline-block';
+    $('rnSave').style.display='none';
+  } else {
+    $('rnConfirmBanner').style.display='none';
+    $('rnRevert').style.display='none';
+    $('rnSave').style.display='inline-block';
+  }
   updateRnPreview();
   $('renScrim').classList.add('show');
 }
@@ -3115,6 +3141,7 @@ $('convSave').onclick=saveConvert;
 $('convScrim').onclick=e=>{if(e.target===$('convScrim'))closeConvert();};
 $('rnClose').onclick=closeRenew; $('rnCancel').onclick=closeRenew;
 $('rnSave').onclick=saveRenew;
+$('rnRevert').onclick=async()=>{ if(!renewingId)return; if(!confirm('Revert this renewal? It undoes the confirmed cycle and returns the agreement to Pending Renewals. You can then renew again with corrected details.'))return; const id=renewingId; closeRenew(); await revertRenewal(id); };
 $('renScrim').onclick=e=>{if(e.target===$('renScrim'))closeRenew();};
 $('rn_custom').onchange=toggleRnBilling;
 $('rnSchedAdd').onclick=()=>addRnSchedRow(1,'',false);
