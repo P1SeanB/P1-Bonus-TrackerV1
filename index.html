@@ -1073,6 +1073,40 @@ const AG_SORT={
   rtype:a=>{const c=compute(a);if(c.renewMult<=0)return 2;return a.autorenew?0:1;}
 };
 function marginThreshold(a){ return (a.target_margin!=null&&a.target_margin!=='')?(+a.target_margin):(marginFlagPct/100); }
+// ---- shared sortable tables: Agr# leftmost, click header to sort (num big→small, text A→Z, date soonest→latest) ----
+const TSORT={};   // { tableKey:{key,dir} }  dir: 1 asc, -1 desc
+function tsortDefDir(type){ return type==='num'?-1:1; }
+function tsortCmp(col,dir,a,b){
+  let x=col.get(a),y=col.get(b);
+  const xn=(x==null||x===''),yn=(y==null||y===''); if(xn&&yn)return 0; if(xn)return 1; if(yn)return -1;   // blanks always bottom
+  if(col.type==='num') return ((+x)-(+y))*dir;
+  return String(x).localeCompare(String(y),undefined,{numeric:true})*dir;
+}
+function tsortApply(tableKey, cols, data){
+  const s=TSORT[tableKey]; let arr=data;
+  if(s&&s.key){ const col=cols.find(c=>c.key===s.key); if(col&&col.get) arr=data.slice().sort((a,b)=>tsortCmp(col,s.dir,a,b)); }
+  const thead='<thead><tr>'+cols.map(c=>{
+    const numCls=c.num?'num':'';
+    if(!c.get) return `<th class="${numCls}">${c.label}</th>`;
+    const active=s&&s.key===c.key, arrow=active?(s.dir===1?'▲':'▼'):'↕';
+    return `<th class="${numCls}" data-tsk="${c.key}" data-tst="${tableKey}" data-tsy="${c.type||'text'}" style="cursor:pointer;user-select:none;white-space:nowrap">${c.label} <span style="font-size:9px;color:${active?'var(--orange)':'var(--line)'}">${arrow}</span></th>`;
+  }).join('')+'</tr></thead>';
+  return {thead, arr};
+}
+function tsortBind(wrapId, rerender){
+  $(wrapId).querySelectorAll('[data-tsk]').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.tsk, tk=th.dataset.tst, ty=th.dataset.tsy, s=TSORT[tk];
+    if(s&&s.key===k) TSORT[tk]={key:k,dir:-s.dir}; else TSORT[tk]={key:k,dir:tsortDefDir(ty)};
+    rerender();
+  });
+}
+function tsortRender(wrapId, tableKey, cols, data, rerender, rowAttr){
+  const {thead,arr}=tsortApply(tableKey,cols,data);
+  const rows=arr.map(r=>`<tr ${rowAttr?rowAttr(r):''}>${cols.map(c=>c.cell(r)).join('')}</tr>`).join('');
+  $(wrapId).innerHTML=`<table>${thead}<tbody>${rows}</tbody></table>`;
+  tsortBind(wrapId, rerender);
+  return arr;
+}
 
 /* ---- auth + boot ---- */
 function showLogin(needConn){
@@ -1081,7 +1115,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-33';
+const APP_VERSION='P1RMR-35';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1570,17 +1604,17 @@ function renderRenewals(){
   $('renCount').textContent=`${MANUAL_LIST.length} shown · ${manual.length} pending`;
   if(!MANUAL_LIST.length){ $('renTableWrap').innerHTML=`<div class="empty"><b>No manual renewals${mq?' match':' pending'}</b>Manual renewals (and auto-renewals converted to manual) appear here. They pay the manual rate every renewal cycle.</div>`; }
   else {
-    const rows=MANUAL_LIST.map((x)=>{const {a,c,days,nextDue,cycleNo}=x; return `<tr style="${rowTint(days)}">
-      <td>${esc(a.customer_name||'—')}${c.converted?' <span class="chip c-maturing" style="font-size:9px">converted</span>':''}${cycleNo>1?` <span class="chip c-payable" style="font-size:9px">cycle ${cycleNo}</span>`:''}</td>
-      <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
-      <td>${(+a.contract_term)}mo</td>
-      <td class="mono" style="color:var(--muted)">${fmtDate(nextDue||c.renewalDate)}</td>
-      <td>${daysCell(days)}</td>
-      <td class="num mono">${fmt(c.mrr)}</td>
-      <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(c.renewalCommission)} <span style="font-size:10px;color:var(--muted)">(${Math.round(c.renewMult*1000)/10}%)</span></td>
-      <td>${can('editAgreements')?`<button class="paidbtn" data-renew="${a.id}">Renew…</button>`:renewStatus(days)}</td>
-    </tr>`;}).join('');
-    $('renTableWrap').innerHTML=`<table><thead><tr><th>Customer</th><th>Agr #</th><th>Term</th><th>Renews</th><th>Days left</th><th class="num">MRR</th><th class="num">Renewal comm.</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
+    const cols=[
+      {key:'num',label:'Agr #',type:'num',get:x=>{const m=String(x.a.agreement_number||'').match(/\d+/);return m?+m[0]:null;},cell:x=>`<td class="ag-no">#${esc(x.a.agreement_number||'—')}</td>`},
+      {key:'cust',label:'Customer',type:'text',get:x=>String(x.a.customer_name||'').toLowerCase(),cell:x=>`<td>${esc(x.a.customer_name||'—')}${x.c.converted?' <span class="chip c-maturing" style="font-size:9px">converted</span>':''}${x.cycleNo>1?` <span class="chip c-payable" style="font-size:9px">cycle ${x.cycleNo}</span>`:''}</td>`},
+      {key:'term',label:'Term',type:'num',get:x=>+x.a.contract_term||0,cell:x=>`<td>${(+x.a.contract_term)}mo</td>`},
+      {key:'renews',label:'Renews',type:'date',get:x=>{const d=x.nextDue||x.c.renewalDate;return d?d.toISOString().slice(0,10):null;},cell:x=>`<td class="mono" style="color:var(--muted)">${fmtDate(x.nextDue||x.c.renewalDate)}</td>`},
+      {key:'days',label:'Days left',type:'num',get:x=>x.days,cell:x=>`<td>${daysCell(x.days)}</td>`},
+      {key:'mrr',label:'MRR',type:'num',num:true,get:x=>x.c.mrr,cell:x=>`<td class="num mono">${fmt(x.c.mrr)}</td>`},
+      {key:'comm',label:'Renewal comm.',type:'num',num:true,get:x=>x.c.renewalCommission,cell:x=>`<td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(x.c.renewalCommission)} <span style="font-size:10px;color:var(--muted)">(${Math.round(x.c.renewMult*1000)/10}%)</span></td>`},
+      {key:'status',label:'Status',get:null,cell:x=>`<td>${can('editAgreements')?`<button class="paidbtn" data-renew="${x.a.id}">Renew…</button>`:renewStatus(x.days)}</td>`}
+    ];
+    tsortRender('renTableWrap','renManual',cols,MANUAL_LIST,renderRenewals,x=>`style="${rowTint(x.days)}"`);
     $('renTableWrap').querySelectorAll('[data-renew]').forEach(b=>b.onclick=()=>openRenew(b.dataset.renew));
   }
 
@@ -1590,22 +1624,21 @@ function renderRenewals(){
   $('autoCount').textContent=`${AUTO_LIST.length} shown · ${auto.length} pending`;
   if(!AUTO_LIST.length){ $('autoTableWrap').innerHTML=`<div class="empty"><b>No auto-renewals${aq?' match':' pending'}</b>12/24-month agreements with autorenewal ON appear here for their one-time renewal commission. 36/48/60-month terms aren't auto-renewal eligible.</div>`; }
   else {
-    const rows=AUTO_LIST.map(x=>{const {a,c,days}=x; const st=autoStatusLabel(x);
-      return `<tr style="${rowTint(days)}">
-      <td>${esc(a.customer_name||'—')}${a.customer_number?`<div style="font-size:10px;color:var(--muted)">Cust #${esc(a.customer_number)}</div>`:''}${a.site_number?`<div style="font-size:10px;color:var(--muted)">Site ${esc(a.site_number)}</div>`:''}</td>
-      <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
-      <td>${(+a.contract_term)}mo</td>
-      <td class="mono" style="color:var(--muted)">${fmtDate(c.renewalDate)}</td>
-      <td>${daysCell(days)}</td>
-      <td class="num mono">${fmt(c.mrr)}</td>
-      <td class="num mono">${fmt(c.acv)}</td>
-      <td class="mono">${c.grossMargin==null?'—':Math.round(c.grossMargin*1000)/10+'%'}</td>
-      <td class="num mono">${Math.round(c.renewMult*1000)/10}%</td>
-      <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(c.renewalCommission)}</td>
-      <td><span class="chip ${statusChipClass(st)}" style="font-size:10px">${st}</span></td>
-      <td>${can('editAgreements')?`<button class="iconbtn" data-convert="${a.id}">Convert to manual</button>`:''}</td>
-    </tr>`;}).join('');
-    $('autoTableWrap').innerHTML=`<table><thead><tr><th>Customer</th><th>Agr #</th><th>Term</th><th>Renewal date</th><th>Days left</th><th class="num">MRR</th><th class="num">ACV</th><th>Margin</th><th class="num">Auto %</th><th class="num">Est. comm.</th><th>Auto-renewal status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    const cols=[
+      {key:'num',label:'Agr #',type:'num',get:x=>{const m=String(x.a.agreement_number||'').match(/\d+/);return m?+m[0]:null;},cell:x=>`<td class="ag-no">#${esc(x.a.agreement_number||'—')}</td>`},
+      {key:'cust',label:'Customer',type:'text',get:x=>String(x.a.customer_name||'').toLowerCase(),cell:x=>`<td>${esc(x.a.customer_name||'—')}${x.a.customer_number?`<div style="font-size:10px;color:var(--muted)">Cust #${esc(x.a.customer_number)}</div>`:''}${x.a.site_number?`<div style="font-size:10px;color:var(--muted)">Site ${esc(x.a.site_number)}</div>`:''}</td>`},
+      {key:'term',label:'Term',type:'num',get:x=>+x.a.contract_term||0,cell:x=>`<td>${(+x.a.contract_term)}mo</td>`},
+      {key:'date',label:'Renewal date',type:'date',get:x=>x.c.renewalDate?x.c.renewalDate.toISOString().slice(0,10):null,cell:x=>`<td class="mono" style="color:var(--muted)">${fmtDate(x.c.renewalDate)}</td>`},
+      {key:'days',label:'Days left',type:'num',get:x=>x.days,cell:x=>`<td>${daysCell(x.days)}</td>`},
+      {key:'mrr',label:'MRR',type:'num',num:true,get:x=>x.c.mrr,cell:x=>`<td class="num mono">${fmt(x.c.mrr)}</td>`},
+      {key:'acv',label:'ACV',type:'num',num:true,get:x=>x.c.acv,cell:x=>`<td class="num mono">${fmt(x.c.acv)}</td>`},
+      {key:'margin',label:'Margin',type:'num',get:x=>x.c.grossMargin==null?null:x.c.grossMargin,cell:x=>`<td class="mono">${x.c.grossMargin==null?'—':Math.round(x.c.grossMargin*1000)/10+'%'}</td>`},
+      {key:'autopct',label:'Auto %',type:'num',num:true,get:x=>x.c.renewMult,cell:x=>`<td class="num mono">${Math.round(x.c.renewMult*1000)/10}%</td>`},
+      {key:'comm',label:'Est. comm.',type:'num',num:true,get:x=>x.c.renewalCommission,cell:x=>`<td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(x.c.renewalCommission)}</td>`},
+      {key:'status',label:'Auto-renewal status',get:null,cell:x=>{const st=autoStatusLabel(x);return `<td><span class="chip ${statusChipClass(st)}" style="font-size:10px">${st}</span></td>`;}},
+      {key:'act',label:'',get:null,cell:x=>`<td>${can('editAgreements')?`<button class="iconbtn" data-convert="${x.a.id}">Convert to manual</button>`:''}</td>`}
+    ];
+    tsortRender('autoTableWrap','renAuto',cols,AUTO_LIST,renderRenewals,x=>`style="${rowTint(x.days)}"`);
     $('autoTableWrap').querySelectorAll('[data-convert]').forEach(b=>b.onclick=()=>openConvert(b.dataset.convert));
   }
 }
@@ -1649,20 +1682,18 @@ function renderForecast(){
   $('fcCount').textContent=`${rows.length} opportunit${rows.length===1?'y':'ies'}`;
   if(!rows.length){$('fcTableWrap').innerHTML=`<div class="empty"><b>No upcoming renewals</b>Active term agreements with a future renewal date and a renewal commission appear here as a forecast.</div>`;return;}
   const stColor=s=>s==='Past due'?'c-held':(s.startsWith('Final')?'c-maturing':(s==='Future'?'c-none':'c-payable'));
-  const body=rows.map(x=>{const c=x.c,a=x.a;
-    const mPct=c.grossMargin==null?'—':`${Math.round(c.grossMargin*1000)/10}%`;
-    return `<tr>
-      <td>${esc(a.customer_name||'—')}${a.site_number?`<div style="font-size:10px;color:var(--muted)">Site #${esc(a.site_number)}</div>`:''}</td>
-      <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
-      <td>${c.term}mo</td>
-      <td class="mono">${fmtDate(c.renewalDate)}</td>
-      <td class="mono" style="font-weight:700;${x.days<0?'color:var(--held)':(x.days<=90?'color:var(--orange)':'')}">${x.days<0?'overdue':x.days+' d'}</td>
-      <td class="mono">${mPct}</td>
-      <td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(c.renewalCommission)}</td>
-      <td class="mono" style="color:var(--muted)">${x.reminderDate?fmtDate(x.reminderDate):'—'}</td>
-      <td><span class="chip ${stColor(x.status)}" style="font-size:10px">${x.status}</span> ${a.autorenew?'<span class="chip c-paid" style="font-size:10px">auto</span>':'<span class="chip c-maturing" style="font-size:10px">manual</span>'}</td>
-    </tr>`;}).join('');
-  $('fcTableWrap').innerHTML=`<table><thead><tr><th>Customer</th><th>Agr #</th><th>Term</th><th>Expiration</th><th>Days left</th><th>Current margin</th><th class="num">Est. bonus</th><th>Next reminder</th><th>Forecast status</th></tr></thead><tbody>${body}</tbody></table>`;
+  const cols=[
+    {key:'num',label:'Agr #',type:'num',get:x=>{const m=String(x.a.agreement_number||'').match(/\d+/);return m?+m[0]:null;},cell:x=>`<td class="ag-no">#${esc(x.a.agreement_number||'—')}</td>`},
+    {key:'cust',label:'Customer',type:'text',get:x=>String(x.a.customer_name||'').toLowerCase(),cell:x=>`<td>${esc(x.a.customer_name||'—')}${x.a.site_number?`<div style="font-size:10px;color:var(--muted)">Site #${esc(x.a.site_number)}</div>`:''}</td>`},
+    {key:'term',label:'Term',type:'num',get:x=>+x.c.term||0,cell:x=>`<td>${x.c.term}mo</td>`},
+    {key:'exp',label:'Expiration',type:'date',get:x=>x.c.renewalDate?x.c.renewalDate.toISOString().slice(0,10):null,cell:x=>`<td class="mono">${fmtDate(x.c.renewalDate)}</td>`},
+    {key:'days',label:'Days left',type:'num',get:x=>x.days,cell:x=>`<td class="mono" style="font-weight:700;${x.days<0?'color:var(--held)':(x.days<=90?'color:var(--orange)':'')}">${x.days<0?'overdue':x.days+' d'}</td>`},
+    {key:'margin',label:'Current margin',type:'num',get:x=>x.c.grossMargin==null?null:x.c.grossMargin,cell:x=>`<td class="mono">${x.c.grossMargin==null?'—':`${Math.round(x.c.grossMargin*1000)/10}%`}</td>`},
+    {key:'bonus',label:'Est. bonus',type:'num',num:true,get:x=>x.c.renewalCommission,cell:x=>`<td class="num mono" style="font-weight:700;color:var(--payable)">${fmt(x.c.renewalCommission)}</td>`},
+    {key:'reminder',label:'Next reminder',type:'date',get:x=>x.reminderDate?x.reminderDate.toISOString().slice(0,10):null,cell:x=>`<td class="mono" style="color:var(--muted)">${x.reminderDate?fmtDate(x.reminderDate):'—'}</td>`},
+    {key:'status',label:'Forecast status',get:null,cell:x=>`<td><span class="chip ${stColor(x.status)}" style="font-size:10px">${x.status}</span> ${x.a.autorenew?'<span class="chip c-paid" style="font-size:10px">auto</span>':'<span class="chip c-maturing" style="font-size:10px">manual</span>'}</td>`}
+  ];
+  tsortRender('fcTableWrap','forecast',cols,rows,renderForecast);
 }
 function exportForecastCSV(){
   const rows=forecastList();
@@ -1710,16 +1741,16 @@ function renderUpcomingReleases(){
   if(!rel.length){ wrap.innerHTML=`<div class="empty"><b>Nothing upcoming</b>Held and forecast releases appear here once agreements have holdbacks, accelerators, or renewals ahead.</div>`; return; }
   const tag=c=>c==='collection'?'<span class="chip c-payable" style="font-size:9px">collection-driven</span>':c==='signed'?'<span class="chip c-paid" style="font-size:9px">signed</span>':'<span class="chip c-maturing" style="font-size:9px">forecast</span>';
   const typeChip=t=>{const M={Holdback:['#fff4e8','var(--orange)'],Accelerator:['#f0ecff','#5a3fb8'],Renewal:['#e7f3ee','var(--payable)']};const m=M[t]||['','var(--ink)'];return `<span class="chip" style="background:${m[0]};color:${m[1]};font-size:10px">${t}</span>`;};
-  const rows=rel.map(r=>`<tr>
-    <td class="mono" style="color:var(--muted)">${r.pending?'<span style="color:var(--orange)">pending</span>':esc(String(r.date||'').slice(0,10))}</td>
-    <td class="ag-no">#${esc(r.a.agreement_number||'—')}</td>
-    <td>${esc(r.a.customer_name||'—')}</td>
-    <td>${typeChip(r.type)}</td>
-    <td>${tag(r.certainty)}</td>
-    <td class="num mono" style="font-weight:700">${fmt(r.amount)}</td>
-    <td class="mono">${r.qi!=null?qLabel(r.qi):'—'}</td>
-  </tr>`).join('');
-  wrap.innerHTML=`<table><thead><tr><th>Release date</th><th>Agr #</th><th>Customer</th><th>Type</th><th>Certainty</th><th class="num">Amount</th><th>Credits to</th></tr></thead><tbody>${rows}</tbody></table>`;
+  const cols=[
+    {key:'num',label:'Agr #',type:'num',get:r=>{const m=String(r.a.agreement_number||'').match(/\d+/);return m?+m[0]:null;},cell:r=>`<td class="ag-no">#${esc(r.a.agreement_number||'—')}</td>`},
+    {key:'date',label:'Release date',type:'date',get:r=>r.pending?null:String(r.date||'').slice(0,10),cell:r=>`<td class="mono" style="color:var(--muted)">${r.pending?'<span style="color:var(--orange)">pending</span>':esc(String(r.date||'').slice(0,10))}</td>`},
+    {key:'cust',label:'Customer',type:'text',get:r=>String(r.a.customer_name||'').toLowerCase(),cell:r=>`<td>${esc(r.a.customer_name||'—')}</td>`},
+    {key:'type',label:'Type',type:'text',get:r=>r.type,cell:r=>`<td>${typeChip(r.type)}</td>`},
+    {key:'certainty',label:'Certainty',type:'text',get:r=>r.certainty,cell:r=>`<td>${tag(r.certainty)}</td>`},
+    {key:'amount',label:'Amount',type:'num',num:true,get:r=>r.amount,cell:r=>`<td class="num mono" style="font-weight:700">${fmt(r.amount)}</td>`},
+    {key:'credits',label:'Credits to',type:'num',get:r=>r.qi,cell:r=>`<td class="mono">${r.qi!=null?qLabel(r.qi):'—'}</td>`}
+  ];
+  tsortRender('repRelWrap','upcoming',cols,rel,renderUpcomingReleases);
 }
 function exportUpcomingCSV(){
   const rel=upcomingReleases();
@@ -1803,7 +1834,7 @@ function renderReports(){
       else{
         body+=pieceLine('Standard 75% (now)',c.immediateCommission,rOf('immediate'));
         body+=pieceLine('Standard holdback 25%',c.holdbackCommission,rOf('holdback'));
-        if(c.acceleratorHeld>0) rows.filter(r=>r.piece==='accel').forEach(r=>{ body+=pieceLine(r.type,r.amount,r); });
+        if(c.acceleratorHeld>0) rows.filter(r=>r.piece==='accel').sort((a,b)=>(a.seq||0)-(b.seq||0)).forEach(r=>{ body+=pieceLine(r.type,r.amount,r); });
       }
       const renRows=rows.filter(r=>r.piece==='renewal');
       if(renRows.length) renRows.forEach(r=>{ body+=pieceLine(r.type,r.amount,r); });
@@ -1816,7 +1847,20 @@ function renderReports(){
       </div>`;
     }).join('');
   };
-  const body=cust.map((o,i)=>{
+  const profCols=[
+    {key:'cust',label:'Customer',type:'text',get:o=>String(o.name||'').toLowerCase()},
+    {key:'n',label:'Agmts',type:'num',num:true,get:o=>o.n},
+    {key:'mrr',label:'MRR',type:'num',num:true,get:o=>o.mrr},
+    {key:'year1',label:'Yr-1 rev',type:'num',num:true,get:o=>o.year1},
+    {key:'gp',label:'Gross profit',type:'num',num:true,get:o=>o.gp},
+    {key:'margin',label:'Avg margin',type:'num',get:o=>o.avgMargin==null?null:o.avgMargin},
+    {key:'comm',label:'Commission',type:'num',num:true,get:o=>o.comm},
+    {key:'paid',label:'Paid',type:'num',num:true,get:o=>o.paid},
+    {key:'held',label:'Held',type:'num',num:true,get:o=>o.held},
+    {key:'next',label:'Next renewal',type:'date',get:o=>o.nextRenewal?o.nextRenewal.toISOString().slice(0,10):null}
+  ];
+  const {thead:profThead,arr:custSorted}=tsortApply('profit',profCols,cust);
+  const body=custSorted.map((o,i)=>{
     const types=[...o.types].map(t=>TYPE_LABEL[t]||t).join(', ');
     return `<tr class="cust-row" data-cust="${i}" style="cursor:pointer">
     <td>▸ ${esc(o.name)}${types?`<div style="font-size:10px;color:var(--muted)">${esc(types)}</div>`:''}</td>
@@ -1830,7 +1874,8 @@ function renderReports(){
     <td class="num mono" style="color:var(--orange)">${fmt(o.held)}</td>
     <td class="mono" style="color:var(--muted)">${o.nextRenewal?fmtDate(o.nextRenewal):'—'}</td>
   </tr><tr class="cust-detail" data-detail="${i}" style="display:none"><td colspan="10" style="background:#f7f7f8;padding:12px 14px">${detailFor(o)}</td></tr>`;}).join('');
-  $('repCustWrap').innerHTML=`<table><thead><tr><th>Customer</th><th class="num">Agmts</th><th class="num">MRR</th><th class="num">Yr-1 rev</th><th class="num">Gross profit</th><th>Avg margin</th><th class="num">Commission</th><th class="num">Paid</th><th class="num">Held</th><th>Next renewal</th></tr></thead><tbody>${body}</tbody></table>`;
+  $('repCustWrap').innerHTML=`<table>${profThead}<tbody>${body}</tbody></table>`;
+  tsortBind('repCustWrap', renderReports);
   $('repCustWrap').querySelectorAll('.cust-row').forEach(row=>row.onclick=()=>{const d=$('repCustWrap').querySelector(`[data-detail="${row.dataset.cust}"]`); if(d){const open=d.style.display!=='none'; d.style.display=open?'none':'table-row'; row.querySelector('td').innerHTML=row.querySelector('td').innerHTML.replace(open?'▾':'▸',open?'▸':'▾');}});
   renderUpcomingReleases();
 }
@@ -2696,26 +2741,20 @@ function renderOpportunities(){
   if(!list.length){ $('oppTableWrap').innerHTML=`<div class="empty"><b>No opportunities${q?' match':''}</b>Click “New opportunity” to mint an opportunity # and start tracking a potential deal.</div>`; return; }
   const showOwner=canViewAll();
   const stageChip=s=> s==='quoting'?'<span class="chip c-payable">Quoting</span>':s==='lost'?'<span class="chip c-held">Lost</span>':'<span class="chip c-maturing">Opportunity</span>';
-  const ageOf=a=>{const d=a.created_at?new Date(a.created_at):(a.updated_at?new Date(a.updated_at):null); if(!d||isNaN(d))return '—'; return Math.max(0,Math.floor((Date.now()-d)/86400000))+'d';};
-  const rows=list.map(a=>{
-    const isLost=a.stage==='lost';
-    const acts=[];
-    if(can('editOpps')) acts.push(isLost?`<button class="iconbtn" data-reopen="${a.id}">Reopen</button>`:`<button class="iconbtn" data-oppedit="${a.id}">Edit</button>`);
-    if(!isLost && can('editAgreements')) acts.push(`<button class="paidbtn" data-oppwin="${a.id}">Win</button>`);
-    if(can('deleteOpps')) acts.push(`<button class="iconbtn" data-oppdel="${a.id}" style="color:var(--held)">Delete</button>`);
-    const actHtml=acts.join(' ');
-    return `<tr${isLost?' style="opacity:.6"':''}>
-      <td class="ag-no">${esc(a.opportunity_number||'—')}</td>
-      <td>${esc(a.customer_name||'—')}${isLost&&a.lost_reason?`<div style="font-size:10px;color:var(--muted)">${esc(a.lost_reason)}</div>`:''}</td>
-      <td>${stageChip(a.stage)}</td>
-      ${showOwner?`<td style="font-size:12px;color:var(--muted)">${esc(ownerKey(a))}</td>`:''}
-      <td class="num mono">${a.est_monthly_rmr?fmt(+a.est_monthly_rmr):'<span style="color:var(--none)">—</span>'}</td>
-      <td class="mono" style="color:var(--muted)">${esc(a.estimate_ref||'—')}</td>
-      <td class="mono" style="color:var(--muted)">${a.expected_close?esc(String(a.expected_close).slice(0,10)):'—'}</td>
-      <td class="mono">${ageOf(a)}</td>
-      <td>${actHtml}</td>
-    </tr>`;}).join('');
-  $('oppTableWrap').innerHTML=`<table><thead><tr><th>Opp #</th><th>Customer</th><th>Stage</th>${showOwner?'<th>Owner</th>':''}<th class="num">Est. MRR</th><th>Estimate #</th><th>Exp. close</th><th>Age</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  const ageDays=a=>{const d=a.created_at?new Date(a.created_at):(a.updated_at?new Date(a.updated_at):null); if(!d||isNaN(d))return null; return Math.max(0,Math.floor((Date.now()-d)/86400000));};
+  const ageOf=a=>{const n=ageDays(a); return n==null?'—':n+'d';};
+  const cols=[
+    {key:'opp',label:'Opp #',type:'text',get:a=>String(a.opportunity_number||''),cell:a=>`<td class="ag-no">${esc(a.opportunity_number||'—')}</td>`},
+    {key:'cust',label:'Customer',type:'text',get:a=>String(a.customer_name||'').toLowerCase(),cell:a=>`<td>${esc(a.customer_name||'—')}${a.stage==='lost'&&a.lost_reason?`<div style="font-size:10px;color:var(--muted)">${esc(a.lost_reason)}</div>`:''}</td>`},
+    {key:'stage',label:'Stage',type:'text',get:a=>String(a.stage||''),cell:a=>`<td>${stageChip(a.stage)}</td>`},
+    ...(showOwner?[{key:'owner',label:'Owner',type:'text',get:a=>String(ownerKey(a)||'').toLowerCase(),cell:a=>`<td style="font-size:12px;color:var(--muted)">${esc(ownerKey(a))}</td>`}]:[]),
+    {key:'mrr',label:'Est. MRR',type:'num',num:true,get:a=>+a.est_monthly_rmr||null,cell:a=>`<td class="num mono">${a.est_monthly_rmr?fmt(+a.est_monthly_rmr):'<span style="color:var(--none)">—</span>'}</td>`},
+    {key:'est',label:'Estimate #',type:'text',get:a=>String(a.estimate_ref||''),cell:a=>`<td class="mono" style="color:var(--muted)">${esc(a.estimate_ref||'—')}</td>`},
+    {key:'close',label:'Exp. close',type:'date',get:a=>a.expected_close?String(a.expected_close).slice(0,10):null,cell:a=>`<td class="mono" style="color:var(--muted)">${a.expected_close?esc(String(a.expected_close).slice(0,10)):'—'}</td>`},
+    {key:'age',label:'Age',type:'num',get:a=>ageDays(a),cell:a=>`<td class="mono">${ageOf(a)}</td>`},
+    {key:'act',label:'',get:null,cell:a=>{const isLost=a.stage==='lost';const acts=[];if(can('editOpps'))acts.push(isLost?`<button class="iconbtn" data-reopen="${a.id}">Reopen</button>`:`<button class="iconbtn" data-oppedit="${a.id}">Edit</button>`);if(!isLost&&can('editAgreements'))acts.push(`<button class="paidbtn" data-oppwin="${a.id}">Win</button>`);if(can('deleteOpps'))acts.push(`<button class="iconbtn" data-oppdel="${a.id}" style="color:var(--held)">Delete</button>`);return `<td>${acts.join(' ')}</td>`;}}
+  ];
+  tsortRender('oppTableWrap','opps',cols,list,renderOpportunities,a=>a.stage==='lost'?'style="opacity:.6"':'');
   $('oppTableWrap').querySelectorAll('[data-oppedit]').forEach(b=>b.onclick=()=>openOpp(b.dataset.oppedit));
   $('oppTableWrap').querySelectorAll('[data-oppwin]').forEach(b=>b.onclick=()=>winOpp(b.dataset.oppwin));
   $('oppTableWrap').querySelectorAll('[data-reopen]').forEach(b=>b.onclick=()=>reopenOpp(b.dataset.reopen));
