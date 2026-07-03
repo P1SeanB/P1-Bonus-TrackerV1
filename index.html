@@ -168,6 +168,7 @@
   .modal-tabs button{background:none;border:none;padding:9px 15px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
   .modal-tabs button:hover{color:var(--ink)}
   .modal-tabs button.active{color:var(--navy);border-bottom-color:var(--orange)}
+  .exp-row{cursor:pointer} .exp-row:hover{background:#fafafa}
   .bill-toggle{grid-column:1/-1;display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink);font-weight:500}
   .bill-wrap{grid-column:1/-1;display:none}
   .bill-wrap.show{display:block}
@@ -1100,11 +1101,17 @@ function tsortBind(wrapId, rerender){
     rerender();
   });
 }
-function tsortRender(wrapId, tableKey, cols, data, rerender, rowAttr){
+function tsortRender(wrapId, tableKey, cols, data, rerender, rowAttr, detailFn){
   const {thead,arr}=tsortApply(tableKey,cols,data);
-  const rows=arr.map(r=>`<tr ${rowAttr?rowAttr(r):''}>${cols.map(c=>c.cell(r)).join('')}</tr>`).join('');
+  const ncol=cols.length;
+  const rows=arr.map((r,i)=>{
+    const main=`<tr ${detailFn?`class="exp-row" data-exp="${i}"`:''} ${rowAttr?rowAttr(r):''}>${cols.map(c=>c.cell(r)).join('')}</tr>`;
+    const det=detailFn?`<tr class="exp-detail" data-expd="${i}" style="display:none"><td colspan="${ncol}" style="background:#f7f7f8;padding:12px 16px">${detailFn(r)}</td></tr>`:'';
+    return main+det;
+  }).join('');
   $(wrapId).innerHTML=`<table>${thead}<tbody>${rows}</tbody></table>`;
   tsortBind(wrapId, rerender);
+  if(detailFn) $(wrapId).querySelectorAll('.exp-row').forEach(row=>row.onclick=(e)=>{ if(e.target.closest('button,input,a,select'))return; const d=$(wrapId).querySelector(`[data-expd="${row.dataset.exp}"]`); if(d) d.style.display=d.style.display==='none'?'table-row':'none'; });
   return arr;
 }
 
@@ -1115,7 +1122,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-36';
+const APP_VERSION='P1RMR-37';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1475,12 +1482,12 @@ function renderQuarter(){
     {key:'st',label:'Status',get:null}
   ];
   const {thead:qThead,arr:qGroups}=tsortApply('quarter',qCols,groups);
-  const rows=qGroups.map(g=>{
+  const rows=qGroups.map((g,i)=>{
     const allPaid=g.items.every(l=>l.paid), nonePaid=g.items.every(l=>!l.paid);
     const ometa=allPaid?{cls:'c-paid',label:'Paid'}:nonePaid?{cls:'c-payable',label:'Payable'}:{cls:'c-maturing',label:`Partial ${g.items.filter(l=>l.paid).length}/${g.items.length}`};
     const signed=g.a.activation_date?fmtDate(new Date(String(g.a.activation_date).slice(0,10)+'T00:00:00')):'—';
     const billing=g.a.first_billing_date?fmtDate(new Date(String(g.a.first_billing_date).slice(0,10)+'T00:00:00')):'<span style="color:var(--none)">—</span>';
-    return `<tr>
+    return `<tr class="exp-row" data-exp="${i}">
       <td class="ag-no" style="vertical-align:top;padding-top:12px">#${esc(g.a.agreement_number||'—')}</td>
       <td style="vertical-align:top;padding-top:12px">${esc(g.a.customer_name||'—')}</td>
       <td class="mono" style="vertical-align:top;padding-top:12px;color:var(--muted);white-space:nowrap">${signed}</td>
@@ -1488,10 +1495,11 @@ function renderQuarter(){
       <td class="num mono" style="vertical-align:top;padding-top:12px;font-weight:700;font-size:16px">${fmt2(g.total)}</td>
       <td style="padding:6px 12px">${g.items.map(pieceRow).join('')}</td>
       <td style="vertical-align:top;padding-top:12px"><span class="chip ${ometa.cls}">${ometa.label}</span></td>
-    </tr>`;
+    </tr><tr class="exp-detail" data-expd="${i}" style="display:none"><td colspan="7" style="background:#f7f7f8;padding:12px 16px">${payoutScheduleHTML(g.a)}</td></tr>`;
   }).join('');
   $('qTableWrap').innerHTML=`<table>${qThead}<tbody>${rows}</tbody></table>`;
   tsortBind('qTableWrap', renderQuarter);
+  $('qTableWrap').querySelectorAll('.exp-row').forEach(row=>row.onclick=(e)=>{ if(e.target.closest('button,input,a,select'))return; const d=$('qTableWrap').querySelector(`[data-expd="${row.dataset.exp}"]`); if(d) d.style.display=d.style.display==='none'?'table-row':'none'; });
   $('qTableWrap').querySelectorAll('[data-paid]').forEach(b=>b.onclick=()=>patchPaid(b.dataset.paid,b.dataset.field,b.dataset.val==='1'));
   $('qTableWrap').querySelectorAll('[data-renrow]').forEach(b=>b.onclick=()=>patchRenewalPaid(b.dataset.renrow,b.dataset.val==='1'));
   $('qTableWrap').querySelectorAll('[data-accelseq]').forEach(b=>b.onclick=()=>patchAccelPiece(b.dataset.accelid,b.dataset.accelseq,b.dataset.val==='1'));
@@ -1685,6 +1693,26 @@ function forecastList(){
     .filter(x=>x.days>=-31)
     .sort((p,q)=>p.days-q.days);
 }
+function payoutScheduleHTML(a){
+  const c=compute(a);
+  const rows=historyLedger().filter(r=>r.a.id===a.id).slice().sort((x,y)=>String(x.date||'zzzz').localeCompare(String(y.date||'zzzz')));
+  const SRC={immediate:'75% at signing',holdback:'releases once 25% of Year-1 is collected',accel:'releases as revenue is collected',renewal:'paid in full when renewed',initial:'at activation'};
+  const line=(ds,label,amt,src,paid,qi)=>`<div style="display:flex;align-items:baseline;gap:10px;padding:4px 0;border-top:1px dashed var(--line)"><span class="mono" style="min-width:96px;color:var(--muted)">${ds||'—'}</span><span style="flex:1;min-width:150px">${label} <span style="color:var(--muted);font-size:11px">— ${src||''}</span></span><span class="mono" style="min-width:60px;color:var(--muted);font-size:11px">${qi!=null?qLabel(qi):''}</span><b class="mono" style="min-width:70px;text-align:right">${fmt(amt)}</b><span class="chip ${paid?'c-paid':'c-payable'}" style="font-size:9px">${paid?'paid':'pending'}</span></div>`;
+  let html=`<div style="font-size:12.5px"><div style="font-weight:700;margin-bottom:2px">Full payout schedule — #${esc(a.agreement_number||'')} ${esc(a.customer_name||'')}</div><div style="color:var(--muted);font-size:11px;margin-bottom:4px">Signed ${a.activation_date?esc(String(a.activation_date).slice(0,10)):'—'} · First billing ${a.first_billing_date?esc(String(a.first_billing_date).slice(0,10)):'same as signing'} · total commission ${fmt(c.legacyFull?c.initialCommission:(c.immediateCommission+c.holdbackCommission+c.acceleratorHeld))}</div>`;
+  if(!rows.length) html+='<div class="file-hint">No commission pieces yet.</div>';
+  rows.forEach(r=>{ const ds=r.date?fmtDate(new Date(String(r.date).slice(0,10)+'T00:00:00')):'—'; html+=line(ds,r.type,r.amount,SRC[r.piece]||'',r.paid,r.qi); });
+  html+='</div>';
+  return html;
+}
+function forecastRenewalHTML(x){
+  const a=x.a,c=x.c, proj=renewalProjection(a,c);
+  let html=`<div style="font-size:12.5px"><div style="font-weight:700;margin-bottom:4px">Renewal bonus — #${esc(a.agreement_number||'')} ${esc(a.customer_name||'')}</div>`;
+  html+=`<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0"><span>Next renewal${c.renewalDate?` · <span class="mono" style="color:var(--muted)">${fmtDate(c.renewalDate)}</span>`:''}</span><b class="mono">${fmt(c.renewalCommission)}</b></div>`;
+  html+=`<div style="color:var(--muted);padding:2px 0;border-top:1px dashed var(--line)">= commissionable <b class="mono">${fmt(c.commissionableValue)}</b> × ${Math.round(c.renewMult*1000)/10}% renewal rate × ${c.marginMultiplier.toFixed(2)} margin multiplier. Renewals pay in full when renewed — no holdback or accelerator split.</div>`;
+  if(proj) html+=`<div style="padding:4px 0;border-top:1px dashed var(--line);margin-top:2px">Projected through 60 months: <b class="mono">${fmt(proj.total)}</b> <span style="color:var(--muted)">(${proj.cycles} renewal${proj.cycles===1?'':'s'} of ~${fmt(proj.first)} each, if renewed each cycle)</span></div>`;
+  html+='</div>';
+  return html;
+}
 function renderForecast(){
   const rows=forecastList();
   const total=rows.reduce((s,x)=>s+x.c.renewalCommission,0);
@@ -1694,7 +1722,7 @@ function renderForecast(){
     <div class="stat accent"><div class="lbl">Forecasted bonus liability</div><div class="val">${fmt(total)}</div></div>
     <div class="stat orange"><div class="lbl">Renewing ≤180 days</div><div class="val">${within180}</div></div>
     <div class="stat"><div class="lbl">Renewing ≤90 days</div><div class="val">${within90}</div></div>`;
-  $('fcCount').textContent=`${rows.length} opportunit${rows.length===1?'y':'ies'}`;
+  $('fcCount').textContent=`${rows.length} opportunit${rows.length===1?'y':'ies'} · click a row for the bonus breakdown`;
   if(!rows.length){$('fcTableWrap').innerHTML=`<div class="empty"><b>No upcoming renewals</b>Active term agreements with a future renewal date and a renewal commission appear here as a forecast.</div>`;return;}
   const stColor=s=>s==='Past due'?'c-held':(s.startsWith('Final')?'c-maturing':(s==='Future'?'c-none':'c-payable'));
   const cols=[
@@ -1708,7 +1736,7 @@ function renderForecast(){
     {key:'reminder',label:'Next reminder',type:'date',get:x=>x.reminderDate?x.reminderDate.toISOString().slice(0,10):null,cell:x=>`<td class="mono" style="color:var(--muted)">${x.reminderDate?fmtDate(x.reminderDate):'—'}</td>`},
     {key:'status',label:'Forecast status',get:null,cell:x=>`<td><span class="chip ${stColor(x.status)}" style="font-size:10px">${x.status}</span> ${x.a.autorenew?'<span class="chip c-paid" style="font-size:10px">auto</span>':'<span class="chip c-maturing" style="font-size:10px">manual</span>'}</td>`}
   ];
-  tsortRender('fcTableWrap','forecast',cols,rows,renderForecast);
+  tsortRender('fcTableWrap','forecast',cols,rows,renderForecast,null,forecastRenewalHTML);
 }
 function exportForecastCSV(){
   const rows=forecastList();
