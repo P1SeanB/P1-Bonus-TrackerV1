@@ -678,6 +678,8 @@
     </div>
     <div class="guide-body">
       <div id="gdPlanTag" class="guide-callout" style="background:#eef6ef;border-left-color:var(--payable)"></div>
+      <div id="guideB" style="display:none"></div>
+      <div id="guideA">
       <h3>The big idea</h3>
       <p>You earn a commission on every recurring-revenue (RMR) agreement you sell — and again when it renews. Your commission is built from three things: <b>how big the deal is</b>, <b>a percentage set by the contract length</b>, and <b>a multiplier based on how profitable the deal is</b>.</p>
       <div class="guide-callout"><b>Commission = Deal value × Term&nbsp;% × Margin multiplier.</b> Every rate below is set by your administrator, so the numbers always reflect the plan assigned to you.</div>
@@ -749,6 +751,7 @@
         <div class="row"><span class="chip c-paid">Paid</span> you've marked it collected</div>
         <div class="row"><span class="chip c-maturing">Manual renewal needed</span> renew it to get paid</div>
         <div class="row"><span class="chip c-held">Urgent / overdue</span> renewal date is here or past</div>
+      </div>
       </div>
     </div>
   </div>
@@ -1168,7 +1171,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-50';
+const APP_VERSION='P1RMR-51';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -3199,9 +3202,55 @@ $('signoutBtn').onclick=doSignOut;
 /* Build the in-app guide from the LOGGED-IN user's assigned plan, so the rates,
    margin tiers, basis and worked example always match what they actually earn.
    Re-runs every time the guide opens and live while it's open (see render()). */
+function typeBGuideHTML(plan){
+  const mult=plan.rmrMultiple!=null?plan.rmrMultiple:2, ni=plan.newInitialPct!=null?plan.newInitialPct:0.5, nd=1-ni;
+  const ri=plan.renInitialPct!=null?plan.renInitialPct:0.5, rd=1-ri;
+  const man=plan.bManualRenewalPct!=null?plan.bManualRenewalPct:0.04, aut=plan.bAutoRenewalPct!=null?plan.bAutoRenewalPct:0.01;
+  const floor=plan.minMargin!=null?plan.minMargin:0.45, ohp=plan.overheadPct!=null?plan.overheadPct:0.28;
+  const money=n=>'$'+Math.round(n).toLocaleString(), pctv=v=>Math.round(v*10000)/100+'%';
+  const mrr=100, acv=1200, direct=400, total=mult*mrr, init=total*ni, def=total*nd, oh=acv*ohp, threshold=direct+oh+total, month=Math.max(1,Math.ceil(threshold/mrr));
+  return `
+  <h3>The big idea</h3>
+  <p>On this plan your commission is a <b>flat multiple of the monthly RMR</b> — how profitable the deal is doesn't scale it up or down. Part is paid up front and part is <b>deferred</b> until the agreement proves it's profitable.</p>
+  <div class="guide-callout"><b>Commission = ${Math.round(mult*100)}% × Monthly RMR.</b> A $100/mo deal earns <b>${money(total)}</b>, whatever the term. The rate is set by your administrator.</div>
+  <h3>How you get paid — initial &amp; deferred</h3>
+  <p>Every commission — new deals and renewals — splits into two payments:</p>
+  <table class="guide-table"><thead><tr><th>Piece</th><th>How much</th><th>When it lands</th></tr></thead><tbody>
+    <tr><td><b>Initial</b></td><td>${Math.round(ni*100)}% of the commission</td><td>Paid now — the quarter you sell it</td></tr>
+    <tr><td><b>Deferred</b></td><td>${Math.round(nd*100)}% of the commission</td><td>Released once the deal crosses its profitability threshold</td></tr>
+  </tbody></table>
+  <div class="guide-callout">Example — a <b>$100/mo</b> deal earns <b>${money(total)}</b>: <b>${money(init)} now</b> and <b>${money(def)} deferred</b>.</div>
+  <h3>When the deferred releases — the profitability threshold</h3>
+  <p>The deferred half is held until the agreement has collected enough revenue to cover <b>everything it costs</b>, so releasing it never pushes the deal into a loss.</p>
+  <div class="guide-callout"><b>Threshold = annual direct costs + overhead (${Math.round(ohp*100)}% of ACV) + the full commission.</b></div>
+  <p style="font-size:12.5px;color:var(--muted)">Example — $100/mo, ${money(direct)} annual direct costs, ACV ${money(acv)}: ${money(direct)} + ${money(oh)} overhead + ${money(total)} commission = <b>${money(threshold)}</b>. Once collections reach ${money(threshold)} — about <b>month ${month}</b> at $100/mo — the ${money(def)} deferred releases as a single payment. If the deal ends first, the deferred stays pending.</p>
+  <p>Each agreement shows its <b>Total agreement cost</b>, <b>revenue required before release</b>, and <b>estimated release month</b>.</p>
+  <h3>Renewals</h3>
+  <p>Renewals earn a % of ACV — <b>Manual ${pctv(man)}</b>, <b>Auto ${pctv(aut)}</b> — split into initial (${Math.round(ri*100)}%) and deferred (${Math.round(rd*100)}%) like new deals. Each renewal cycle gets its <b>own</b> profitability threshold (that renewal's costs + that renewal's commission), so every term stands on its own.</p>
+  <h3>Margin floor</h3>
+  <p>Margin doesn't change your commission on this plan, but it's still a gate: a deal below <b>${Math.round(floor*100)}%</b> gross margin pays <b>$0</b> and needs management approval.</p>
+  <h3>Where to see your money</h3>
+  <table class="guide-table"><thead><tr><th>Screen</th><th>What it shows</th></tr></thead><tbody>
+    <tr><td><b>Quarter view</b></td><td>What's payable this quarter (Initial / Deferred), plus what's releasing later.</td></tr>
+    <tr><td><b>Reports → Upcoming releases</b></td><td>Every deferred and renewal release, dated, soonest first.</td></tr>
+    <tr><td><b>Commission History</b></td><td>Every Initial and Deferred payment you've earned, with status.</td></tr>
+  </tbody></table>
+  <h3>What the statuses mean</h3>
+  <div class="guide-legend">
+    <div class="row"><span class="chip c-payable">Payable</span> owed to you this quarter</div>
+    <div class="row"><span class="chip c-paid">Paid</span> marked collected</div>
+    <div class="row"><span class="chip c-held">Deferred / pending</span> waiting on the profitability threshold</div>
+  </div>`;
+}
 function renderGuide(){
-  if(!$('gdTermBody'))return;
+  if(!$('gdTermBody')&&!$('guideB'))return;
   const plan=resolvePlan({owner_email:CURRENT_EMAIL});
+  const isB=plan.planType==='B';
+  if($('guideA')) $('guideA').style.display=isB?'none':'block';
+  if($('guideB')){ $('guideB').style.display=isB?'block':'none'; if(isB) $('guideB').innerHTML=typeBGuideHTML(plan); }
+  const pt=$('gdPlanTag'); if(pt) pt.innerHTML=`You're on the <b>${esc(plan.planVersion||'default')}</b> plan${isB?' — RMR-multiple + deferred':''}. All figures below reflect it.`;
+  if(isB) return;
+  if(!$('gdTermBody'))return;
   const acv=plan.basis==='ACV';
   const pc=v=>(v==null)?'n/a':(Math.round(v*10000)/100)+'%';     // 0.055 -> "5.5%"
   const pn=v=>Math.round(v*10000)/100;                            // 0.60 -> 60
