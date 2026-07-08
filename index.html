@@ -1026,7 +1026,7 @@ function compute(a,plan){
   }}
   // Once renewed, the credited quarter follows the Renewal Month entered on the Renew form (not the activation+term math).
   if(a.renewed && a.renewal_credit_month){const m=String(a.renewal_credit_month).match(/^(\d{4})-(\d{2})$/);if(m){renewalQI=qIndexFromYM(+m[1],+m[2]-1);}}
-  return {term,rmr:mrr,mrr,acv,tcv,months,commissionableValue,basis:cfg.basis,
+  const R={term,rmr:mrr,mrr,acv,tcv,months,commissionableValue,basis:cfg.basis,
           planVersion:cfg.planVersion,minMargin:cfg.minMargin,targetMargin:cfg.targetMargin,
           laborHours,laborCost,materialCost,monitoringCost,softwareCost,subCost,otherCost,directCosts,
           grossProfit,grossMargin,laborPctRevenue,netProfit,overheadPct,overhead,totalDirectCosts,contractNet,
@@ -1040,6 +1040,37 @@ function compute(a,plan){
           billingExpected:(Array.isArray(a.billing_log)&&a.billing_log.length)?billingLogExpected(a.billing_log):totalRev,
           holdbackThreshold,accelThreshold,
           initialQI,renewalDate,renewalQI,annualBilled,firstBill,scheduled:!!sched,agreementType:atype,noRenewal};
+  if(cfg.planType==='B'){
+    // ---- Type B: flat RMR-multiple commission, initial/deferred split, profitability-threshold release ----
+    const floor=cfg.minMargin!=null?cfg.minMargin:0.45;
+    const eligibleB = !(grossMargin!=null && grossMargin<floor);          // margin floor still blocks payout
+    const totalComm = eligibleB ? (cfg.rmrMultiple!=null?cfg.rmrMultiple:2)*mrr : 0;
+    const niPct=cfg.newInitialPct!=null?cfg.newInitialPct:0.5;
+    const bInit=totalComm*niPct, bDef=totalComm*(1-niPct);
+    const annualOverheadB=acv*(cfg.overheadPct!=null?cfg.overheadPct:0.28);  // overhead on ANNUAL basis
+    const annualDirectB=directCosts;                                        // annual direct costs
+    const thresholdB=annualDirectB+annualOverheadB+totalComm;               // Total Agreement Cost = revenue required before deferred releases
+    const relMonthB = mrr>0 ? Math.ceil(thresholdB/mrr) : null;             // forecast month (steady collection)
+    const reachableB = thresholdB<=tcv;                                     // can this term's revenue ever cover it?
+    const blogB=(Array.isArray(a.billing_log)&&a.billing_log.length)?a.billing_log:null;
+    let relDateB=null, relQIB=null;
+    if(a.activation_date){ const bd=new Date((a.first_billing_date||a.activation_date)+'T00:00:00'); const rb=isNaN(bd)?new Date(a.activation_date+'T00:00:00'):bd;
+      if(!isNaN(rb)){ relDateB = blogB ? billingLogReleaseDate(blogB, thresholdB) : (relMonthB!=null?addMonths(rb, relMonthB):null); relQIB = relDateB?qIndexFromYM(relDateB.getFullYear(),relDateB.getMonth()):null; } }
+    const renPctB = isAuto ? (cfg.bAutoRenewalPct!=null?cfg.bAutoRenewalPct:0.01) : (cfg.bManualRenewalPct!=null?cfg.bManualRenewalPct:0.04);
+    const renCommB = (eligibleB && !noRenewal && term>0) ? renPctB*acv : 0;
+    // map onto the fields the current renderers read (Phase 3 refines labels), plus Type-B extras for the dashboard
+    R.planType='B'; R.marginMultiplier=1; R.initMult=1; R.legacyFull=false;
+    R.initialCommission=totalComm; R.standardCommission=totalComm; R.baseCommissionNew=totalComm;
+    R.immediateCommission=bInit; R.holdbackCommission=bDef;
+    R.acceleratorCommission=0; R.acceleratorHeld=0; R.acceleratorPieces=[]; R.acceleratorQI=null; R.acceleratorReleaseDate=null;
+    R.holdbackReleaseDate=relDateB; R.holdbackQI=relQIB;
+    R.renewalCommission=renCommB; R.renewMult=renPctB; R.baseCommissionRenewal=renCommB;
+    R.bTotalCommission=totalComm; R.bInitial=bInit; R.bDeferred=bDef; R.bInitialPct=niPct; R.bDeferredPct=1-niPct;
+    R.bAnnualDirect=annualDirectB; R.bAnnualOverhead=annualOverheadB; R.bTotalAgreementCost=thresholdB; R.bThreshold=thresholdB;
+    R.bReleaseMonth=relMonthB; R.bReachable=reachableB; R.bReleaseDate=relDateB; R.bReleaseQI=relQIB;
+    R.bRenewalPct=renPctB; R.bEligible=eligibleB; R.bRmrMultiple=(cfg.rmrMultiple!=null?cfg.rmrMultiple:2); R.renInitialPct=(cfg.renInitialPct!=null?cfg.renInitialPct:0.5); R.renDeferredPct=(cfg.renDeferredPct!=null?cfg.renDeferredPct:0.5);
+  } else { R.planType='A'; }
+  return R;
 }
 function deferredStatus(c,selQI,paid){return 'none';}     // legacy no-op (deferred model removed)
 const STATUS_META={none:{cls:'c-none',label:'Paid upfront'},held:{cls:'c-held',label:'Deferred held'},maturing:{cls:'c-maturing',label:'Maturing'},payable:{cls:'c-payable',label:'Payable'},paid:{cls:'c-paid',label:'Paid'}};
@@ -1137,7 +1168,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-48';
+const APP_VERSION='P1RMR-49';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -2929,7 +2960,43 @@ function readForm(){return{
   legacy_full_pay: (editingId ? (((AGREEMENTS.find(a=>a.id===editingId)||{}).legacy_full_pay)!==false) : false),
   billing_log: (EDIT_LOG&&EDIT_LOG.length)?EDIT_LOG:null};}
 let PREVIEW_BASIS='ACV';   // view-only deal-value basis for the live calculation panel (commission always uses the plan basis)
+function calcPanelB(c, B, acvId, tcvId){
+  const tbtn=(id,l,on)=>`<button type="button" id="${id}" style="border:1px solid var(--line);background:${on?'var(--navy)':'#fff'};color:${on?'#fff':'var(--muted)'};border-radius:6px;padding:1px 8px;font-size:11px;font-weight:600;cursor:pointer">${l}</button>`;
+  const gm=c.grossMargin, mPct=gm==null?'—':`${Math.round(gm*1000)/10}%`, floor=c.minMargin!=null?c.minMargin:0.45, floorHit=gm!=null&&gm<floor;
+  const vRev=B==='ACV'?c.acv:c.tcv, vDirect=B==='ACV'?c.directCosts:c.totalDirectCosts, vGP=vRev-vDirect, vOH=B==='ACV'?(c.acv*c.overheadPct):c.overhead, vNet=vRev-vDirect-c.bTotalCommission-vOH;
+  const vRevLabel=B==='ACV'?'Annual revenue (ACV)':`Contract revenue (TCV · ${c.months}mo)`, vDirNote=B==='ACV'?'annual':'full term';
+  const pvVal=B==='ACV'?c.acv:c.tcv, pvLabel=B==='ACV'?'ACV (×12)':`TCV (×${c.months}mo)`;
+  const relTxt = !c.bReachable ? '<span style="color:var(--orange)">not reachable this term — deferred stays pending</span>'
+    : (c.bReleaseQI!=null ? `~${c.bReleaseDate?fmtDate(c.bReleaseDate):qLabel(c.bReleaseQI)} · month ${c.bReleaseMonth} · ${qLabel(c.bReleaseQI)}` : `~month ${c.bReleaseMonth}`);
+  return `<h4 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">Live calculation <span style="font-weight:500;color:var(--none);font-size:11px">plan ${esc(c.planVersion)} · RMR-multiple</span><span style="margin-left:auto;font-weight:500;font-size:11px;color:var(--muted)">view: ${tbtn(acvId,'ACV',B==='ACV')}${tbtn(tcvId,'TCV',B==='TCV')}</span></h4>
+  <div class="pgrid">
+    <div><span>MRR <span style="color:var(--none)">(annual billing ÷ 12)</span></span><b style="font-size:15px">${fmt2(c.mrr)}</b></div>
+    <div><span>${pvLabel}</span><b style="font-size:15px">${fmt(pvVal)}</b></div>
+    <div style="grid-column:1/-1;font-weight:700;color:var(--muted);font-size:11px;letter-spacing:.04em;text-transform:uppercase;margin-top:2px">Margin Engine <span style="text-transform:none;font-weight:500">(flat rate — no margin multiplier)</span></div>
+    <div><span>${vRevLabel}</span><b style="font-size:14px">${fmt(vRev)}</b></div>
+    <div><span>Direct costs <span style="color:var(--none)">(${vDirNote} · labor ${fmt(c.laborCost)})</span></span><b style="font-size:14px">${fmt(vDirect)}</b></div>
+    <div><span>Gross profit</span><b style="font-size:14px">${fmt(vGP)}</b></div>
+    <div><span>Gross margin <span style="color:var(--none)">(floor ${Math.round(floor*100)}%)</span></span><b style="font-size:15px;color:${floorHit?'var(--held)':'var(--paid)'}">${mPct}</b></div>
+    <div><span>Overhead <span style="color:var(--none)">(${Math.round(c.overheadPct*100)}% of ${B} ${fmt(vRev)})</span></span><b style="font-size:14px;color:var(--held)">−${fmt(vOH)}</b></div>
+    <div><span>Net profit <span style="color:var(--none)">(${B==='ACV'?'annual':'full contract'} · after costs · commission · overhead)</span></span><b style="font-size:15px;color:${vNet<0?'var(--held)':'var(--paid)'}">${fmt(vNet)}</b></div>
+    ${floorHit?`<div style="grid-column:1/-1;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:7px 10px;font-size:12px;color:#9a2a2a"><b>⚠ Below minimum margin (${Math.round(floor*100)}%).</b> Commission pays $0 — management approval required.</div>`:''}
+    <div style="grid-column:1/-1;border-top:1px solid var(--line);margin-top:2px;padding-top:6px"></div>
+    <div><span>Commission rate <span style="color:var(--none)">(${Math.round((c.bRmrMultiple||2)*100)}% × MRR)</span></span><b style="font-size:13px;color:var(--muted)">${fmt2(c.mrr)}</b></div>
+    <div><span>Total commission</span><b style="color:var(--payable);font-size:17px">${fmt(c.bTotalCommission)}</b></div>
+    <div><span>Initial payment <span style="color:var(--none)">(${Math.round(c.bInitialPct*100)}% · now)</span></span><b style="color:var(--payable);font-size:15px">${fmt(c.bInitial)}</b></div>
+    <div><span>Deferred payment <span style="color:var(--none)">(${Math.round(c.bDeferredPct*100)}% · held)</span></span><b style="font-size:15px;color:var(--orange)">${fmt(c.bDeferred)}</b></div>
+    <div style="grid-column:1/-1;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.03em;text-transform:uppercase;margin-top:2px">Deferred release — profitability threshold</div>
+    <div><span>Total agreement cost <span style="color:var(--none)">(direct + overhead + commission)</span></span><b style="font-size:14px">${fmt(c.bTotalAgreementCost)}</b></div>
+    <div><span>Revenue required before release</span><b style="font-size:15px">${fmt(c.bThreshold)}</b></div>
+    <div style="grid-column:1/-1"><span>Estimated release <span style="color:var(--none)">(threshold ÷ MRR)</span></span> <b style="font-size:13px">${relTxt}</b></div>
+    <div style="grid-column:1/-1;border-top:1px solid var(--line);margin-top:2px;padding-top:6px"></div>
+    <div><span>Renewal commission <span style="color:var(--none)">(${Math.round(c.bRenewalPct*10000)/100}% of ACV · ${c.isAuto?'auto':'manual'})</span></span><b style="font-size:16px">${fmt(c.renewalCommission)}</b></div>
+    <div><span>Renews</span><b style="font-size:13px">${c.renewalQI!=null?qLabel(c.renewalQI):'set activation date'}</b></div>
+    <div style="grid-column:1/-1;font-size:11px;color:var(--muted)">Renewals split ${Math.round((c.renInitialPct!=null?c.renInitialPct:0.5)*100)}% initial / ${Math.round((c.renDeferredPct!=null?c.renDeferredPct:0.5)*100)}% deferred, each cycle with its own threshold.</div>
+  </div>`;
+}
 function calcPanelHTML(c, B, row, acvId, tcvId){
+  if(c.planType==='B') return calcPanelB(c, B, acvId, tcvId);
   const gm=c.grossMargin;
   const mPct=gm==null?'—':`${Math.round(gm*1000)/10}%`;
   const target=c.targetMargin||0.50,minM=c.minMargin||0.45;
