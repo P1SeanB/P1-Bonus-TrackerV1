@@ -812,6 +812,11 @@ const DEFAULT_CONFIG={
   holdbackThresholdPct:0.25,                                // §3 release once 25% of Year-1 revenue is collected
   accelReleasePct:0.50,                                     // §4 accelerator releases at 50% realized margin (≈50% of revenue billed)
   overheadPct:0.28,                                         // company overhead as % of total contract value (net-profit only)
+  planType:'A',                                             // 'A' margin-tiered (current) · 'B' RMR-multiple + deferred threshold
+  rmrMultiple:2.00,                                         // Type B: commission = rmrMultiple × Monthly RMR (200% = 2×)
+  newInitialPct:0.50, newDeferredPct:0.50,                  // Type B: new-agreement initial/deferred split
+  renInitialPct:0.50, renDeferredPct:0.50,                  // Type B: renewal initial/deferred split
+  bManualRenewalPct:0.04, bAutoRenewalPct:0.01,             // Type B: renewal commission as % of ACV (manual/auto)
   newPct:{12:0.06,24:0.07,36:0.08,48:0.085,60:0.09},        // §3.6 new-agreement matrix
   renewalPct:{12:0.04,24:0.05,36:0.055,48:0.0575,60:0.06},  // §3.6 manual renewal matrix (every renewal)
   autoRenewalPct:{12:0.02,24:0.025},                        // auto-renewal: lower rate, ONE-TIME, only 12/24-mo
@@ -1132,7 +1137,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-47';
+const APP_VERSION='P1RMR-48';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1266,7 +1271,7 @@ async function loadUsers(){
   KNOWN_USERS=[...set].filter(Boolean).sort();
 }
 let ACTIVE_PLAN_ID=null;
-function normalizeConfig(j){ j=j||{}; if(j.targetMargin==null)j.targetMargin=0.50; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='2026 v1.0'; if(!j.basis)j.basis='TCV'; if(!j.autoRenewalPct)j.autoRenewalPct={12:0.02,24:0.025}; if(j.immediatePct==null)j.immediatePct=0.75; if(j.holdbackPct==null)j.holdbackPct=0.25; if(j.holdbackThresholdPct==null)j.holdbackThresholdPct=0.25; if(j.accelReleasePct==null)j.accelReleasePct=0.50; if(j.overheadPct==null)j.overheadPct=0.28; return j; }
+function normalizeConfig(j){ j=j||{}; if(j.targetMargin==null)j.targetMargin=0.50; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='2026 v1.0'; if(!j.basis)j.basis='TCV'; if(!j.autoRenewalPct)j.autoRenewalPct={12:0.02,24:0.025}; if(j.immediatePct==null)j.immediatePct=0.75; if(j.holdbackPct==null)j.holdbackPct=0.25; if(j.holdbackThresholdPct==null)j.holdbackThresholdPct=0.25; if(j.accelReleasePct==null)j.accelReleasePct=0.50; if(j.overheadPct==null)j.overheadPct=0.28; if(!j.planType)j.planType='A'; if(j.rmrMultiple==null)j.rmrMultiple=2.00; if(j.newInitialPct==null)j.newInitialPct=0.50; if(j.newDeferredPct==null)j.newDeferredPct=0.50; if(j.renInitialPct==null)j.renInitialPct=0.50; if(j.renDeferredPct==null)j.renDeferredPct=0.50; if(j.bManualRenewalPct==null)j.bManualRenewalPct=0.04; if(j.bAutoRenewalPct==null)j.bAutoRenewalPct=0.01; return j; }
 async function loadPlans(){   // load EVERY saved plan; pick a default for the editor + fallback. Graceful if table absent.
   try{
     const {data,error}=await sb.from('rmr_commission_plans').select('*').order('modified_at',{ascending:false});
@@ -2081,6 +2086,11 @@ function renderAdmin(){
         <select class="cfg-in wide" id="planPicker">${PLANS.map(p=>`<option value="${esc(String(p.id))}" ${String(p.id)===String(EDIT_PLAN_ID)?'selected':''}>${esc(p.plan_name||p.version||'plan')}${p.is_default?' — default':''}</option>`).join('')}<option value="__new">+ New plan…</option></select>`:''}
         <label class="cfg-lbl">Plan name / version <span style="color:var(--none)">(stamped on every paid snapshot)</span></label>
         <input class="cfg-in wide" id="cfg_plan" value="${esc(c.planVersion||'')}">
+        <label class="cfg-lbl">Plan type</label>
+        <div class="cfg-radios">
+          <label><input type="radio" name="cfg_ptype" value="A" ${c.planType!=='B'?'checked':''}> Margin-tiered <span style="color:var(--none)">(current — rate × basis × margin multiplier)</span></label>
+          <label><input type="radio" name="cfg_ptype" value="B" ${c.planType==='B'?'checked':''}> RMR multiple + deferred threshold</label>
+        </div>
         <label class="cfg-lbl">Commission basis</label>
         <div class="cfg-radios">
           <label><input type="radio" name="cfg_basis" value="TCV" ${c.basis==='TCV'?'checked':''}> TCV — MRR × contract months</label>
@@ -2091,9 +2101,30 @@ function renderAdmin(){
           <div><label class="cfg-lbl">Minimum margin (floor)</label><input class="cfg-in" id="cfg_min" type="number" step="0.5" value="${Math.round(c.minMargin*10000)/100}"> %</div>
         </div>
       </div></div>
-      <div class="panel"><div class="panel-head"><h2>Margin multipliers</h2></div><div class="admin-body">
-        <table class="cfg-table"><thead><tr><th>Margin ≥</th><th>Multiplier</th><th>Tier</th><th>Status</th></tr></thead><tbody>${tierRows}</tbody></table>
+      <div class="panel"><div class="panel-head"><h2>Margin ${c.planType==='B'?'floor':'multipliers'}</h2></div><div class="admin-body">
+        ${c.planType==='B'?`<div style="font-size:12.5px;color:var(--muted);line-height:1.6">This plan uses a flat RMR multiple — no margin multiplier. Gross margin is still calculated and shown, and the <b>minimum-margin floor (${Math.round(c.minMargin*100)}%)</b> above still blocks payout when a deal isn't profitable enough.</div>`:`
+        <table class="cfg-table"><thead><tr><th>Margin ≥</th><th>Multiplier</th><th>Tier</th><th>Status</th></tr></thead><tbody>${tierRows}</tbody></table>`}
       </div></div>
+      ${c.planType==='B'?`
+      <div class="panel"><div class="panel-head"><h2>RMR-multiple commission</h2><span class="qctx">flat · no margin multiplier</span></div><div class="admin-body">
+        <label class="cfg-lbl">Commission rate <span style="color:var(--none)">(% of Monthly RMR · 200% = 2× MRR)</span></label>
+        <input class="cfg-in" id="cfg_rmrmult" type="number" step="1" value="${Math.round(c.rmrMultiple*100)}"> %
+        <div class="cfg-two" style="margin-top:14px">
+          <div><label class="cfg-lbl">New: initial payment</label><input class="cfg-in" id="cfg_newinit" type="number" step="1" value="${Math.round(c.newInitialPct*100)}"> %</div>
+          <div><label class="cfg-lbl">New: deferred payment</label><input class="cfg-in" id="cfg_newdef" type="number" step="1" value="${Math.round(c.newDeferredPct*100)}"> %</div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:10px">Deferred releases once the term's collected revenue covers <b>direct costs + overhead + the full commission</b>.</div>
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Renewals</h2><span class="qctx">% of ACV · own threshold each cycle</span></div><div class="admin-body">
+        <div class="cfg-two">
+          <div><label class="cfg-lbl">Manual renewal</label><input class="cfg-in" id="cfg_bman" type="number" step="0.01" value="${Math.round(c.bManualRenewalPct*10000)/100}"> % of ACV</div>
+          <div><label class="cfg-lbl">Auto renewal</label><input class="cfg-in" id="cfg_bauto" type="number" step="0.01" value="${Math.round(c.bAutoRenewalPct*10000)/100}"> % of ACV</div>
+        </div>
+        <div class="cfg-two" style="margin-top:14px">
+          <div><label class="cfg-lbl">Renewal: initial payment</label><input class="cfg-in" id="cfg_reninit" type="number" step="1" value="${Math.round(c.renInitialPct*100)}"> %</div>
+          <div><label class="cfg-lbl">Renewal: deferred payment</label><input class="cfg-in" id="cfg_rendef" type="number" step="1" value="${Math.round(c.renDeferredPct*100)}"> %</div>
+        </div>
+      </div></div>`:`
       <div class="panel"><div class="panel-head"><h2>New-agreement commission</h2></div><div class="admin-body">
         <table class="cfg-table"><thead><tr><th>Term</th><th>Commission</th></tr></thead><tbody>${pctRows(c.newPct,'newpct')}</tbody></table>
       </div></div>
@@ -2103,7 +2134,7 @@ function renderAdmin(){
       <div class="panel"><div class="panel-head"><h2>Auto-renewal commission</h2><span class="qctx">one-time · 12/24-mo only</span></div><div class="admin-body">
         <table class="cfg-table"><thead><tr><th>Term</th><th>Commission</th></tr></thead><tbody>${[12,24].map(t=>`<tr><td>${t} months</td><td><input class="cfg-in" data-autopct="${t}" type="number" step="0.01" value="${Math.round((c.autoRenewalPct&&c.autoRenewalPct[t]!=null?c.autoRenewalPct[t]:(t===12?0.02:0.025))*10000)/100}"> %</td></tr>`).join('')}</tbody></table>
         <div style="font-size:11px;color:var(--muted);margin-top:8px">36/48/60-month agreements are expected to be renegotiated and earn no auto-renewal commission.</div>
-      </div></div>
+      </div></div>`}
     </div>
     <div class="admin-actions">
       <button class="btn-primary" id="cfgSave">Save plan</button>
@@ -2120,6 +2151,7 @@ function renderAdmin(){
     ${can('editConfig')?`<div class="panel"><div class="panel-head"><h2>User permissions</h2><span class="qctx">roles &amp; commission plan per employee</span></div><div id="usersWrap"><div class="admin-body" style="color:var(--muted);font-size:13px">Loading…</div></div></div>`:''}
     ${can('viewAudit')?`<div class="panel"><div class="panel-head"><h2>Audit log</h2><span class="qctx">immutable · most recent first</span></div><div id="auditWrap"><div class="admin-body" style="color:var(--muted);font-size:13px">Loading…</div></div></div>`:''}`;
   $('cfgSave').onclick=saveAdmin;
+  document.querySelectorAll('input[name=cfg_ptype]').forEach(r=>r.onchange=()=>{ CONFIG.planType=(document.querySelector('input[name=cfg_ptype]:checked')||{}).value||'A'; saveConfig(); renderAdmin(); });
   if($('planPicker')) $('planPicker').onchange=function(){
     if(this.value==='__new'){ const fresh=JSON.parse(JSON.stringify(DEFAULT_CONFIG)); fresh.planVersion='New plan'; CONFIG=fresh; EDIT_PLAN_ID=null; saveConfig(); renderAdmin(); $('cfg_plan').focus(); $('cfg_plan').select(); return; }
     const p=PLANS.find(pp=>String(pp.id)===this.value); if(p){ CONFIG=normalizeConfig(JSON.parse(JSON.stringify(p.config))); EDIT_PLAN_ID=p.id; saveConfig(); renderAdmin(); }
@@ -2230,37 +2262,50 @@ function saveAdmin(){
   const msg=$('cfgMsg'), errs=[];
   if(!can('editConfig')){ msg.style.color='var(--held)'; msg.textContent='Only Administrators can modify the commission plan.'; return; }
   const plan=$('cfg_plan').value.trim()||'unnamed';
+  const planType=(document.querySelector('input[name=cfg_ptype]:checked')||{}).value||'A';
   const basis=(document.querySelector('input[name=cfg_basis]:checked')||{}).value||'TCV';
   const target=(+$('cfg_target').value)/100, min=(+$('cfg_min').value)/100;
   if(isNaN(target)||target<=0||target>1) errs.push('Target margin must be between 0 and 100%.');
   if(isNaN(min)||min<0||min>1) errs.push('Minimum margin must be between 0 and 100%.');
   if(!errs.length && min>target) errs.push('Minimum margin cannot exceed target margin.');
-  const newPct={}, renewalPct={}, autoRenewalPct={};
-  document.querySelectorAll('[data-newpct]').forEach(i=>{const t=+i.dataset.newpct,v=+i.value/100; if(isNaN(v)||v<0)errs.push(`New ${t}-mo % is invalid.`); newPct[t]=v;});
-  document.querySelectorAll('[data-renpct]').forEach(i=>{const t=+i.dataset.renpct,v=+i.value/100; if(isNaN(v)||v<0)errs.push(`Manual renewal ${t}-mo % is invalid.`); renewalPct[t]=v;});
-  document.querySelectorAll('[data-autopct]').forEach(i=>{const t=+i.dataset.autopct,v=+i.value/100; if(isNaN(v)||v<0)errs.push(`Auto-renewal ${t}-mo % is invalid.`); autoRenewalPct[t]=v;});
-  const tiers=CONFIG.marginTiers.map((t,i)=>({
-    min:(+document.querySelector(`[data-tiermin="${i}"]`).value)/100,
-    mult:+document.querySelector(`[data-tiermult="${i}"]`).value,
-    label:document.querySelector(`[data-tierlabel="${i}"]`).value.trim(),
-    status:document.querySelector(`[data-tierstatus="${i}"]`).value.trim()
-  }));
-  tiers.forEach(t=>{ if(isNaN(t.min)||t.min<0||t.min>1)errs.push('A tier margin is out of range.'); if(isNaN(t.mult)||t.mult<0)errs.push('A tier multiplier is invalid.'); });
-  if(errs.length){ msg.style.color='var(--held)'; msg.textContent=errs[0]; return; }
-  tiers.sort((a,b)=>b.min-a.min);
+  const newConf={...CONFIG, planVersion:plan, planType, basis, targetMargin:target, minMargin:min};
+  if(planType==='B'){
+    const mult=(+$('cfg_rmrmult').value)/100, ni=(+$('cfg_newinit').value)/100, nd=(+$('cfg_newdef').value)/100, ri=(+$('cfg_reninit').value)/100, rd=(+$('cfg_rendef').value)/100, bm=(+$('cfg_bman').value)/100, ba=(+$('cfg_bauto').value)/100;
+    if(isNaN(mult)||mult<0) errs.push('Commission rate (% of RMR) is invalid.');
+    if(isNaN(ni)||isNaN(nd)||Math.abs((ni+nd)-1)>0.005) errs.push('New-agreement initial + deferred must add up to 100%.');
+    if(isNaN(ri)||isNaN(rd)||Math.abs((ri+rd)-1)>0.005) errs.push('Renewal initial + deferred must add up to 100%.');
+    if(isNaN(bm)||bm<0||isNaN(ba)||ba<0) errs.push('Renewal % of ACV is invalid.');
+    if(errs.length){ msg.style.color='var(--held)'; msg.textContent=errs[0]; return; }
+    Object.assign(newConf,{rmrMultiple:mult,newInitialPct:ni,newDeferredPct:nd,renInitialPct:ri,renDeferredPct:rd,bManualRenewalPct:bm,bAutoRenewalPct:ba});
+  } else {
+    const newPct={}, renewalPct={}, autoRenewalPct={};
+    document.querySelectorAll('[data-newpct]').forEach(i=>{const t=+i.dataset.newpct,v=+i.value/100; if(isNaN(v)||v<0)errs.push(`New ${t}-mo % is invalid.`); newPct[t]=v;});
+    document.querySelectorAll('[data-renpct]').forEach(i=>{const t=+i.dataset.renpct,v=+i.value/100; if(isNaN(v)||v<0)errs.push(`Manual renewal ${t}-mo % is invalid.`); renewalPct[t]=v;});
+    document.querySelectorAll('[data-autopct]').forEach(i=>{const t=+i.dataset.autopct,v=+i.value/100; if(isNaN(v)||v<0)errs.push(`Auto-renewal ${t}-mo % is invalid.`); autoRenewalPct[t]=v;});
+    const tiers=CONFIG.marginTiers.map((t,i)=>({
+      min:(+document.querySelector(`[data-tiermin="${i}"]`).value)/100,
+      mult:+document.querySelector(`[data-tiermult="${i}"]`).value,
+      label:document.querySelector(`[data-tierlabel="${i}"]`).value.trim(),
+      status:document.querySelector(`[data-tierstatus="${i}"]`).value.trim()
+    }));
+    tiers.forEach(t=>{ if(isNaN(t.min)||t.min<0||t.min>1)errs.push('A tier margin is out of range.'); if(isNaN(t.mult)||t.mult<0)errs.push('A tier multiplier is invalid.'); });
+    if(errs.length){ msg.style.color='var(--held)'; msg.textContent=errs[0]; return; }
+    tiers.sort((a,b)=>b.min-a.min);
+    Object.assign(newConf,{newPct,renewalPct,autoRenewalPct,marginTiers:tiers});
+  }
   const isNew=(EDIT_PLAN_ID==null);
   const assigned=Object.values(USER_PLAN).filter(pid=>String(pid)===String(EDIT_PLAN_ID)).length;
   const who=isNew?'a new plan':(assigned?`"${plan}" (${assigned} rep${assigned===1?'':'s'} assigned)`:`"${plan}"`);
   if(!confirm(`Save ${who}? This reprices every UNPAID commission for reps on this plan. Already-paid commissions stay frozen.`)) return;
-  const before={planVersion:CONFIG.planVersion,basis:CONFIG.basis,newPct:CONFIG.newPct,renewalPct:CONFIG.renewalPct};
-  CONFIG={planVersion:plan,basis,targetMargin:target,minMargin:min,newPct,renewalPct,autoRenewalPct,marginTiers:tiers};
+  const before={planVersion:CONFIG.planVersion,planType:CONFIG.planType,basis:CONFIG.basis};
+  CONFIG=newConf;
   saveConfig();
   msg.style.color='var(--muted)'; msg.textContent='Saving…';
   persistPlan(CONFIG,EDIT_PLAN_ID,false).then(r=>{
     if(r.ok){ EDIT_PLAN_ID=r.id; msg.style.color='var(--payable)'; msg.textContent=isNew?'✓ New plan created — assign it to reps in User permissions.':'✓ Saved — unpaid commissions for this plan have repriced.'; renderAdmin(); render(); }
     else { msg.style.color='var(--orange)'; msg.textContent=r.err?('Saved locally only — '+r.err):'✓ Saved locally. Run migration to share across users.'; }
   });
-  audit(isNew?'Commission plan created':'Commission plan modified','Admin',null,before,{planVersion:plan,basis,newPct,renewalPct},null);
+  audit(isNew?'Commission plan created':'Commission plan modified','Admin',null,before,{planVersion:plan,planType,basis},null);
   toast('Commission plan saved');
 }
 function renderLegend(){
