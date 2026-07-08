@@ -1168,7 +1168,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-49';
+const APP_VERSION='P1RMR-50';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1491,13 +1491,14 @@ function renderQuarter(){
   lines.sort((x,y)=>y.amount-x.amount);
   const pieceRow=(l)=>{
     const st=l.paid?'paid':'payable',meta=STATUS_META[st];
-    const TAGS={renewal:['Renewal','#e7f3ee','var(--payable)'],immediate:['Standard 75%','#eef1f6','var(--navy)'],holdback:['Holdback 25%','#fff4e8','var(--orange)'],accelerator:[l.accelseq?`Accelerator ${l.accelseq}`:'Accelerator','#f0ecff','#5a3fb8'],initial:['Initial','#eef1f6','var(--navy)']};
+    const isB=l.c&&l.c.planType==='B';
+    const TAGS={renewal:['Renewal','#e7f3ee','var(--payable)'],immediate:[isB?`Initial ${Math.round((l.c.bInitialPct||0.5)*100)}%`:'Standard 75%','#eef1f6','var(--navy)'],holdback:[isB?`Deferred ${Math.round((l.c.bDeferredPct||0.5)*100)}%`:'Holdback 25%','#fff4e8','var(--orange)'],accelerator:[l.accelseq?`Accelerator ${l.accelseq}`:'Accelerator','#f0ecff','#5a3fb8'],initial:['Initial','#eef1f6','var(--navy)']};
     const tg=TAGS[l.type]||TAGS.initial;
     const typeTag=`<span class="type-tag" style="background:${tg[1]};color:${tg[2]}">${tg[0]}</span>`;
     const dateTxt=
       l.type==='renewal' ? `${l.auto?'auto-renew':('manual'+(l.cycle?` · cycle ${l.cycle}`:''))}`
-      : l.type==='immediate' ? '75% at activation'
-      : l.type==='holdback' ? `releases ${l.c.holdbackQI!=null?qLabel(l.c.holdbackQI):'pending collection'}`
+      : l.type==='immediate' ? (isB?'initial · paid now':'75% at activation')
+      : l.type==='holdback' ? (isB?`deferred → ${l.c.holdbackQI!=null?qLabel(l.c.holdbackQI):(l.c.bReachable?'threshold':'pending')} · profitability threshold`:`releases ${l.c.holdbackQI!=null?qLabel(l.c.holdbackQI):'pending collection'}`)
       : l.type==='accelerator' ? `installment ${l.accelseq}, as collected`
       : 'at activation';
     const btn=can('editAgreements')
@@ -1756,7 +1757,8 @@ function forecastList(){
 function payoutScheduleHTML(a){
   const c=compute(a);
   const rows=historyLedger().filter(r=>r.a.id===a.id).slice().sort((x,y)=>String(x.date||'zzzz').localeCompare(String(y.date||'zzzz')));
-  const SRC={immediate:'75% at signing',holdback:'releases once 25% of Year-1 is collected',accel:'releases as revenue is collected',renewal:'paid in full when renewed',initial:'at activation'};
+  const isB=c.planType==='B';
+  const SRC=isB?{immediate:'initial — paid now',holdback:'deferred — releases at profitability threshold',accel:'',renewal:'paid in full when renewed',initial:'at activation'}:{immediate:'75% at signing',holdback:'releases once 25% of Year-1 is collected',accel:'releases as revenue is collected',renewal:'paid in full when renewed',initial:'at activation'};
   const line=(ds,label,amt,src,paid,qi)=>`<div style="display:flex;align-items:baseline;gap:10px;padding:4px 0;border-top:1px dashed var(--line)"><span class="mono" style="min-width:96px;color:var(--muted)">${ds||'—'}</span><span style="flex:1;min-width:150px">${label} <span style="color:var(--muted);font-size:11px">— ${src||''}</span></span><span class="mono" style="min-width:60px;color:var(--muted);font-size:11px">${qi!=null?qLabel(qi):''}</span><b class="mono" style="min-width:70px;text-align:right">${fmt(amt)}</b><span class="chip ${paid?'c-paid':'c-payable'}" style="font-size:9px">${paid?'paid':'pending'}</span></div>`;
   let html=`<div style="font-size:12.5px"><div style="font-weight:700;margin-bottom:2px">Full payout schedule — #${esc(a.agreement_number||'')} ${esc(a.customer_name||'')}</div><div style="color:var(--muted);font-size:11px;margin-bottom:4px">Signed ${a.activation_date?esc(String(a.activation_date).slice(0,10)):'—'} · First billing ${a.first_billing_date?esc(String(a.first_billing_date).slice(0,10)):'same as signing'} · total commission ${fmt(c.legacyFull?c.initialCommission:(c.immediateCommission+c.holdbackCommission+c.acceleratorHeld))}</div>`;
   if(!rows.length) html+='<div class="file-hint">No commission pieces yet.</div>';
@@ -1811,7 +1813,7 @@ function upcomingReleases(){
   const out=[];
   historyLedger().forEach(r=>{
     if(r.paid) return;
-    if(r.piece==='holdback') out.push({date:r.date,qi:r.qi,amount:r.amount,type:'Holdback',certainty:'collection',pending:r.qi==null,a:r.a});
+    if(r.piece==='holdback') out.push({date:r.date,qi:r.qi,amount:r.amount,type:(r.a&&compute(r.a).planType==='B')?'Deferred':'Holdback',certainty:'collection',pending:r.qi==null,a:r.a});
     else if(r.piece==='accel') out.push({date:r.date,qi:r.qi,amount:r.amount,type:'Accelerator',certainty:'collection',pending:r.qi==null,a:r.a});
     else if(r.piece==='renewal') out.push({date:r.date,qi:r.qi,amount:r.amount,type:'Renewal',certainty:'signed',pending:false,a:r.a});
   });
@@ -1826,9 +1828,9 @@ function qUpcomingDetail(key, list){
   if(!list||!list.length) return '';
   const label=key==='pending'?'Pending collection':qLabel(+key);
   const tot=list.reduce((s,r)=>s+r.amount,0);
-  const typeChip=t=>{const M={Holdback:['#fff4e8','var(--orange)'],Accelerator:['#f0ecff','#5a3fb8'],Renewal:['#e7f3ee','var(--payable)']};const m=M[t]||['','var(--ink)'];return `<span class="chip" style="background:${m[0]};color:${m[1]};font-size:10px">${t}</span>`;};
+  const typeChip=t=>{const M={Holdback:['#fff4e8','var(--orange)'],Deferred:['#fff4e8','var(--orange)'],Accelerator:['#f0ecff','#5a3fb8'],Renewal:['#e7f3ee','var(--payable)']};const m=M[t]||['','var(--ink)'];return `<span class="chip" style="background:${m[0]};color:${m[1]};font-size:10px">${t}</span>`;};
   const tag=c=>c==='collection'?'<span class="chip c-payable" style="font-size:9px">collection-driven</span>':c==='signed'?'<span class="chip c-paid" style="font-size:9px">signed</span>':'<span class="chip c-maturing" style="font-size:9px">forecast</span>';
-  const src=r=>r.type==='Holdback'?'releases once 25% of Year-1 is collected':r.type==='Accelerator'?'released as revenue is collected':'renewal — a rep still signs it';
+  const src=r=>r.type==='Holdback'?'releases once 25% of Year-1 is collected':r.type==='Deferred'?'releases at the profitability threshold':r.type==='Accelerator'?'released as revenue is collected':'renewal — a rep still signs it';
   const rows=list.slice().sort((a,b)=>b.amount-a.amount).map(r=>`<div style="display:flex;align-items:baseline;gap:10px;padding:5px 0;border-top:1px dashed var(--line);flex-wrap:wrap">
     <span class="ag-no" style="min-width:52px">#${esc(r.a.agreement_number||'—')}</span>
     <span style="flex:1;min-width:150px">${esc(r.a.customer_name||'—')}</span>
@@ -1850,7 +1852,7 @@ function renderQuarterUpcoming(selQI){
   const keys=Object.keys(groups).filter(k=>k!=='pending').map(Number).sort((a,b)=>a-b).slice(0,6);
   const validKeys=keys.map(String).concat(groups.pending?['pending']:[]);
   if(QUP_OPEN!=null && !validKeys.includes(String(QUP_OPEN))) QUP_OPEN=null;
-  const card=(key,label,list,note)=>{ const by={Holdback:0,Accelerator:0,Renewal:0}; list.forEach(r=>by[r.type]+=r.amount);
+  const card=(key,label,list,note)=>{ const by={}; list.forEach(r=>{by[r.type]=(by[r.type]||0)+r.amount;});
     const parts=Object.entries(by).filter(([,v])=>v>0).map(([k,v])=>`${k} ${fmt(v)}`).join(' · '); const tot=list.reduce((s,r)=>s+r.amount,0);
     const active=String(QUP_OPEN)===String(key);
     return `<div class="stat" data-qcard="${key}" style="min-width:200px;cursor:pointer${active?';outline:2px solid var(--orange);outline-offset:-1px':''}"><div class="lbl">${label} <span style="color:var(--orange)">${active?'▾':'▸'}</span></div><div class="val" style="font-size:20px">${fmt(tot)}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">${parts}${note?` · <span style="color:var(--orange)">${note}</span>`:''}</div></div>`;
@@ -1870,7 +1872,7 @@ function renderUpcomingReleases(){
   $('repRelCount').textContent=`${rel.length} release${rel.length===1?'':'s'} · held & forecast, soonest first`;
   if(!rel.length){ wrap.innerHTML=`<div class="empty"><b>Nothing upcoming</b>Held and forecast releases appear here once agreements have holdbacks, accelerators, or renewals ahead.</div>`; return; }
   const tag=c=>c==='collection'?'<span class="chip c-payable" style="font-size:9px">collection-driven</span>':c==='signed'?'<span class="chip c-paid" style="font-size:9px">signed</span>':'<span class="chip c-maturing" style="font-size:9px">forecast</span>';
-  const typeChip=t=>{const M={Holdback:['#fff4e8','var(--orange)'],Accelerator:['#f0ecff','#5a3fb8'],Renewal:['#e7f3ee','var(--payable)']};const m=M[t]||['','var(--ink)'];return `<span class="chip" style="background:${m[0]};color:${m[1]};font-size:10px">${t}</span>`;};
+  const typeChip=t=>{const M={Holdback:['#fff4e8','var(--orange)'],Deferred:['#fff4e8','var(--orange)'],Accelerator:['#f0ecff','#5a3fb8'],Renewal:['#e7f3ee','var(--payable)']};const m=M[t]||['','var(--ink)'];return `<span class="chip" style="background:${m[0]};color:${m[1]};font-size:10px">${t}</span>`;};
   const cols=[
     {key:'num',label:'Agr #',type:'num',get:r=>{const m=String(r.a.agreement_number||'').match(/\d+/);return m?+m[0]:null;},cell:r=>`<td class="ag-no">#${esc(r.a.agreement_number||'—')}</td>`},
     {key:'date',label:'Release date',type:'date',get:r=>r.pending?null:String(r.date||'').slice(0,10),cell:r=>`<td class="mono" style="color:var(--muted)">${r.pending?'<span style="color:var(--orange)">pending</span>':esc(String(r.date||'').slice(0,10))}</td>`},
@@ -2043,8 +2045,11 @@ function historyLedger(){
     if(c.legacyFull){
       if(c.initialCommission>0||a.paid_initial) rows.push(mkLedgerRow(a,c,'Initial','Initial','initial',(a.paid_initial&&a.initial_snapshot)?a.initial_snapshot:null,!!a.paid_initial,c.initialQI,iso(a.activation_date),c.initialCommission,c.newPct,false));
     } else {
-      if(c.immediateCommission>0||a.paid_immediate) rows.push(mkLedgerRow(a,c,'Standard 75%','Standard','immediate',(a.paid_immediate&&a.immediate_snapshot)?a.immediate_snapshot:null,!!a.paid_immediate,c.initialQI,iso(a.activation_date),c.immediateCommission,c.newPct,false));
-      if(c.holdbackCommission>0||a.paid_holdback) rows.push(mkLedgerRow(a,c,'Holdback 25%','Holdback','holdback',(a.paid_holdback&&a.holdback_snapshot)?a.holdback_snapshot:null,!!a.paid_holdback,c.holdbackQI,iso(c.holdbackReleaseDate),c.holdbackCommission,c.newPct,false));
+      const isB=c.planType==='B';
+      const immLbl=isB?`Initial ${Math.round((c.bInitialPct||0.5)*100)}%`:'Standard 75%';
+      const defLbl=isB?`Deferred ${Math.round((c.bDeferredPct||0.5)*100)}%`:'Holdback 25%';
+      if(c.immediateCommission>0||a.paid_immediate) rows.push(mkLedgerRow(a,c,immLbl,'Standard','immediate',(a.paid_immediate&&a.immediate_snapshot)?a.immediate_snapshot:null,!!a.paid_immediate,c.initialQI,iso(a.activation_date),c.immediateCommission,c.newPct,false));
+      if(c.holdbackCommission>0||a.paid_holdback) rows.push(mkLedgerRow(a,c,defLbl,'Holdback','holdback',(a.paid_holdback&&a.holdback_snapshot)?a.holdback_snapshot:null,!!a.paid_holdback,c.holdbackQI,iso(c.holdbackReleaseDate),c.holdbackCommission,c.newPct,false));
       (c.acceleratorPieces||[]).forEach(p=>{ const pd=(a.accel_paid&&a.accel_paid[p.seq])||null; const paid=!!(pd&&pd.paid); const amt=(paid&&pd.snapshot)?+pd.snapshot.amount:p.amount;
         if(amt>0||paid) rows.push({a,type:`Accelerator ${p.seq}`,cat:'Accelerator',piece:'accel',paid,frozen:paid,pending:false,date:paid?(pd.paid_date):(p.releaseDate?iso(p.releaseDate):null),qi:p.qi,term:c.term,commissionable:null,margin:c.grossMargin,rate:c.newPct,mult:c.marginMultiplier,amount:amt,plan:c.planVersion,seq:p.seq}); });
     }
