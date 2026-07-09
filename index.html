@@ -1052,13 +1052,18 @@ function compute(a,plan){
     const bInit=totalComm*niPct, bDef=totalComm*(1-niPct);
     const annualOverheadB=acv*(cfg.overheadPct!=null?cfg.overheadPct:0.28);  // overhead on ANNUAL basis
     const annualDirectB=directCosts;                                        // annual direct costs
-    const thresholdB=annualDirectB+annualOverheadB+totalComm;               // Total Agreement Cost = revenue required before deferred releases
-    const relMonthB = mrr>0 ? Math.ceil(thresholdB/mrr) : null;             // forecast month (steady collection)
-    const reachableB = thresholdB<=tcv;                                     // can this term's revenue ever cover it?
+    const totalAgreementCostB=annualDirectB+annualOverheadB+totalComm;      // full cost of the deal (informational)
+    // Option 2 — deferred releases when the deal turns NET-PROFITABLE: direct costs are covered month-to-month as
+    // revenue arrives, so cumulative GROSS PROFIT (revenue − direct) only needs to cover overhead + the full commission.
+    const recoveryTargetB=annualOverheadB+totalComm;                        // what accumulated gross profit must cover
+    const gpPerMonthB=grossProfit/12;                                       // monthly gross profit = (ACV − direct) / 12
+    const relMonthB = gpPerMonthB>0 ? Math.ceil(recoveryTargetB/gpPerMonthB) : null;   // month net profit crosses zero
+    const reachableB = gpPerMonthB>0 && recoveryTargetB <= grossProfit*(term/12);       // enough gross profit over the term
+    const revForReleaseB = (grossMargin&&grossMargin>0) ? recoveryTargetB/grossMargin : null;  // collected revenue that yields that gross profit
     const blogB=(Array.isArray(a.billing_log)&&a.billing_log.length)?a.billing_log:null;
     let relDateB=null, relQIB=null;
-    if(a.activation_date){ const bd=new Date((a.first_billing_date||a.activation_date)+'T00:00:00'); const rb=isNaN(bd)?new Date(a.activation_date+'T00:00:00'):bd;
-      if(!isNaN(rb)){ relDateB = blogB ? billingLogReleaseDate(blogB, thresholdB) : (relMonthB!=null?addMonths(rb, relMonthB):null); relQIB = relDateB?qIndexFromYM(relDateB.getFullYear(),relDateB.getMonth()):null; } }
+    if(a.activation_date && relMonthB!=null){ const bd=new Date((a.first_billing_date||a.activation_date)+'T00:00:00'); const rb=isNaN(bd)?new Date(a.activation_date+'T00:00:00'):bd;
+      if(!isNaN(rb)){ relDateB = (blogB&&revForReleaseB!=null) ? billingLogReleaseDate(blogB, revForReleaseB) : addMonths(rb, relMonthB); relQIB = relDateB?qIndexFromYM(relDateB.getFullYear(),relDateB.getMonth()):null; } }
     const renPctB = isAuto ? (cfg.bAutoRenewalPct!=null?cfg.bAutoRenewalPct:0.01) : (cfg.bManualRenewalPct!=null?cfg.bManualRenewalPct:0.04);
     const renCommB = (eligibleB && !noRenewal && term>0) ? renPctB*acv : 0;
     // map onto the fields the current renderers read (Phase 3 refines labels), plus Type-B extras for the dashboard
@@ -1069,7 +1074,8 @@ function compute(a,plan){
     R.holdbackReleaseDate=relDateB; R.holdbackQI=relQIB;
     R.renewalCommission=renCommB; R.renewMult=renPctB; R.baseCommissionRenewal=renCommB;
     R.bTotalCommission=totalComm; R.bInitial=bInit; R.bDeferred=bDef; R.bInitialPct=niPct; R.bDeferredPct=1-niPct;
-    R.bAnnualDirect=annualDirectB; R.bAnnualOverhead=annualOverheadB; R.bTotalAgreementCost=thresholdB; R.bThreshold=thresholdB;
+    R.bAnnualDirect=annualDirectB; R.bAnnualOverhead=annualOverheadB; R.bTotalAgreementCost=totalAgreementCostB;
+    R.bRecoveryTarget=recoveryTargetB; R.bMonthlyGP=gpPerMonthB; R.bRevForRelease=revForReleaseB; R.bThreshold=recoveryTargetB;
     R.bReleaseMonth=relMonthB; R.bReachable=reachableB; R.bReleaseDate=relDateB; R.bReleaseQI=relQIB;
     R.bRenewalPct=renPctB; R.bEligible=eligibleB; R.bRmrMultiple=(cfg.rmrMultiple!=null?cfg.rmrMultiple:2); R.renInitialPct=(cfg.renInitialPct!=null?cfg.renInitialPct:0.5); R.renDeferredPct=(cfg.renDeferredPct!=null?cfg.renDeferredPct:0.5);
   } else { R.planType='A'; }
@@ -1171,7 +1177,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-51';
+const APP_VERSION='P1RMR-52';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -2993,10 +2999,11 @@ function calcPanelB(c, B, acvId, tcvId){
     <div><span>Total commission</span><b style="color:var(--payable);font-size:17px">${fmt(c.bTotalCommission)}</b></div>
     <div><span>Initial payment <span style="color:var(--none)">(${Math.round(c.bInitialPct*100)}% · now)</span></span><b style="color:var(--payable);font-size:15px">${fmt(c.bInitial)}</b></div>
     <div><span>Deferred payment <span style="color:var(--none)">(${Math.round(c.bDeferredPct*100)}% · held)</span></span><b style="font-size:15px;color:var(--orange)">${fmt(c.bDeferred)}</b></div>
-    <div style="grid-column:1/-1;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.03em;text-transform:uppercase;margin-top:2px">Deferred release — profitability threshold</div>
+    <div style="grid-column:1/-1;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.03em;text-transform:uppercase;margin-top:2px">Deferred release — when the deal turns net-profitable</div>
     <div><span>Total agreement cost <span style="color:var(--none)">(direct + overhead + commission)</span></span><b style="font-size:14px">${fmt(c.bTotalAgreementCost)}</b></div>
-    <div><span>Revenue required before release</span><b style="font-size:15px">${fmt(c.bThreshold)}</b></div>
-    <div style="grid-column:1/-1"><span>Estimated release <span style="color:var(--none)">(threshold ÷ MRR)</span></span> <b style="font-size:13px">${relTxt}</b></div>
+    <div><span>Gross profit needed to release <span style="color:var(--none)">(overhead + commission)</span></span><b style="font-size:15px">${fmt(c.bRecoveryTarget)}</b></div>
+    <div><span>Monthly gross profit <span style="color:var(--none)">(revenue − direct costs)</span></span><b style="font-size:14px">${fmt(c.bMonthlyGP)}<span style="font-size:11px;color:var(--muted)">/mo</span></b></div>
+    <div style="grid-column:1/-1"><span>Estimated release <span style="color:var(--none)">(month net profit turns positive)</span></span> <b style="font-size:13px">${relTxt}</b></div>
     <div style="grid-column:1/-1;border-top:1px solid var(--line);margin-top:2px;padding-top:6px"></div>
     <div><span>Renewal commission <span style="color:var(--none)">(${Math.round(c.bRenewalPct*10000)/100}% of ACV · ${c.isAuto?'auto':'manual'})</span></span><b style="font-size:16px">${fmt(c.renewalCommission)}</b></div>
     <div><span>Renews</span><b style="font-size:13px">${c.renewalQI!=null?qLabel(c.renewalQI):'set activation date'}</b></div>
@@ -3208,7 +3215,8 @@ function typeBGuideHTML(plan){
   const man=plan.bManualRenewalPct!=null?plan.bManualRenewalPct:0.04, aut=plan.bAutoRenewalPct!=null?plan.bAutoRenewalPct:0.01;
   const floor=plan.minMargin!=null?plan.minMargin:0.45, ohp=plan.overheadPct!=null?plan.overheadPct:0.28;
   const money=n=>'$'+Math.round(n).toLocaleString(), pctv=v=>Math.round(v*10000)/100+'%';
-  const mrr=100, acv=1200, direct=400, total=mult*mrr, init=total*ni, def=total*nd, oh=acv*ohp, threshold=direct+oh+total, month=Math.max(1,Math.ceil(threshold/mrr));
+  const mrr=100, acv=1200, direct=400, total=mult*mrr, init=total*ni, def=total*nd, oh=acv*ohp, threshold=direct+oh+total;
+  const gp=(acv-direct)/12, recovery=oh+total, month=Math.max(1,Math.ceil(recovery/gp));   // Option 2: net-profitable month
   return `
   <h3>The big idea</h3>
   <p>On this plan your commission is a <b>flat multiple of the monthly RMR</b> — how profitable the deal is doesn't scale it up or down. Part is paid up front and part is <b>deferred</b> until the agreement proves it's profitable.</p>
@@ -3217,14 +3225,14 @@ function typeBGuideHTML(plan){
   <p>Every commission — new deals and renewals — splits into two payments:</p>
   <table class="guide-table"><thead><tr><th>Piece</th><th>How much</th><th>When it lands</th></tr></thead><tbody>
     <tr><td><b>Initial</b></td><td>${Math.round(ni*100)}% of the commission</td><td>Paid now — the quarter you sell it</td></tr>
-    <tr><td><b>Deferred</b></td><td>${Math.round(nd*100)}% of the commission</td><td>Released once the deal crosses its profitability threshold</td></tr>
+    <tr><td><b>Deferred</b></td><td>${Math.round(nd*100)}% of the commission</td><td>Released once the deal turns net-profitable</td></tr>
   </tbody></table>
   <div class="guide-callout">Example — a <b>$100/mo</b> deal earns <b>${money(total)}</b>: <b>${money(init)} now</b> and <b>${money(def)} deferred</b>.</div>
-  <h3>When the deferred releases — the profitability threshold</h3>
-  <p>The deferred half is held until the agreement has collected enough revenue to cover <b>everything it costs</b>, so releasing it never pushes the deal into a loss.</p>
-  <div class="guide-callout"><b>Threshold = annual direct costs + overhead (${Math.round(ohp*100)}% of ACV) + the full commission.</b></div>
-  <p style="font-size:12.5px;color:var(--muted)">Example — $100/mo, ${money(direct)} annual direct costs, ACV ${money(acv)}: ${money(direct)} + ${money(oh)} overhead + ${money(total)} commission = <b>${money(threshold)}</b>. Once collections reach ${money(threshold)} — about <b>month ${month}</b> at $100/mo — the ${money(def)} deferred releases as a single payment. If the deal ends first, the deferred stays pending.</p>
-  <p>Each agreement shows its <b>Total agreement cost</b>, <b>revenue required before release</b>, and <b>estimated release month</b>.</p>
+  <h3>When the deferred releases — when the deal turns net-profitable</h3>
+  <p>Direct costs are covered month to month as revenue comes in, so they don't have to be "re-collected." The deferred half releases once the deal's <b>gross profit</b> (revenue minus direct costs) has covered its <b>overhead + the full commission</b> — the month the account becomes net-profitable. Paying it then can never push the deal into a loss.</p>
+  <div class="guide-callout"><b>Releases once gross profit covers overhead (${Math.round(ohp*100)}% of ACV) + the full commission.</b></div>
+  <p style="font-size:12.5px;color:var(--muted)">Example — $100/mo, ACV ${money(acv)}, ${money(direct)} annual direct: gross profit accrues at ~${money(gp)}/mo and needs to cover ${money(oh)} overhead + ${money(total)} commission = <b>${money(recovery)}</b> → about <b>month ${month}</b>, when the deal turns net-profitable and the ${money(def)} deferred releases in one payment. If the deal ends first, the deferred stays pending.</p>
+  <p>Each agreement shows its <b>total agreement cost</b>, the <b>gross profit needed to release</b>, and the <b>estimated net-profitable month</b>.</p>
   <h3>Renewals</h3>
   <p>Renewals earn a % of ACV — <b>Manual ${pctv(man)}</b>, <b>Auto ${pctv(aut)}</b> — split into initial (${Math.round(ri*100)}%) and deferred (${Math.round(rd*100)}%) like new deals. Each renewal cycle gets its <b>own</b> profitability threshold (that renewal's costs + that renewal's commission), so every term stands on its own.</p>
   <h3>Margin floor</h3>
