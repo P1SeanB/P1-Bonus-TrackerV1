@@ -907,6 +907,34 @@ function billingLogReleaseDate(log,threshold){   // date collection crosses thre
   for(const e of sorted){ if(e.status==='unpaid') continue; cum+=(+e.amount||0); if(cum>=threshold-1e-6) return new Date(String(e.date).slice(0,10)+'T00:00:00'); }
   return null;   // not enough collected yet → held until it catches up
 }
+function laborAtMonth(m, rows, rate, repeat){    // scheduled inspection/PM labor $ landing in month m (from first billing)
+  let s=0;
+  for(const r of (rows||[])){ const rm=+r.month||0, hrs=+r.hours||0; if(rm<1||hrs<=0) continue;
+    const oneTime=/one[\s-]?time|once/i.test(r.label||'')||rm>12||!repeat;
+    if(oneTime){ if(m===rm) s+=hrs*rate; } else if(m>=rm && ((m-rm)%12===0)) s+=hrs*rate; }
+  return s;
+}
+function typeBRelease(a, opts){   // walk months: cumulative gross profit (rev − monthly recurring direct − scheduled labor) vs target
+  const {term, rb, target, recurMo, rate, rows, repeat, invByMonth, blog}=opts;
+  if(!(target>0)||!rb||isNaN(rb)) return {month:null,date:null};
+  const now=new Date();
+  const revAtM=(m)=>{ const mDate=addMonths(rb,m-1), sched=invByMonth[m]||0;
+    if(!blog) return sched;
+    let matched=0, any=false;
+    for(const e of blog){ if(!e||!e.date)continue; const d=new Date(String(e.date).slice(0,10)+'T00:00:00'); if(isNaN(d))continue;
+      if(d.getFullYear()===mDate.getFullYear()&&d.getMonth()===mDate.getMonth()){ any=true; if(logEffectivePaid(e)) matched+=(+e.amount||0); } }
+    if(any) return matched;                       // log covers this month → a missed (unpaid) invoice counts as $0, delaying release
+    return (mDate>now)?sched:0; };                // no entry: future assume scheduled, past nothing
+  let cum=0;
+  for(let m=1;m<=term;m++){ cum += revAtM(m) - recurMo - laborAtMonth(m,rows,rate,repeat);
+    if(cum>=target-1e-6) return {month:m, date:addMonths(rb,m-1)}; }
+  return {month:null,date:null};                  // never turns net-profitable within the term → deferred stays pending
+}
+function hasMissedBilling(a){   // a past invoice the customer didn't pay (manually marked unpaid) → deferred commission at risk
+  const log=a&&Array.isArray(a.billing_log)?a.billing_log:null; if(!log)return false;
+  const t=todayISO();
+  return log.some(e=>e&&e.status==='unpaid'&&String(e.date||'').slice(0,10)<=t);
+}
 async function patchAccelPiece(id,seq,val){
   if(!can('editAgreements')){ toast('Your role cannot mark commissions paid.'); return; }
   const a=AGREEMENTS.find(x=>x.id===id); if(!a)return;
@@ -1060,14 +1088,18 @@ function compute(a,plan){
     // Option 2 — deferred releases when the deal turns NET-PROFITABLE: direct costs are covered month-to-month as
     // revenue arrives, so cumulative GROSS PROFIT (revenue − direct) only needs to cover overhead + the full commission.
     const recoveryTargetB=annualOverheadB+totalComm;                        // what accumulated gross profit must cover
-    const gpPerMonthB=grossProfit/12;                                       // monthly gross profit = (ACV − direct) / 12
-    const relMonthB = gpPerMonthB>0 ? Math.ceil(recoveryTargetB/gpPerMonthB) : null;   // month net profit crosses zero
-    const reachableB = gpPerMonthB>0 && recoveryTargetB <= grossProfit*(term/12);       // enough gross profit over the term
-    const revForReleaseB = (grossMargin&&grossMargin>0) ? recoveryTargetB/grossMargin : null;  // collected revenue that yields that gross profit
+    const gpPerMonthB=grossProfit/12;                                       // avg monthly gross profit (display only)
+    const _rowsB=(a.labor_schedule&&Array.isArray(a.labor_schedule.rows))?a.labor_schedule.rows:[];
+    const _repeatB=a.labor_schedule?(a.labor_schedule.repeat!==false):true;
+    const recurDirectMoB=(directCosts-laborCost)/12;                        // recurring non-labor direct, spread monthly
+    const bLumpyB=_rowsB.some(r=>(+r.hours>0)&&(+r.month>0));                // has dated inspection/PM labor
     const blogB=(Array.isArray(a.billing_log)&&a.billing_log.length)?a.billing_log:null;
-    let relDateB=null, relQIB=null;
-    if(a.activation_date && relMonthB!=null){ const bd=new Date((a.first_billing_date||a.activation_date)+'T00:00:00'); const rb=isNaN(bd)?new Date(a.activation_date+'T00:00:00'):bd;
-      if(!isNaN(rb)){ relDateB = (blogB&&revForReleaseB!=null) ? billingLogReleaseDate(blogB, revForReleaseB) : addMonths(rb, relMonthB); relQIB = relDateB?qIndexFromYM(relDateB.getFullYear(),relDateB.getMonth()):null; } }
+    let relDateB=null, relQIB=null, relMonthB=null, reachableB=false;
+    { const bd=new Date(String(a.first_billing_date||a.activation_date||'').slice(0,10)+'T00:00:00'); const rb=isNaN(bd)?null:bd;
+      if(rb){ const invB={}; scheduledInvoiceAmounts(a).forEach(x=>{invB[x.m]=x.amount;});
+        const w=typeBRelease(a,{term,rb,target:recoveryTargetB,recurMo:recurDirectMoB,rate,rows:_rowsB,repeat:_repeatB,invByMonth:invB,blog:blogB});
+        relMonthB=w.month; reachableB=(w.month!=null); relDateB=w.date; relQIB=relDateB?qIndexFromYM(relDateB.getFullYear(),relDateB.getMonth()):null; } }
+    const revForReleaseB=(grossMargin&&grossMargin>0)?recoveryTargetB/grossMargin:null;
     const renPctB = isAuto ? (cfg.bAutoRenewalPct!=null?cfg.bAutoRenewalPct:0.01) : (cfg.bManualRenewalPct!=null?cfg.bManualRenewalPct:0.04);
     const renCommB = (eligibleB && !noRenewal && term>0) ? renPctB*acv : 0;
     // map onto the fields the current renderers read (Phase 3 refines labels), plus Type-B extras for the dashboard
@@ -1082,6 +1114,7 @@ function compute(a,plan){
     R.bRecoveryTarget=recoveryTargetB; R.bMonthlyGP=gpPerMonthB; R.bRevForRelease=revForReleaseB; R.bThreshold=recoveryTargetB;
     R.bReleaseMonth=relMonthB; R.bReachable=reachableB; R.bReleaseDate=relDateB; R.bReleaseQI=relQIB;
     R.bRenewalPct=renPctB; R.bEligible=eligibleB; R.bRmrMultiple=(cfg.rmrMultiple!=null?cfg.rmrMultiple:2); R.renInitialPct=(cfg.renInitialPct!=null?cfg.renInitialPct:0.5); R.renDeferredPct=(cfg.renDeferredPct!=null?cfg.renDeferredPct:0.5);
+    R.bLumpy=bLumpyB; R.bMissedBilling=hasMissedBilling(a);
   } else { R.planType='A'; }
   return R;
 }
@@ -1181,7 +1214,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-53';
+const APP_VERSION='P1RMR-54';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -1600,9 +1633,10 @@ function renderAgreements(){
     const autoTag=(c.renewMult>0&&c.term>0)?(a.autorenew
       ?'<span class="chip c-payable" style="font-size:10px">auto</span>'
       :(a.renewed?'<span class="chip c-paid" style="font-size:10px">renewed</span>':'<span class="chip c-maturing" style="font-size:10px">manual</span>')):'';
-    return `<tr class="${canViewAll()?'exp-row':''}" ${canViewAll()?`data-agexp="${a.id}"`:''}>
-      <td class="ag-no">#${esc(a.agreement_number||'—')}</td>
-      <td>${esc(a.customer_name||'—')}${(a.customer_number||a.site_number)?`<div style="font-size:10px;color:var(--muted)">${a.customer_number?'Cust #'+esc(a.customer_number):''}${a.customer_number&&a.site_number?' · ':''}${a.site_number?'Site #'+esc(a.site_number):''}</div>`:''}${showOwner?`<div style="font-size:10px;color:var(--orange);font-weight:600;margin-top:2px">${esc(a.owner_email||'(unassigned)')}<span style="color:var(--muted);font-weight:500"> · plan ${esc(c.planVersion||'—')}</span></div>`:''}</td>
+    const missed=hasMissedBilling(a);
+    return `<tr class="${canViewAll()?'exp-row':''}" ${canViewAll()?`data-agexp="${a.id}"`:''} ${missed?'style="background:#fdecec"':''}>
+      <td class="ag-no">#${esc(a.agreement_number||'—')}${missed?' <span title="Customer payment missed — deferred commission at risk; bring the account current." style="color:#c0392b;font-size:12px">⚠</span>':''}</td>
+      <td>${esc(a.customer_name||'—')}${missed?' <span class="chip" style="background:#f8d7d7;color:#9a2a2a;font-size:9px">payment missed</span>':''}${(a.customer_number||a.site_number)?`<div style="font-size:10px;color:var(--muted)">${a.customer_number?'Cust #'+esc(a.customer_number):''}${a.customer_number&&a.site_number?' · ':''}${a.site_number?'Site #'+esc(a.site_number):''}</div>`:''}${showOwner?`<div style="font-size:10px;color:var(--orange);font-weight:600;margin-top:2px">${esc(a.owner_email||'(unassigned)')}<span style="color:var(--muted);font-weight:500"> · plan ${esc(c.planVersion||'—')}</span></div>`:''}</td>
       <td class="mono">${fmt(c.mrr)}${c.scheduled?'<div style="font-size:10px;color:var(--orange);font-weight:600;letter-spacing:.03em">SCHEDULED</div>':''}</td>
       <td>${termTxt}</td>
       <td>${mCell}</td>
@@ -3034,7 +3068,8 @@ function calcPanelB(c, B, acvId, tcvId){
     <div><span>Total agreement cost <span style="color:var(--none)">(direct + overhead + commission)</span></span><b style="font-size:14px">${fmt(c.bTotalAgreementCost)}</b></div>
     <div><span>Gross profit needed to release <span style="color:var(--none)">(overhead + commission)</span></span><b style="font-size:15px">${fmt(c.bRecoveryTarget)}</b></div>
     <div><span>Monthly gross profit <span style="color:var(--none)">(revenue − direct costs)</span></span><b style="font-size:14px">${fmt(c.bMonthlyGP)}<span style="font-size:11px;color:var(--muted)">/mo</span></b></div>
-    <div style="grid-column:1/-1"><span>Estimated release <span style="color:var(--none)">(month net profit turns positive)</span></span> <b style="font-size:13px">${relTxt}</b></div>
+    <div style="grid-column:1/-1"><span>Estimated release <span style="color:var(--none)">(month net profit turns positive${c.bLumpy?' · reflects scheduled labor timing':''})</span></span> <b style="font-size:13px">${relTxt}</b></div>
+    ${c.bMissedBilling?`<div style="grid-column:1/-1;background:#fbeaea;border:1px solid #e6a6a6;border-radius:8px;padding:7px 10px;font-size:12px;color:#9a2a2a;margin-top:2px"><b>⚠ Missed customer payment.</b> Collections are behind, which pushes back the deferred release — the rep/manager should bring the account current.</div>`:''}
     <div style="grid-column:1/-1;border-top:1px solid var(--line);margin-top:2px;padding-top:6px"></div>
     <div><span>Renewal commission <span style="color:var(--none)">(${Math.round(c.bRenewalPct*10000)/100}% of ACV · ${c.isAuto?'auto':'manual'})</span></span><b style="font-size:16px">${fmt(c.renewalCommission)}</b></div>
     <div><span>Renews</span><b style="font-size:13px">${c.renewalQI!=null?qLabel(c.renewalQI):'set activation date'}</b></div>
