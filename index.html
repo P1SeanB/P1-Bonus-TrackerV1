@@ -528,13 +528,16 @@
       <div class="grid agpane" data-pane="costs" style="display:none">
         <div class="fld full"><label style="color:var(--muted)">Direct costs — annual recurring (drives the margin multiplier)</label></div>
         <div class="fld"><label>Loaded labor rate <span class="hint">$ / hour, fully burdened</span></label><input id="f_rate" type="number" step="0.01" placeholder="117"></div>
-        <div class="fld"><label>Inspection frequency <span class="hint">per year</span></label>
-          <select id="f_freq">
-            <option value="0">None</option><option value="1">1 — annual</option>
-            <option value="2" selected>2 — semi-annual</option><option value="4">4 — quarterly</option><option value="12">12 — monthly</option>
-          </select>
+        <input type="hidden" id="f_freq" value="2"><input type="hidden" id="f_hrs" value="0">
+        <div class="fld full">
+          <label>Inspection / service labor schedule <span class="hint">each scheduled visit — month of service (from 1st billing) · hours · type. Leave empty if no inspection/PM labor.</span></label>
+          <table class="cfg-table" id="laborSchedTable" style="margin-top:4px"><thead><tr><th style="width:130px">Month of service</th><th style="width:110px">Hours</th><th>Type</th><th style="width:36px"></th></tr></thead><tbody id="laborSchedBody"></tbody></table>
+          <div style="display:flex;align-items:center;gap:16px;margin-top:8px;flex-wrap:wrap">
+            <button type="button" class="btn-ghost" id="laborAddRow" style="font-size:12px;padding:4px 12px">+ Add service</button>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink)"><input type="checkbox" id="f_labor_repeat" checked> Repeat each renewal term</label>
+            <span id="laborSchedTotal" style="font-size:12px;color:var(--muted)"></span>
+          </div>
         </div>
-        <div class="fld"><label>Hours per inspection <span class="hint">→ labor cost</span></label><input id="f_hrs" type="number" step="0.25" placeholder="4"></div>
         <div class="fld"><label>Materials <span class="hint">$ / yr — batteries, devices</span></label><input id="f_mat" type="number" step="0.01" placeholder="0"></div>
         <div class="fld"><label>Monitoring <span class="hint">$ / yr — central station, Alarm.com</span></label><input id="f_mon" type="number" step="0.01" placeholder="0"></div>
         <div class="fld"><label>Software licensing <span class="hint">$ / yr — licenses, hosted</span></label><input id="f_soft" type="number" step="0.01" placeholder="0"></div>
@@ -956,7 +959,8 @@ function compute(a,plan){
   const tcv=mrr*months;
   const commissionableValue=(cfg.basis==='ACV')?acv:tcv;
   // ── Margin Engine §4.5–4.10: annual recurring direct costs ──
-  const laborHours=(+a.inspection_frequency||0)*(+a.hours_per_inspection||0);
+  const _sched=(a.labor_schedule&&Array.isArray(a.labor_schedule.rows))?a.labor_schedule.rows:null;
+  const laborHours=(_sched&&_sched.length)?_sched.reduce((s,r)=>s+(+r.hours||0),0):((+a.inspection_frequency||0)*(+a.hours_per_inspection||0));  // Phase 1: schedule sets annual labor total; timing still smoothed (Phase 2)
   const laborCost=laborHours*rate;
   const materialCost=+a.material_cost_annual||0,monitoringCost=+a.monitoring_cost_annual||0;
   const softwareCost=+a.software_cost_annual||0,subCost=+a.subcontractor_annual_cost||0,otherCost=+a.other_direct_annual||0;
@@ -1177,7 +1181,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-52';
+const APP_VERSION='P1RMR-53';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -2405,6 +2409,7 @@ function openModal(id,promote){
   else if(a&&a.custom_billing) addSchedRow(1,'',false);
   $('f_rate').value=v('loaded_labor_rate');
   $('f_freq').value=a?String(a.inspection_frequency):'2';$('f_hrs').value=v('hours_per_inspection');
+  loadLaborSchedule(a);
   $('f_mat').value=v('material_cost_annual');$('f_mon').value=v('monitoring_cost_annual');
   $('f_soft').value=v('software_cost_annual');$('f_sub').value=v('subcontractor_annual_cost');$('f_other').value=v('other_direct_annual');
   $('f_target').value=(a&&a.target_margin!=null&&a.target_margin!=='')?Math.round(a.target_margin*100):'';
@@ -2956,12 +2961,38 @@ function renderOpportunities(){
   $('oppTableWrap').querySelectorAll('[data-reopen]').forEach(b=>b.onclick=()=>reopenOpp(b.dataset.reopen));
   $('oppTableWrap').querySelectorAll('[data-oppdel]').forEach(b=>b.onclick=()=>deleteOpp(b.dataset.oppdel));
 }
+let LABOR_ROWS=[];   // inspection/service labor schedule for the open agreement: [{month,hours,label}]
+function laborTotal(){ const t=$('laborSchedTotal'); if(!t)return; const rate=+$('f_rate').value||0; const hrs=LABOR_ROWS.reduce((s,r)=>s+(+r.hours||0),0); t.textContent=hrs>0?`${hrs} hrs/yr × ${fmt2(rate)}/hr = ${fmt(hrs*rate)}/yr labor`:''; }
+function renderLaborSchedule(){
+  const body=$('laborSchedBody'); if(!body)return;
+  body.innerHTML = LABOR_ROWS.length ? LABOR_ROWS.map((r,i)=>`<tr data-lr="${i}">
+    <td><input type="number" step="1" min="1" class="cfg-in lr-month" value="${r.month??''}" style="width:70px"> <span style="font-size:10px;color:var(--muted)">mo</span></td>
+    <td><input type="number" step="0.25" min="0" class="cfg-in lr-hours" value="${r.hours??''}" style="width:80px"></td>
+    <td><input type="text" class="cfg-in lr-label" value="${esc(r.label||'')}" placeholder="Annual / Semi-annual / Quarterly PM / one-time" style="width:100%"></td>
+    <td><button type="button" class="iconbtn lr-del" title="Remove">✕</button></td></tr>`).join('')
+    : `<tr><td colspan="4" style="color:var(--muted);font-size:12px;padding:8px 4px">No scheduled labor. Click <b>+ Add service</b> if this agreement includes inspection or PM labor.</td></tr>`;
+  body.querySelectorAll('[data-lr]').forEach(tr=>{ const i=+tr.dataset.lr;
+    tr.querySelector('.lr-month').oninput=e=>{LABOR_ROWS[i].month=+e.target.value||null; laborTotal(); updatePreview();};
+    tr.querySelector('.lr-hours').oninput=e=>{LABOR_ROWS[i].hours=+e.target.value||0; laborTotal(); updatePreview();};
+    tr.querySelector('.lr-label').oninput=e=>{LABOR_ROWS[i].label=e.target.value;};
+    tr.querySelector('.lr-del').onclick=()=>{LABOR_ROWS.splice(i,1); renderLaborSchedule(); updatePreview();};
+  });
+  laborTotal();
+}
+function readLaborSchedule(){ return {repeat: $('f_labor_repeat')?$('f_labor_repeat').checked:true, rows: LABOR_ROWS.filter(r=>r.month&&(+r.hours>0)).map(r=>({month:+r.month,hours:+r.hours,label:(r.label||'').trim()||'Service'}))}; }
+function seedLaborFromLegacy(freq,hours){ const map={1:[12],2:[6,12],4:[3,6,9,12],12:[1,2,3,4,5,6,7,8,9,10,11,12]}; return (map[freq]||[]).map(m=>({month:m,hours:hours||0,label:'Inspection'})); }
+function loadLaborSchedule(a){
+  if(a&&a.labor_schedule&&Array.isArray(a.labor_schedule.rows)&&a.labor_schedule.rows.length){ LABOR_ROWS=a.labor_schedule.rows.map(r=>({month:r.month,hours:r.hours,label:r.label})); if($('f_labor_repeat'))$('f_labor_repeat').checked=a.labor_schedule.repeat!==false; }
+  else if(a&&(+a.inspection_frequency>0)&&(+a.hours_per_inspection>0)){ LABOR_ROWS=seedLaborFromLegacy(+a.inspection_frequency,+a.hours_per_inspection); if($('f_labor_repeat'))$('f_labor_repeat').checked=true; }
+  else { LABOR_ROWS=[]; if($('f_labor_repeat'))$('f_labor_repeat').checked=true; }
+  renderLaborSchedule();
+}
 function readForm(){return{
   id:editingId||undefined,agreement_number:$('f_num').value.trim(),customer_name:$('f_cust').value.trim(),customer_number:$('f_custnum').value.trim()||null,site_number:$('f_sitenum').value.trim()||null,
   activation_date:$('f_date').value||null,first_billing_date:$('f_billdate').value||null,contract_term:+$('f_term').value,monthly_rmr:+$('f_rmr').value||0,
   loaded_labor_rate:+$('f_rate').value||0,
   custom_billing:$('f_custom').checked,billing_schedule:readSchedule(),
-  inspection_frequency:+$('f_freq').value,hours_per_inspection:+$('f_hrs').value||0,
+  inspection_frequency:+$('f_freq').value,hours_per_inspection:+$('f_hrs').value||0,labor_schedule:readLaborSchedule(),
   material_cost_annual:+$('f_mat').value||0,monitoring_cost_annual:+$('f_mon').value||0,
   software_cost_annual:+$('f_soft').value||0,subcontractor_annual_cost:+$('f_sub').value||0,other_direct_annual:+$('f_other').value||0,
   target_margin:($('f_target').value.trim()===''?null:(+$('f_target').value/100)),
@@ -3364,6 +3395,9 @@ $('tabAdmin').onclick=()=>switchView('admin');
 $('addBtn').onclick=()=>{ if(!sb){toast('Sign in first');return;} openModal(null); };
 $('f_custom').onchange=toggleBilling;
 $('schedAdd').onclick=()=>addSchedRow(1,'',false);
+$('laborAddRow').onclick=()=>{ LABOR_ROWS.push({month:'',hours:'',label:''}); renderLaborSchedule(); };
+$('f_labor_repeat').addEventListener('change',updatePreview);
+$('f_rate').addEventListener('input',laborTotal);
 $('blogToggle').onclick=()=>{const w=$('blogWrap');const open=w.style.display!=='none';w.style.display=open?'none':'block';$('blogHint').textContent=open?'▸ show':'▾ hide';if(!open)renderBillingLog();};
 $('blogGen').onclick=()=>{ if(EDIT_LOG.length && !confirm('Rebuild the billing log from the schedule?\n\nThis overwrites any manual dates, invoice numbers, and paid/unpaid marks.')) return; EDIT_LOG=generateBillingLog(readForm()); renderBillingLog(); };
 document.querySelectorAll('#agTabs button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('#agTabs button').forEach(x=>x.classList.toggle('active',x===b)); document.querySelectorAll('.agpane').forEach(p=>p.style.display=(p.dataset.pane===b.dataset.tab)?'':'none'); });
