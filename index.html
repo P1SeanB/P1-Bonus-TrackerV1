@@ -920,10 +920,12 @@ function typeBRelease(a, opts){   // walk months: cumulative gross profit (rev �
   const now=new Date();
   const revAtM=(m)=>{ const mDate=addMonths(rb,m-1), sched=invByMonth[m]||0;
     if(!blog) return sched;
-    let matched=0, any=false;
+    let amt=0, any=false;
     for(const e of blog){ if(!e||!e.date)continue; const d=new Date(String(e.date).slice(0,10)+'T00:00:00'); if(isNaN(d))continue;
-      if(d.getFullYear()===mDate.getFullYear()&&d.getMonth()===mDate.getMonth()){ any=true; if(logEffectivePaid(e)) matched+=(+e.amount||0); } }
-    if(any) return matched;                       // log covers this month → a missed (unpaid) invoice counts as $0, delaying release
+      if(d.getFullYear()===mDate.getFullYear()&&d.getMonth()===mDate.getMonth()){ any=true;
+        if(d<=now){ if(logEffectivePaid(e)) amt+=(+e.amount||0); }         // past: only actually-collected counts (missed = $0 → delays release)
+        else if(e.status!=='unpaid') amt+=(+e.amount||0); } }             // future: assume collected unless explicitly marked unpaid
+    if(any) return amt;
     return (mDate>now)?sched:0; };                // no entry: future assume scheduled, past nothing
   let cum=0;
   for(let m=1;m<=term;m++){ cum += revAtM(m) - recurMo - laborAtMonth(m,rows,rate,repeat);
@@ -1214,7 +1216,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-54';
+const APP_VERSION='P1RMR-55';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
