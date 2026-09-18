@@ -287,7 +287,7 @@
 </header>
 
 <nav class="tabs">
-  <button class="active" data-view="quarter" id="tabQuarter" title="What pays out this quarter: each agreement's commission for the selected quarter (75% standard, holdbacks, accelerator installments, renewals), plus a 'Releasing later' forecast. Export payroll from here.">Quarter view</button>
+  <button class="active" data-view="quarter" id="tabQuarter" title="What pays out this quarter: each agreement's commission for the selected quarter (initial and deferred pieces, accelerator installments, renewals), plus a 'Releasing later' forecast. Export payroll from here.">Quarter view</button>
   <button data-view="opportunities" id="tabOpportunities" title="Your sales pipeline of potential deals not yet signed. Track stage, estimated value, and close date; 'Win' an opportunity to turn it into an agreement.">Opportunities</button>
   <button data-view="agreements" id="tabAgreements" title="Every active RMR agreement with its RMR, term, margin, and commission. Managers can click a row to see the full live calculation (ACV/TCV, overhead, net) or Edit the deal.">Agreements</button>
   <button data-view="renewals" id="tabRenewals" title="Renewals due now or soon that you need to act on. Manual renewals pay every cycle (Renew button); auto-renewals pay once. Rows color green→amber→red as the date nears.">Pending Renewals</button>
@@ -495,11 +495,11 @@
         <div class="fld"><label>Contract term</label>
           <select id="f_term">
             <option value="0">Month-to-month</option>
-            <option value="12" selected>12 months (6% new · 4% renewal)</option>
-            <option value="24">24 months (7% new · 5% renewal)</option>
-            <option value="36">36 months (8% new · 5.5% renewal)</option>
-            <option value="48">48 months (8.5% new · 5.75% renewal)</option>
-            <option value="60">60 months (9% new · 6% renewal)</option>
+            <option value="12" selected>12 months</option>
+            <option value="24">24 months</option>
+            <option value="36">36 months</option>
+            <option value="48">48 months</option>
+            <option value="60">60 months</option>
           </select>
         </div>
         <div class="fld full"><label>Agreement type <span class="hint">manual renews each cycle · auto pays one one-time renewal & skips Pending Renewals · one-time / month-to-month earn no renewal commission</span></label>
@@ -509,6 +509,7 @@
             <option value="onetime">One-Time</option>
             <option value="m2m">Month-to-Month</option>
           </select></div>
+        <div class="fld full"><label class="bill-toggle"><input type="checkbox" id="f_termconv"> Term conversion <span class="hint">this agreement re-papers a 12-month customer onto a 36-month or longer term — pays the plan's one-time conversion incentive (Farmer / Hybrid plans)</span></label></div>
         <div class="fld full"><label>Estimate # <span class="hint">SSE quote reference — ties this agreement back to its opportunity</span></label><input id="f_estref" placeholder="e.g. SSE-045-26"></div>
         <div class="fld full"><label>Notes</label><input id="f_notes" placeholder="Optional"></div>
       </div>
@@ -726,8 +727,8 @@
       <table class="guide-table">
         <thead><tr><th>Piece</th><th>How much</th><th>When it lands</th></tr></thead>
         <tbody>
-          <tr><td><b>Standard — paid now</b></td><td>75% of the standard commission</td><td>The quarter you sell it</td></tr>
-          <tr><td><b>Standard holdback</b></td><td>25% of the standard commission</td><td>Once the customer has paid <b id="gdHbInline">25%</b> of the first year — about 3 months in on a steady deal</td></tr>
+          <tr><td><b>Initial — paid now</b></td><td>The plan's initial share of the commission (workbook plans: 50%)</td><td>The quarter you sell it</td></tr>
+          <tr><td><b>Deferred</b></td><td>The remaining share (workbook plans: 50%)</td><td>Workbook plans: about 3 months after first billing (installed and invoiced). Older plans: once the customer has paid <b id="gdHbInline">25%</b> of the first year</td></tr>
           <tr><td><b>Accelerator</b><div style="font-size:11px;color:var(--muted)">the high-margin bonus (the ×-above-1.0 part)</div></td><td>the margin bump</td><td>In <b>6-month pieces</b>, each released as that window's revenue is collected</td></tr>
         </tbody>
       </table>
@@ -826,6 +827,17 @@ const DEFAULT_CONFIG={
   newPct:{12:0.06,24:0.07,36:0.08,48:0.085,60:0.09},        // §3.6 new-agreement matrix
   renewalPct:{12:0.04,24:0.05,36:0.055,48:0.0575,60:0.06},  // §3.6 manual renewal matrix (every renewal)
   autoRenewalPct:{12:0.02,24:0.025},                        // auto-renewal: lower rate, ONE-TIME, only 12/24-mo
+  // ── Workbook (Hunter / Farmer / Hybrid) fields ──
+  role:'',                                                  // 'Hunter' | 'Farmer' | 'Hybrid' | '' — which role this plan is for
+  quotaMonthlyRmr:0,                                        // performance quota: new Monthly RMR per month (Hunter $2,000 · Hybrid $1,250)
+  accelMultiplier:1.0,                                      // RMR activated above the monthly quota earns this × the term rate (Hunter 1.25)
+  releaseMode:'revenue',                                    // 'revenue' = deferred releases once holdbackThresholdPct of Yr-1 is collected · 'offset' = N months after first billing
+  releaseOffsetMonths:3,                                    // workbook: 50% at execution, 50% ~90 days after installation & first billing
+  termConversionMult:0,                                     // one-time incentive × Monthly RMR when a 12-month agreement is re-papered to ≥ termConversionMinTerm (Farmer/Hybrid 1.5)
+  termConversionMinTerm:36,
+  portfolioBonus:false,                                     // Farmer / Hybrid: GRR + NRR bonuses as % of base salary (salary is NOT stored here — the tool reports the % earned)
+  grrBonus:[{min:0.95,pct:0.02},{min:0.965,pct:0.04},{min:0.98,pct:0.06},{min:0.99,pct:0.08}],
+  nrrBonus:[{min:1.03,pct:0.02},{min:1.05,pct:0.04},{min:1.08,pct:0.06},{min:1.10,pct:0.08}],
   marginTiers:[                                             // §4.4/§4.13 (first match wins, descending)
     {min:0.60,mult:1.25,label:'Maximum',status:'Exceptional'},
     {min:0.55,mult:1.10,label:'Accelerated',status:'Excellent'},
@@ -842,13 +854,14 @@ function saveConfig(){LS.set('rmr_commission_config',JSON.stringify(CONFIG));}
    resolvePlan(a) decides which plan an agreement is calculated under:
      owner's assigned plan → the default plan → the local CONFIG fallback.
    Paid lines stay frozen via the snapshot regardless of which plan resolves. */
-let PLANS=[], USER_PLAN={}, EDIT_PLAN_ID=null;
+let PLANS=[], USER_PLAN={}, USER_ROLE={}, EDIT_PLAN_ID=null;
 function planById(id){ if(id==null)return null; const p=PLANS.find(p=>String(p.id)===String(id)); return p?p.config:null; }
 function defaultPlanConfig(){ const d=PLANS.find(p=>p.is_default); if(d)return d.config; const a=PLANS.find(p=>p.status==='active'); if(a)return a.config; return PLANS.length?PLANS[0].config:CONFIG; }
+function planForRole(role){ if(!role)return null; const p=PLANS.find(p=>p.config&&p.config.role===role&&(p.status||'active')==='active'); return p?p.config:null; }
 function resolvePlan(a){
   const email=(a&&a.owner_email)?String(a.owner_email).toLowerCase():null;
   const pid=email?USER_PLAN[email]:null;
-  return planById(pid)||defaultPlanConfig();
+  return planById(pid)||planForRole(email?USER_ROLE[email]:null)||defaultPlanConfig();
 }
 function planLabelFor(a){ const cfg=resolvePlan(a); return cfg&&cfg.planVersion?cfg.planVersion:''; }
 function pctFor(map,term){if(map[term]!=null)return map[term];const ks=Object.keys(map).map(Number).sort((a,b)=>a-b);let v=map[ks[0]];for(const k of ks){if(term>=k)v=map[k];}return v;}
@@ -965,12 +978,24 @@ function frozenAmount(a,type){
   const frozen=paid&&snap&&snap.amount!=null;
   return {amount:frozen?+snap.amount:live,frozen,snap:frozen?snap:null};
 }
+function splitLabels(c){   // labels for the new-agreement split, driven by the plan (workbook: 50 / 50, 3 months after first billing)
+  const im=Math.round(((c&&c.immediatePct!=null)?c.immediatePct:0.75)*100), hb=100-im;
+  const when=(c&&c.releaseMode==='offset')?`${c.releaseOffsetMonths||3} months after first billing`:`once ${Math.round(((c&&c.holdbackThresholdPct)||0.25)*100)}% of Year-1 is collected`;
+  return {imm:`Initial ${im}%`,def:`Deferred ${hb}%`,immWhen:`${im}% at activation`,defWhen:when,im,hb};
+}
 const HOLDBACK_START=new Date('2026-01-01T00:00:00');   // Q1 2026 — holdback & accelerator apply from here
 function isLegacyFull(a){
   if(a.paid_initial) return true;                        // already paid 100% under the old model → leave alone
   const s=a&&a.activation_date; if(!s) return a&&a.legacy_full_pay!==false;
   const d=new Date(String(s).slice(0,10)+'T00:00:00'); if(isNaN(d)) return a.legacy_full_pay!==false;
   return d < HOLDBACK_START;                             // before Q1 2026 → grandfathered; Q1 2026+ → split
+}
+function agreementMrr(a){   // same MRR rule as compute(): flat Monthly RMR, or annual custom invoicing ÷ 12
+  const sched=(a.custom_billing&&Array.isArray(a.billing_schedule)&&a.billing_schedule.length)?a.billing_schedule:null;
+  if(!sched) return +a.monthly_rmr||0;
+  let m0=0; const bs=a.first_billing_date||a.activation_date; if(bs){const d=new Date(String(bs).slice(0,10)+'T00:00:00'); if(!isNaN(d))m0=d.getMonth();}
+  let ann=0; for(let m=1;m<=12;m++){ const since=m-1,cal=((m0+since)%12)+1; for(const r of sched){ if((+r.month)===cal){ if(r.once&&since>=12)continue; ann+=(+r.amount||0); } } }
+  return ann/12;
 }
 function compute(a,plan){
   const cfg=plan||resolvePlan(a);
@@ -1017,7 +1042,23 @@ function compute(a,plan){
                     : converted ? 'Auto-Renewal Converted to Manual Renewal'
                     : a.autorenew ? 'Auto-Renewal'
                     : (term>0 ? 'Manual Renewal' : 'Not Applicable');
-  const baseCommissionNew=commissionableValue*newPct;
+  // ── Workbook: quota accelerator — this owner's RMR activated above the monthly quota earns accelMultiplier × the term rate ──
+  const quota=+cfg.quotaMonthlyRmr||0, accelX=+cfg.accelMultiplier||1, rateMonths=(cfg.basis==='ACV')?12:months;
+  let quotaAboveRmr=0, quotaAccelExtra=0, quotaMonthRmr=mrr, quotaPriorRmr=0;
+  if(quota>0 && accelX>1 && a.activation_date && mrr>0){
+    const ym=String(a.activation_date).slice(0,7), own=String(a.owner_email||'').toLowerCase();
+    const key=x=>String(x.activation_date||'').slice(0,10)+'|'+String(x.agreement_number||'').padStart(12,'0')+'|'+String(x.id||'');
+    const mine=key(a), list=(typeof AGREEMENTS!=='undefined'&&Array.isArray(AGREEMENTS))?AGREEMENTS:[];
+    list.forEach(x=>{ if(!x||(a.id!=null&&String(x.id)===String(a.id)))return; if(!isLiveAgreement(x))return;
+      if(String(x.activation_date||'').slice(0,7)!==ym)return; if(String(x.owner_email||'').toLowerCase()!==own)return;
+      const m=agreementMrr(x); quotaMonthRmr+=m; if(key(x)<mine) quotaPriorRmr+=m; });
+    quotaAboveRmr=Math.max(0, Math.min(mrr, quotaPriorRmr+mrr-quota));
+    quotaAccelExtra=quotaAboveRmr*rateMonths*newPct*(accelX-1);
+  }
+  // ── Workbook: term-conversion incentive — a 12-month agreement re-papered to ≥ minTerm pays a one-time multiple of Monthly RMR ──
+  const convMult=+cfg.termConversionMult||0, convMin=+cfg.termConversionMinTerm||36;
+  const conversionCommission=(a.term_conversion && convMult>0 && term>=convMin) ? mrr*convMult : 0;
+  const baseCommissionNew=commissionableValue*newPct+quotaAccelExtra+conversionCommission;
   const baseCommissionRenewal=commissionableValue*renewalPct;
   const initialCommission=baseCommissionNew*mm.mult;          // Final = Base × Margin Multiplier (§3.11)
   const renewalCommission=noRenewal?0:baseCommissionRenewal*mm.mult;
@@ -1036,7 +1077,8 @@ function compute(a,plan){
   const releaseMonth=(threshold)=>{ if(!(threshold>0))return 1; let cum=0; for(let m=1;m<=(term||12);m++){ cum+=revAt(m); if(cum>=threshold-1e-6) return m; } return term||12; };
   const holdbackThreshold=(cfg.holdbackThresholdPct!=null?cfg.holdbackThresholdPct:0.25)*year1Rev;
   const accelThreshold   =(cfg.accelReleasePct!=null?cfg.accelReleasePct:0.50)*totalRev;
-  const holdbackReleaseMonth=releaseMonth(holdbackThreshold), accelReleaseMonth=releaseMonth(accelThreshold);
+  const offsetMode=(cfg.releaseMode==='offset'), offsetMonths=(+cfg.releaseOffsetMonths>0?+cfg.releaseOffsetMonths:3);
+  const holdbackReleaseMonth=offsetMode?offsetMonths:releaseMonth(holdbackThreshold), accelReleaseMonth=releaseMonth(accelThreshold);
   const netProfit=grossProfit-initialCommission;             // §4.14 annual gross profit less the commission
   const overheadPct=(cfg.overheadPct!=null?cfg.overheadPct:0.28);        // company overhead as % of total contract value
   const overhead=tcv*overheadPct;
@@ -1047,7 +1089,7 @@ function compute(a,plan){
   if(a.activation_date){const ad=new Date(a.activation_date+'T00:00:00');if(!isNaN(ad)){initialQI=qIndexFromYM(ad.getFullYear(),ad.getMonth());if(term>0&&!noRenewal){renewalDate=addMonths(ad,term);renewalQI=qIndexFromYM(renewalDate.getFullYear(),renewalDate.getMonth());}
     if(!legacyFull){ const bd=new Date((a.first_billing_date||a.activation_date)+'T00:00:00'); const rb=isNaN(bd)?ad:bd;   // releases measured from FIRST BILLING (revenue start)
       const blog=(Array.isArray(a.billing_log)&&a.billing_log.length)?a.billing_log:null;
-      holdbackReleaseDate = blog ? billingLogReleaseDate(blog,holdbackThreshold) : addMonths(rb,holdbackReleaseMonth);
+      holdbackReleaseDate = offsetMode ? addMonths(rb,offsetMonths) : (blog ? billingLogReleaseDate(blog,holdbackThreshold) : addMonths(rb,holdbackReleaseMonth));
       holdbackQI = holdbackReleaseDate ? qIndexFromYM(holdbackReleaseDate.getFullYear(),holdbackReleaseDate.getMonth()) : null;
       // Accelerator releases in 6-month installments, each piece sized to the revenue collected in that window.
       if(acceleratorCommission>0 && (term||0)>0){
@@ -1076,6 +1118,8 @@ function compute(a,plan){
           billingCollected:(Array.isArray(a.billing_log)&&a.billing_log.length)?billingLogCollected(a.billing_log):null,
           billingExpected:(Array.isArray(a.billing_log)&&a.billing_log.length)?billingLogExpected(a.billing_log):totalRev,
           holdbackThreshold,accelThreshold,
+          immediatePct:imPct,holdbackPct:hbPct,releaseMode:offsetMode?'offset':'revenue',releaseOffsetMonths:offsetMonths,
+          quota,accelX,quotaMonthRmr,quotaPriorRmr,quotaAboveRmr,quotaAccelExtra,conversionCommission,planRole:cfg.role||'',
           initialQI,renewalDate,renewalQI,annualBilled,firstBill,scheduled:!!sched,agreementType:atype,noRenewal};
   if(cfg.planType==='B'){
     // ---- Type B: flat RMR-multiple commission, initial/deferred split, profitability-threshold release ----
@@ -1138,7 +1182,7 @@ function nextDueDate(a){        // when the NEXT manual renewal is due (drives P
   return null;                                                        // renewed but not backfilled → not re-surfaced until Admin builds the ledger
 }
 // --- Phase 3: renewal + growth bonus calcs (comparison/forecast only; never live payouts) ---
-function renewalBonusTier(term){const t=+term;if(t===12)return 1.25;if(t===24)return 0.75;if(t>=36)return 0.50;return 0;}
+function renewalBonusTier(term,cfg){ const t=+term||0; if(!t)return 0; const p=cfg||defaultPlanConfig()||CONFIG; return (pctFor(p.renewalPct,t)||0)*t; }   // manual-renewal multiple of Monthly RMR (workbook: 0.75× / 1.25× / 1.5× / 2.0×)
 function renewalBonusOf(r,force){ // force=true ignores status (for forecasting potential)
   if(!force&&(r.status||'completed')!=='completed')return 0;
   return (+r.previous_rmr||0)*renewalBonusTier(r.new_term);
@@ -1146,7 +1190,8 @@ function renewalBonusOf(r,force){ // force=true ignores status (for forecasting 
 function growthBonusOf(r,force){
   if(!force&&(r.status||'completed')!=='completed')return 0;
   const g=(+r.renewed_rmr||0)-(+r.previous_rmr||0);
-  return g>0?g*1.00:0;            // positive growth only (shrinkage pays $0, never negative)
+  const p=defaultPlanConfig()||CONFIG, t=+r.new_term||12;
+  return g>0?g*((pctFor(p.newPct,t)||0)*t):0;            // growth pays the new-agreement multiple for the renewed term (workbook upsell schedule); shrinkage pays $0
 }
 function renewalTotalsFor(agreementId){
   let renewal=0,growth=0,completed=0;
@@ -1222,22 +1267,27 @@ let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
   CURRENT_EMAIL=email||''; const lc=(email||'').toLowerCase();
   if(ADMIN_EMAILS.includes(lc)){ CURRENT_ROLE='Administrator'; return; }   // guaranteed admin
-  try{ const {data,error}=await sb.from('rmr_users').select('role').eq('email',lc).limit(1); if(error)throw error; CURRENT_ROLE=(data&&data[0]&&data[0].role)||'Sales Representative'; }
-  catch(e){ CURRENT_ROLE='Sales Representative'; }   // table missing → least privilege (Sean still admin via list above)
+  try{ const {data,error}=await sb.from('rmr_users').select('role').eq('email',lc).limit(1); if(error)throw error; CURRENT_ROLE=normRole(data&&data[0]&&data[0].role); }
+  catch(e){ CURRENT_ROLE='Hybrid'; }   // table missing → least privilege (Sean still admin via list above)
 }
+/* Roles follow the Service Sales Planning Workbook: Hunter (new business), Farmer (portfolio / renewals), Hybrid (both).
+   Legacy rows are mapped on read: 'Sales Representative' → Hybrid, 'Sales Manager' → Executive. */
+const LEGACY_ROLE_MAP={'Sales Representative':'Hybrid','Sales Manager':'Executive'};
+function normRole(r){ r=(r||'').trim(); return LEGACY_ROLE_MAP[r]||r||'Hybrid'; }
+const REP_ROLES=['Hunter','Farmer','Hybrid'];
 const PERMISSIONS={
   editConfig:['Administrator'],
   viewAudit:['Administrator','Executive'],
-  override:['Administrator','Executive','Sales Manager'],
-  editAgreements:['Administrator','Executive','Sales Manager'],
-  editOpps:['Administrator','Executive','Sales Manager','Sales Representative'],
-  deleteOpps:['Administrator','Executive','Sales Manager'],
-  calculate:['Administrator','Executive','Sales Manager','Sales Representative'],
-  export:['Administrator','Executive','Sales Manager','Sales Representative','Read Only']
+  override:['Administrator','Executive'],
+  editAgreements:['Administrator','Executive'],
+  editOpps:['Administrator','Executive','Hunter','Farmer','Hybrid'],
+  deleteOpps:['Administrator','Executive'],
+  calculate:['Administrator','Executive','Hunter','Farmer','Hybrid'],
+  export:['Administrator','Executive','Hunter','Farmer','Hybrid','Read Only']
 };
 function can(fn){ return (PERMISSIONS[fn]||[]).includes(CURRENT_ROLE); }
 let USER_FILTER=null;   // null = all visible; else array of owner keys to include
-function canViewAll(){ return ['Administrator','Executive','Sales Manager'].includes(CURRENT_ROLE); }
+function canViewAll(){ return ['Administrator','Executive'].includes(CURRENT_ROLE); }
 function ownerKey(a){ return (a&&a.owner_email)?a.owner_email:'(unassigned)'; }
 /* ---- Opportunity pipeline: stage lives on the agreement record ----
    stage: undefined/null/'won'/'active' = a live agreement (counts toward commission);
@@ -1340,17 +1390,39 @@ let KNOWN_USERS=[];
 async function loadUsers(){
   let users=[];
   // try with plan_id; if that column isn't migrated yet, fall back to email only
-  try{ const {data,error}=await sb.from('rmr_users').select('email,plan_id'); if(error)throw error; users=data||[]; }
-  catch(e){ try{ const {data}=await sb.from('rmr_users').select('email'); users=data||[]; }catch(_){ users=[]; } }
-  USER_PLAN={};
+  try{ const {data,error}=await sb.from('rmr_users').select('email,plan_id,role'); if(error)throw error; users=data||[]; }
+  catch(e){ try{ const {data}=await sb.from('rmr_users').select('email,role'); users=data||[]; }catch(_){ try{ const {data}=await sb.from('rmr_users').select('email'); users=data||[]; }catch(__){ users=[]; } } }
+  USER_PLAN={}; USER_ROLE={};
   const set=new Set();
-  users.forEach(u=>{ if(u&&u.email){ set.add(u.email); if(u.plan_id!=null&&u.plan_id!=='') USER_PLAN[String(u.email).toLowerCase()]=u.plan_id; } });
+  users.forEach(u=>{ if(u&&u.email){ set.add(u.email); const em=String(u.email).toLowerCase(); if(u.plan_id!=null&&u.plan_id!=='') USER_PLAN[em]=u.plan_id; if(u.role) USER_ROLE[em]=normRole(u.role); } });
   AGREEMENTS.forEach(a=>{ if(a.owner_email) set.add(a.owner_email); });
   if(CURRENT_EMAIL) set.add(CURRENT_EMAIL);
   KNOWN_USERS=[...set].filter(Boolean).sort();
 }
 let ACTIVE_PLAN_ID=null;
-function normalizeConfig(j){ j=j||{}; if(j.targetMargin==null)j.targetMargin=0.50; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='2026 v1.0'; if(!j.basis)j.basis='TCV'; if(!j.autoRenewalPct)j.autoRenewalPct={12:0.02,24:0.025}; if(j.immediatePct==null)j.immediatePct=0.75; if(j.holdbackPct==null)j.holdbackPct=0.25; if(j.holdbackThresholdPct==null)j.holdbackThresholdPct=0.25; if(j.accelReleasePct==null)j.accelReleasePct=0.50; if(j.overheadPct==null)j.overheadPct=0.28; if(!j.planType)j.planType='A'; if(j.rmrMultiple==null)j.rmrMultiple=2.00; if(j.newInitialPct==null)j.newInitialPct=0.50; if(j.newDeferredPct==null)j.newDeferredPct=0.50; if(j.renInitialPct==null)j.renInitialPct=0.50; if(j.renDeferredPct==null)j.renDeferredPct=0.50; if(j.bManualRenewalPct==null)j.bManualRenewalPct=0.04; if(j.bAutoRenewalPct==null)j.bAutoRenewalPct=0.01; return j; }
+function normalizeConfig(j){ j=j||{}; if(j.targetMargin==null)j.targetMargin=0.50; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='2026 v1.0'; if(!j.basis)j.basis='TCV'; if(!j.autoRenewalPct)j.autoRenewalPct={12:0.02,24:0.025}; if(j.immediatePct==null)j.immediatePct=0.75; if(j.holdbackPct==null)j.holdbackPct=0.25; if(j.holdbackThresholdPct==null)j.holdbackThresholdPct=0.25; if(j.accelReleasePct==null)j.accelReleasePct=0.50; if(j.overheadPct==null)j.overheadPct=0.28; if(!j.planType)j.planType='A'; if(j.rmrMultiple==null)j.rmrMultiple=2.00; if(j.newInitialPct==null)j.newInitialPct=0.50; if(j.newDeferredPct==null)j.newDeferredPct=0.50; if(j.renInitialPct==null)j.renInitialPct=0.50; if(j.renDeferredPct==null)j.renDeferredPct=0.50; if(j.bManualRenewalPct==null)j.bManualRenewalPct=0.04; if(j.bAutoRenewalPct==null)j.bAutoRenewalPct=0.01;
+  if(j.role==null)j.role=''; if(j.quotaMonthlyRmr==null)j.quotaMonthlyRmr=0; if(j.accelMultiplier==null)j.accelMultiplier=1; if(!j.releaseMode)j.releaseMode='revenue'; if(j.releaseOffsetMonths==null)j.releaseOffsetMonths=3;
+  if(j.termConversionMult==null)j.termConversionMult=0; if(j.termConversionMinTerm==null)j.termConversionMinTerm=36; if(j.portfolioBonus==null)j.portfolioBonus=false;
+  if(!Array.isArray(j.grrBonus)||!j.grrBonus.length)j.grrBonus=JSON.parse(JSON.stringify(DEFAULT_CONFIG.grrBonus)); if(!Array.isArray(j.nrrBonus)||!j.nrrBonus.length)j.nrrBonus=JSON.parse(JSON.stringify(DEFAULT_CONFIG.nrrBonus));
+  return j; }
+/* ===== Workbook presets — Point1 Service Sales Executive Planning Workbook (Sep-2026 actuals) =====
+   Commission = Monthly RMR × term multiple. With TCV basis the tool's term % reproduces the multiple exactly (% = multiple ÷ months):
+   new agreements 1.0× / 1.5× / 2.0× / 2.25× (48-mo interpolated) / 2.5× · manual renewals 0.75× / 1.25× / 1.5× / 1.75× (interp.) / 2.0× ·
+   auto-renewals 0 · margin is a gate (45% floor), not a multiplier · 50% at execution, 50% three months after first billing. */
+const WB_NEW_PCT={12:1.00/12,24:1.50/24,36:2.00/36,48:2.25/48,60:2.50/60};   // multiple ÷ months
+const WB_REN_PCT={12:0.75/12,24:1.25/24,36:1.50/36,48:1.75/48,60:2.00/60};
+const WB_ZERO_PCT={12:0,24:0,36:0,48:0,60:0};
+const WB_TIERS=[{min:0.45,mult:1.00,label:'Eligible',status:'At or above 45% floor'},{min:0.00,mult:0.00,label:'Not eligible',status:'Below 45% floor'}];
+function workbookPreset(role){
+  const base=JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  Object.assign(base,{planType:'A',basis:'TCV',targetMargin:0.50,minMargin:0.45,immediatePct:0.50,holdbackPct:0.50,releaseMode:'offset',releaseOffsetMonths:3,
+    newPct:{...WB_NEW_PCT},autoRenewalPct:{12:0,24:0},marginTiers:JSON.parse(JSON.stringify(WB_TIERS)),role});
+  if(role==='Hunter') Object.assign(base,{planVersion:'Hunter 2026',quotaMonthlyRmr:2000,accelMultiplier:1.25,renewalPct:{...WB_ZERO_PCT},termConversionMult:0,portfolioBonus:false});
+  if(role==='Farmer') Object.assign(base,{planVersion:'Farmer 2026',quotaMonthlyRmr:0,accelMultiplier:1,renewalPct:{...WB_REN_PCT},termConversionMult:1.5,termConversionMinTerm:36,portfolioBonus:true});
+  if(role==='Hybrid') Object.assign(base,{planVersion:'Hybrid 2026',quotaMonthlyRmr:1250,accelMultiplier:1,renewalPct:{...WB_REN_PCT},termConversionMult:1.5,termConversionMinTerm:36,portfolioBonus:true});
+  return normalizeConfig(base);
+}
+function bonusTier(table,value){ if(value==null||isNaN(value))return null; const rows=[...(table||[])].sort((a,b)=>b.min-a.min); for(const t of rows){ if(value>=t.min-1e-9) return t; } return null; }
 async function loadPlans(){   // load EVERY saved plan; pick a default for the editor + fallback. Graceful if table absent.
   try{
     const {data,error}=await sb.from('rmr_commission_plans').select('*').order('modified_at',{ascending:false});
@@ -1411,7 +1483,8 @@ async function upsert(row){
   async function go(p){ if(p.id){const {error}=await sb.from('rmr_agreements').update(p).eq('id',p.id);if(error)throw error;} else {const {error}=await sb.from('rmr_agreements').insert(p);if(error)throw error;} }
   try{ await go(payload); }
   catch(e){ // ref columns not migrated yet → retry without them so saving still works
-    if(/customer_number|site_number|owner_email|converted_to_manual|conversion_|renewal_date|renewal_credit_month|prerenewal_state|stage|opportunity_number|estimate_ref|est_monthly_rmr|expected_close|lost_reason|agreement_type|legacy_full_pay|first_billing_date|billing_log|accel_paid|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,converted_to_manual,conversion_date,conversion_notes,conversion_ref,renewal_date,renewal_credit_month,prerenewal_state,stage,opportunity_number,estimate_ref,est_monthly_rmr,expected_close,lost_reason,agreement_type,legacy_full_pay,first_billing_date,billing_log,accel_paid,...rest}=payload; await go(rest); }
+    if(/term_conversion/i.test(e.message||'')){ const {term_conversion,...rest}=payload; try{ await go(rest); toast('Saved — run migration_v20_workbook_roles.sql to enable the term-conversion flag'); return; }catch(e2){ e=e2; } }
+    if(/customer_number|site_number|owner_email|converted_to_manual|conversion_|renewal_date|renewal_credit_month|prerenewal_state|stage|opportunity_number|estimate_ref|est_monthly_rmr|expected_close|lost_reason|agreement_type|legacy_full_pay|first_billing_date|billing_log|accel_paid|term_conversion|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,converted_to_manual,conversion_date,conversion_notes,conversion_ref,renewal_date,renewal_credit_month,prerenewal_state,stage,opportunity_number,estimate_ref,est_monthly_rmr,expected_close,lost_reason,agreement_type,legacy_full_pay,first_billing_date,billing_log,accel_paid,term_conversion,...rest}=payload; await go(rest); }
     else throw e;
   }
 }
@@ -1419,7 +1492,7 @@ async function patchPaid(id,field,val){
   if(!can('editAgreements')){ toast('Your role cannot mark commissions paid.'); return; }
   const a=AGREEMENTS.find(x=>x.id===id);
   const SNAP_FOR={paid_initial:['initial_snapshot','initial','Initial commission'],renewal_paid:['renewal_snapshot','renewal','Renewal commission'],
-    paid_immediate:['immediate_snapshot','immediate','Standard commission (75%)'],paid_holdback:['holdback_snapshot','holdback','Standard holdback (25%)'],paid_accel:['accel_snapshot','accel','Accelerator']};
+    paid_immediate:['immediate_snapshot','immediate','Initial commission'],paid_holdback:['holdback_snapshot','holdback','Deferred commission'],paid_accel:['accel_snapshot','accel','Accelerator']};
   const [snapCol,snapType,label]=SNAP_FOR[field]||[null,null,'Commission'];
   const update={[field]:val,updated_at:new Date().toISOString()};
   if(snapCol) update[snapCol]= (val&&a) ? buildSnapshot(a,snapType) : null;  // freeze on pay, clear on un-pay
@@ -1540,12 +1613,12 @@ function renderQuarter(){
   const pieceRow=(l)=>{
     const st=l.paid?'paid':'payable',meta=STATUS_META[st];
     const isB=l.c&&l.c.planType==='B';
-    const TAGS={renewal:['Renewal','#e7f3ee','var(--payable)'],immediate:[isB?`Initial ${Math.round((l.c.bInitialPct||0.5)*100)}%`:'Standard 75%','#eef1f6','var(--navy)'],holdback:[isB?`Deferred ${Math.round((l.c.bDeferredPct||0.5)*100)}%`:'Holdback 25%','#fff4e8','var(--orange)'],accelerator:[l.accelseq?`Accelerator ${l.accelseq}`:'Accelerator','#f0ecff','#5a3fb8'],initial:['Initial','#eef1f6','var(--navy)']};
+    const TAGS={renewal:['Renewal','#e7f3ee','var(--payable)'],immediate:[isB?`Initial ${Math.round((l.c.bInitialPct||0.5)*100)}%`:splitLabels(l.c).imm,'#eef1f6','var(--navy)'],holdback:[isB?`Deferred ${Math.round((l.c.bDeferredPct||0.5)*100)}%`:splitLabels(l.c).def,'#fff4e8','var(--orange)'],accelerator:[l.accelseq?`Accelerator ${l.accelseq}`:'Accelerator','#f0ecff','#5a3fb8'],initial:['Initial','#eef1f6','var(--navy)']};
     const tg=TAGS[l.type]||TAGS.initial;
     const typeTag=`<span class="type-tag" style="background:${tg[1]};color:${tg[2]}">${tg[0]}</span>`;
     const dateTxt=
       l.type==='renewal' ? `${l.auto?'auto-renew':('manual'+(l.cycle?` · cycle ${l.cycle}`:''))}`
-      : l.type==='immediate' ? (isB?'initial · paid now':'75% at activation')
+      : l.type==='immediate' ? (isB?'initial · paid now':splitLabels(l.c).immWhen)
       : l.type==='holdback' ? (isB?`deferred → ${l.c.holdbackQI!=null?qLabel(l.c.holdbackQI):(l.c.bReachable?'threshold':'pending')} · profitability threshold`:`releases ${l.c.holdbackQI!=null?qLabel(l.c.holdbackQI):'pending collection'}`)
       : l.type==='accelerator' ? `installment ${l.accelseq}, as collected`
       : 'at activation';
@@ -1807,7 +1880,7 @@ function payoutScheduleHTML(a){
   const c=compute(a);
   const rows=historyLedger().filter(r=>r.a.id===a.id).slice().sort((x,y)=>String(x.date||'zzzz').localeCompare(String(y.date||'zzzz')));
   const isB=c.planType==='B';
-  const SRC=isB?{immediate:'initial — paid now',holdback:'deferred — releases at profitability threshold',accel:'',renewal:'paid in full when renewed',initial:'at activation'}:{immediate:'75% at signing',holdback:'releases once 25% of Year-1 is collected',accel:'releases as revenue is collected',renewal:'paid in full when renewed',initial:'at activation'};
+  const SRC=isB?{immediate:'initial — paid now',holdback:'deferred — releases at profitability threshold',accel:'',renewal:'paid in full when renewed',initial:'at activation'}:{immediate:splitLabels(c).immWhen.replace('activation','signing'),holdback:'releases '+splitLabels(c).defWhen,accel:'releases as revenue is collected',renewal:'paid in full when renewed',initial:'at activation'};
   const line=(ds,label,amt,src,paid,qi)=>`<div style="display:flex;align-items:baseline;gap:10px;padding:4px 0;border-top:1px dashed var(--line)"><span class="mono" style="min-width:96px;color:var(--muted)">${ds||'—'}</span><span style="flex:1;min-width:150px">${label} <span style="color:var(--muted);font-size:11px">— ${src||''}</span></span><span class="mono" style="min-width:60px;color:var(--muted);font-size:11px">${qi!=null?qLabel(qi):''}</span><b class="mono" style="min-width:70px;text-align:right">${fmt(amt)}</b><span class="chip ${paid?'c-paid':'c-payable'}" style="font-size:9px">${paid?'paid':'pending'}</span></div>`;
   let html=`<div style="font-size:12.5px"><div style="font-weight:700;margin-bottom:2px">Full payout schedule — #${esc(a.agreement_number||'')} ${esc(a.customer_name||'')}</div><div style="color:var(--muted);font-size:11px;margin-bottom:4px">Signed ${a.activation_date?esc(String(a.activation_date).slice(0,10)):'—'} · First billing ${a.first_billing_date?esc(String(a.first_billing_date).slice(0,10)):'same as signing'} · total commission ${fmt(c.legacyFull?c.initialCommission:(c.immediateCommission+c.holdbackCommission+c.acceleratorHeld))}</div>`;
   if(!rows.length) html+='<div class="file-hint">No commission pieces yet.</div>';
@@ -2013,8 +2086,8 @@ function renderReports(){
       let body='';
       if(c.legacyFull){ body+=pieceLine('Initial commission',c.initialCommission,rOf('initial')); }
       else{
-        body+=pieceLine('Standard 75% (now)',c.immediateCommission,rOf('immediate'));
-        body+=pieceLine('Standard holdback 25%',c.holdbackCommission,rOf('holdback'));
+        body+=pieceLine(splitLabels(c).imm+' (now)',c.immediateCommission,rOf('immediate'));
+        body+=pieceLine(splitLabels(c).def,c.holdbackCommission,rOf('holdback'));
         if(c.acceleratorHeld>0) rows.filter(r=>r.piece==='accel').sort((a,b)=>(a.seq||0)-(b.seq||0)).forEach(r=>{ body+=pieceLine(r.type,r.amount,r); });
       }
       const renRows=rows.filter(r=>r.piece==='renewal');
@@ -2073,7 +2146,7 @@ function commStatusLabel(r){
   if(r.paid) return `${r.type} — Paid`;
   if(r.mult===0) return `${r.type} — Not eligible (below margin floor)`;
   switch(r.piece){
-    case 'holdback': return `Standard holdback — held until 25% of Year-1 collected${q?` · eligible ${q}`:''}`;
+    case 'holdback': return `Deferred — releases ${c?splitLabels(c).defWhen:'later'}${q?` · eligible ${q}`:''}`;
     case 'accel':    return `Accelerator — held until 50% realized margin${q?` · eligible ${q}`:''}`;
     case 'renewal':  return r.pending?`Renewal — pending renewal`:`Renewal commission — eligible${q?` ${q}`:''}`;
     default:         return `Standard commission — eligible${q?` ${q}`:''}`;
@@ -2095,8 +2168,8 @@ function historyLedger(){
       if(c.initialCommission>0||a.paid_initial) rows.push(mkLedgerRow(a,c,'Initial','Initial','initial',(a.paid_initial&&a.initial_snapshot)?a.initial_snapshot:null,!!a.paid_initial,c.initialQI,iso(a.activation_date),c.initialCommission,c.newPct,false));
     } else {
       const isB=c.planType==='B';
-      const immLbl=isB?`Initial ${Math.round((c.bInitialPct||0.5)*100)}%`:'Standard 75%';
-      const defLbl=isB?`Deferred ${Math.round((c.bDeferredPct||0.5)*100)}%`:'Holdback 25%';
+      const immLbl=isB?`Initial ${Math.round((c.bInitialPct||0.5)*100)}%`:splitLabels(c).imm;
+      const defLbl=isB?`Deferred ${Math.round((c.bDeferredPct||0.5)*100)}%`:splitLabels(c).def;
       if(c.immediateCommission>0||a.paid_immediate) rows.push(mkLedgerRow(a,c,immLbl,'Standard','immediate',(a.paid_immediate&&a.immediate_snapshot)?a.immediate_snapshot:null,!!a.paid_immediate,c.initialQI,iso(a.activation_date),c.immediateCommission,c.newPct,false));
       if(c.holdbackCommission>0||a.paid_holdback) rows.push(mkLedgerRow(a,c,defLbl,'Holdback','holdback',(a.paid_holdback&&a.holdback_snapshot)?a.holdback_snapshot:null,!!a.paid_holdback,c.holdbackQI,iso(c.holdbackReleaseDate),c.holdbackCommission,c.newPct,false));
       (c.acceleratorPieces||[]).forEach(p=>{ const pd=(a.accel_paid&&a.accel_paid[p.seq])||null; const paid=!!(pd&&pd.paid); const amt=(paid&&pd.snapshot)?+pd.snapshot.amount:p.amount;
@@ -2171,6 +2244,12 @@ function renderAdmin(){
         <select class="cfg-in wide" id="planPicker">${PLANS.map(p=>`<option value="${esc(String(p.id))}" ${String(p.id)===String(EDIT_PLAN_ID)?'selected':''}>${esc(p.plan_name||p.version||'plan')}${p.is_default?' — default':''}</option>`).join('')}<option value="__new">+ New plan…</option></select>`:''}
         <label class="cfg-lbl">Plan name / version <span style="color:var(--none)">(stamped on every paid snapshot)</span></label>
         <input class="cfg-in wide" id="cfg_plan" value="${esc(c.planVersion||'')}">
+        <label class="cfg-lbl">Role this plan is for <span style="color:var(--none)">(Hunter · Farmer · Hybrid — reps with no plan assigned use the plan tagged for their role)</span></label>
+        <select class="cfg-in wide" id="cfg_role">${['','Hunter','Farmer','Hybrid'].map(r=>`<option value="${r}" ${(c.role||'')===r?'selected':''}>${r||'— any role —'}</option>`).join('')}</select>
+        <div class="cfg-two">
+          <div><label class="cfg-lbl">Monthly new-RMR quota <span style="color:var(--none)">(performance measure)</span></label><input class="cfg-in" id="cfg_quota" type="number" step="50" value="${Math.round(+c.quotaMonthlyRmr||0)}"> $/mo</div>
+          <div><label class="cfg-lbl">Above-quota accelerator <span style="color:var(--none)">(× term rate · 1 = none)</span></label><input class="cfg-in" id="cfg_accelx" type="number" step="0.05" value="${+c.accelMultiplier||1}"> ×</div>
+        </div>
         <label class="cfg-lbl">Plan type</label>
         <div class="cfg-radios">
           <label><input type="radio" name="cfg_ptype" value="A" ${c.planType!=='B'?'checked':''}> Margin-tiered <span style="color:var(--none)">(current — rate × basis × margin multiplier)</span></label>
@@ -2218,12 +2297,44 @@ function renderAdmin(){
       </div></div>
       <div class="panel"><div class="panel-head"><h2>Auto-renewal commission</h2><span class="qctx">one-time · 12/24-mo only</span></div><div class="admin-body">
         <table class="cfg-table"><thead><tr><th>Term</th><th>Commission</th></tr></thead><tbody>${[12,24].map(t=>`<tr><td>${t} months</td><td><input class="cfg-in" data-autopct="${t}" type="number" step="0.01" value="${Math.round((c.autoRenewalPct&&c.autoRenewalPct[t]!=null?c.autoRenewalPct[t]:(t===12?0.02:0.025))*10000)/100}"> %</td></tr>`).join('')}</tbody></table>
-        <div style="font-size:11px;color:var(--muted);margin-top:8px">36/48/60-month agreements are expected to be renegotiated and earn no auto-renewal commission.</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">36/48/60-month agreements are expected to be renegotiated and earn no auto-renewal commission. Workbook plans pay 0% on auto-renewals.</div>
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Payment split &amp; release</h2><span class="qctx">new-agreement commission</span></div><div class="admin-body">
+        <div class="cfg-two">
+          <div><label class="cfg-lbl">Initial payment</label><input class="cfg-in" id="cfg_imm" type="number" step="1" value="${Math.round((c.immediatePct!=null?c.immediatePct:0.75)*100)}"> %</div>
+          <div><label class="cfg-lbl">Deferred payment</label><input class="cfg-in" id="cfg_hb" type="number" step="1" value="${Math.round((c.holdbackPct!=null?c.holdbackPct:0.25)*100)}"> %</div>
+        </div>
+        <label class="cfg-lbl" style="margin-top:12px">Deferred payment releases</label>
+        <div class="cfg-radios">
+          <label><input type="radio" name="cfg_release" value="offset" ${c.releaseMode==='offset'?'checked':''}> <input class="cfg-in" id="cfg_offset" type="number" step="1" min="0" style="width:56px" value="${+c.releaseOffsetMonths||3}"> months after first billing <span style="color:var(--none)">(workbook: 3 ≈ 90 days after install &amp; first invoice)</span></label>
+          <label><input type="radio" name="cfg_release" value="revenue" ${c.releaseMode!=='offset'?'checked':''}> once <input class="cfg-in" id="cfg_hbthr" type="number" step="1" min="0" style="width:56px" value="${Math.round((c.holdbackThresholdPct!=null?c.holdbackThresholdPct:0.25)*100)}"> % of Year-1 revenue is collected</label>
+        </div>
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Term-conversion incentive</h2><span class="qctx">Farmer · Hybrid · once per account</span></div><div class="admin-body">
+        <div class="cfg-two">
+          <div><label class="cfg-lbl">Incentive <span style="color:var(--none)">(× Monthly RMR · 0 = off)</span></label><input class="cfg-in" id="cfg_convmult" type="number" step="0.05" value="${+c.termConversionMult||0}"> ×</div>
+          <div><label class="cfg-lbl">Minimum new term</label><select class="cfg-in" id="cfg_convmin">${[24,36,48,60].map(t=>`<option value="${t}" ${(+c.termConversionMinTerm||36)===t?'selected':''}>${t} months</option>`).join('')}</select></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:10px">Paid when an agreement is saved with the <b>Term conversion</b> box ticked and its term meets the minimum. It rides with the new-agreement commission (same initial / deferred split). Workbook: 1.5× for converting a 12-month agreement to 36 months.</div>
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Portfolio bonuses (GRR / NRR)</h2><span class="qctx">% of base salary · salary is not stored here</span></div><div class="admin-body">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:10px"><input type="checkbox" id="cfg_pbon" ${c.portfolioBonus?'checked':''}> This plan earns retention and growth bonuses (Farmer / Hybrid)</label>
+        <div class="cfg-two">
+          <div><table class="cfg-table"><thead><tr><th>GRR ≥</th><th>Bonus</th></tr></thead><tbody>${(c.grrBonus||[]).map((t,i)=>`<tr><td><input class="cfg-in" data-grrmin="${i}" type="number" step="0.1" value="${Math.round(t.min*1000)/10}"> %</td><td><input class="cfg-in" data-grrpct="${i}" type="number" step="0.5" value="${Math.round(t.pct*1000)/10}"> % of base</td></tr>`).join('')}</tbody></table></div>
+          <div><table class="cfg-table"><thead><tr><th>NRR ≥</th><th>Bonus</th></tr></thead><tbody>${(c.nrrBonus||[]).map((t,i)=>`<tr><td><input class="cfg-in" data-nrrmin="${i}" type="number" step="0.1" value="${Math.round(t.min*1000)/10}"> %</td><td><input class="cfg-in" data-nrrpct="${i}" type="number" step="0.5" value="${Math.round(t.pct*1000)/10}"> % of base</td></tr>`).join('')}</tbody></table></div>
+        </div>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
+          <label class="cfg-lbl">Check a year <span style="color:var(--none)">(enter the measured figures from the CRM — the tracker does not compute GRR/NRR itself)</span></label>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:12.5px">GRR <input class="cfg-in" id="pb_grr" type="number" step="0.1" style="width:70px" value="96.5"> % &nbsp; NRR <input class="cfg-in" id="pb_nrr" type="number" step="0.1" style="width:70px" value="108"> % &nbsp; <span id="pb_out" style="font-weight:700"></span></div>
+        </div>
       </div></div>`}
     </div>
     <div class="admin-actions">
       <button class="btn-primary" id="cfgSave">Save plan</button>
       <button class="iconbtn" id="cfgNew">+ New plan</button>
+      <select class="cfg-in" id="cfgPreset" title="Load a workbook plan into the editor (then Save plan)"><option value="">Load workbook preset…</option><option value="Hunter">Hunter 2026</option><option value="Farmer">Farmer 2026</option><option value="Hybrid">Hybrid 2026</option></select>
+      <button class="iconbtn" id="cfgSeed" title="Create Hunter 2026, Farmer 2026 and Hybrid 2026 as saved plans (skips any that already exist) and make Hybrid 2026 the default">Create the 3 workbook plans</button>
+      <button class="iconbtn" id="cfgReprice" style="color:var(--held)" title="Rewrite the frozen snapshots of already-PAID commissions at the plan each rep is on today">Re-price paid commissions</button>
       <button class="iconbtn" id="cfgDefault">Set as default</button>
       ${PLANS.length>1?`<button class="iconbtn" id="cfgDelete" style="color:var(--held)">Delete plan</button>`:''}
       <button class="iconbtn" id="cfgReset">Reset to PRD defaults</button>
@@ -2242,6 +2353,13 @@ function renderAdmin(){
     const p=PLANS.find(pp=>String(pp.id)===this.value); if(p){ CONFIG=normalizeConfig(JSON.parse(JSON.stringify(p.config))); EDIT_PLAN_ID=p.id; saveConfig(); renderAdmin(); }
   };
   $('cfgNew').onclick=()=>{ const fresh=JSON.parse(JSON.stringify(DEFAULT_CONFIG)); fresh.planVersion='New plan'; CONFIG=fresh; EDIT_PLAN_ID=null; saveConfig(); renderAdmin(); $('cfg_plan').focus(); $('cfg_plan').select(); };
+  if($('cfgPreset')) $('cfgPreset').onchange=function(){ const r=this.value; if(!r)return; const ex=PLANS.find(p=>p.config&&p.config.role===r&&(p.plan_name||'')===workbookPreset(r).planVersion); CONFIG=workbookPreset(r); EDIT_PLAN_ID=ex?ex.id:null; saveConfig(); renderAdmin(); toast(ex?`${CONFIG.planVersion} loaded — Save plan to update it`:`${CONFIG.planVersion} preset loaded — Save plan to create it`); };
+  if($('cfgSeed')) $('cfgSeed').onclick=seedWorkbookPlans;
+  if($('cfgReprice')) $('cfgReprice').onclick=repricePaidCommissions;
+  const pbCheck=()=>{ const o=$('pb_out'); if(!o)return; const g=(+$('pb_grr').value)/100, n=(+$('pb_nrr').value)/100; const tg=bonusTier(CONFIG.grrBonus,g), tn=bonusTier(CONFIG.nrrBonus,n);
+    o.innerHTML=CONFIG.portfolioBonus?`GRR → <span style="color:var(--payable)">${tg?Math.round(tg.pct*1000)/10:0}%</span> of base · NRR → <span style="color:var(--payable)">${tn?Math.round(tn.pct*1000)/10:0}%</span> of base · total <span style="color:var(--payable)">${Math.round(((tg?tg.pct:0)+(tn?tn.pct:0))*1000)/10}%</span>`:'<span style="color:var(--muted)">portfolio bonuses are off for this plan</span>'; };
+  ['pb_grr','pb_nrr'].forEach(id=>{ if($(id)) $(id).oninput=pbCheck; }); pbCheck();
+  document.querySelectorAll('input[name=cfg_release]').forEach(r=>r.onchange=()=>{});
   $('cfgDefault').onclick=async()=>{
     if(EDIT_PLAN_ID==null){ toast('Save this plan first, then set it as default'); return; }
     $('cfgMsg').style.color='var(--muted)';$('cfgMsg').textContent='Setting default…';
@@ -2261,11 +2379,11 @@ function renderAdmin(){
   $('cfgExport').onclick=()=>{ const blob=new Blob([JSON.stringify(CONFIG,null,2)],{type:'application/json'}); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=`commission-plan-${String(CONFIG.planVersion||'plan').replace(/[^a-z0-9]+/gi,'-')}.json`; a.click(); URL.revokeObjectURL(u); };
   $('cfgImport').onclick=()=>$('cfgFile').click();
   $('cfgFile').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ try{ const j=JSON.parse(r.result); if(!j.newPct||!j.marginTiers)throw 0; CONFIG=normalizeConfig(j); saveConfig(); toast('Plan loaded into editor — review, then Save plan'); renderAdmin(); }catch(err){ toast('Invalid plan file'); } }; r.readAsText(f); };
-  if(!can('editConfig')){ ['cfgSave','cfgNew','cfgDefault','cfgDelete','cfgReset','cfgImport'].forEach(id=>{const b=$(id); if(b){b.disabled=true;b.style.opacity=.5;b.title='Administrator only';}}); if($('planPicker'))$('planPicker').disabled=true; $('cfgMsg').textContent='Read-only — your role cannot modify the plan.'; }
+  if(!can('editConfig')){ ['cfgSave','cfgNew','cfgDefault','cfgDelete','cfgReset','cfgImport','cfgPreset','cfgSeed','cfgReprice'].forEach(id=>{const b=$(id); if(b){b.disabled=true;b.style.opacity=.5;b.title='Administrator only';}}); if($('planPicker'))$('planPicker').disabled=true; $('cfgMsg').textContent='Read-only — your role cannot modify the plan.'; }
   if(can('viewAudit')) renderAudit();
   if(can('editConfig')) renderUsers();
 }
-const ROLE_LIST=['Administrator','Executive','Sales Manager','Sales Representative','Read Only'];
+const ROLE_LIST=['Administrator','Executive','Hunter','Farmer','Hybrid','Read Only'];
 async function renderUsers(){
   const w=$('usersWrap'); if(!w)return;
   let rows=[];
@@ -2277,20 +2395,20 @@ async function renderUsers(){
   const body=rows.map(u=>{const self=(u.email||'').toLowerCase()===(CURRENT_EMAIL||'').toLowerCase();
     return `<tr>
       <td>${esc(u.email)}${self?' <span class="qctx">(you)</span>':''}</td>
-      <td><select class="cfg-in wide" style="width:180px" data-role-email="${esc(u.email)}">${ROLE_LIST.map(r=>opt(r,u.role)).join('')}</select></td>
+      <td><select class="cfg-in wide" style="width:180px" data-role-email="${esc(u.email)}">${ROLE_LIST.map(r=>opt(r,normRole(u.role))).join('')}</select></td>
       ${planCell(u)}
       <td>${self?'':`<button class="iconbtn" data-del-user="${esc(u.email)}">Remove</button>`}</td>
     </tr>`;}).join('');
   w.innerHTML=`<div class="admin-body">
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
       <input id="nuEmail" class="cfg-in wide" placeholder="employee@point1.com" style="width:240px">
-      <select id="nuRole" class="cfg-in wide" style="width:180px">${ROLE_LIST.map(r=>opt(r,'Sales Representative')).join('')}</select>
+      <select id="nuRole" class="cfg-in wide" style="width:180px">${ROLE_LIST.map(r=>opt(r,'Hybrid')).join('')}</select>
       ${PLANS.length?`<select id="nuPlan" class="cfg-in wide" style="width:200px">${planOpts('')}</select>`:''}
       <button class="btn-primary" id="nuAdd">Add / update</button>
     </div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">
       Sets a person's <b>role</b> and the <b>commission plan</b> their agreements calculate under. Their <b>login</b> is created in Supabase ▸ Authentication ▸ Users.
-      Anyone who can sign in but isn't listed here defaults to <b>Sales Representative</b> on the <b>default plan</b>.
+      Anyone who can sign in but isn't listed here defaults to <b>Hybrid</b> on the <b>default plan</b>. A rep with no plan assigned uses the plan tagged for their role (Hunter / Farmer / Hybrid), then the default plan.
     </div>
     <table class="cfg-table"><thead><tr><th>Email</th><th>Role</th>${PLANS.length?'<th>Commission plan</th>':''}<th></th></tr></thead><tbody>${body||`<tr><td colspan="${PLANS.length?4:3}" style="color:var(--muted)">No roles set yet — you are admin by default.</td></tr>`}</tbody></table>
   </div>`;
@@ -2321,7 +2439,7 @@ async function renderUsers(){
   w.querySelectorAll('[data-del-user]').forEach(b=>b.onclick=async()=>{
     const em=b.dataset.delUser;
     if((em||'').toLowerCase()===(CURRENT_EMAIL||'').toLowerCase()){ toast("You can't remove your own access"); return; }
-    if(!confirm(`Remove ${em}? They keep their Supabase login but revert to the default Sales Representative role on the default plan.`)) return;
+    if(!confirm(`Remove ${em}? They keep their Supabase login but revert to the default Hybrid role on the default plan.`)) return;
     try{ const {error}=await sb.from('rmr_users').delete().eq('email',em); if(error)throw error;
       audit('User role removed','Admin',em,null,null); toast('Removed'); await loadUsers(); renderUsers(); render(); }
     catch(e){ toast(e.message||'Failed'); }
@@ -2353,7 +2471,9 @@ function saveAdmin(){
   if(isNaN(target)||target<=0||target>1) errs.push('Target margin must be between 0 and 100%.');
   if(isNaN(min)||min<0||min>1) errs.push('Minimum margin must be between 0 and 100%.');
   if(!errs.length && min>target) errs.push('Minimum margin cannot exceed target margin.');
-  const newConf={...CONFIG, planVersion:plan, planType, basis, targetMargin:target, minMargin:min};
+  const role=($('cfg_role')&&$('cfg_role').value)||'', quotaV=+($('cfg_quota')?$('cfg_quota').value:0)||0, accelV=+($('cfg_accelx')?$('cfg_accelx').value:1)||1;
+  if(quotaV<0) errs.push('Quota cannot be negative.'); if(accelV<1) errs.push('Accelerator must be 1.0 or higher (1 = none).');
+  const newConf={...CONFIG, planVersion:plan, planType, basis, targetMargin:target, minMargin:min, role, quotaMonthlyRmr:quotaV, accelMultiplier:accelV};
   if(planType==='B'){
     const mult=(+$('cfg_rmrmult').value)/100, ni=(+$('cfg_newinit').value)/100, nd=(+$('cfg_newdef').value)/100, ri=(+$('cfg_reninit').value)/100, rd=(+$('cfg_rendef').value)/100, bm=(+$('cfg_bman').value)/100, ba=(+$('cfg_bauto').value)/100;
     if(isNaN(mult)||mult<0) errs.push('Commission rate (% of RMR) is invalid.');
@@ -2377,6 +2497,23 @@ function saveAdmin(){
     if(errs.length){ msg.style.color='var(--held)'; msg.textContent=errs[0]; return; }
     tiers.sort((a,b)=>b.min-a.min);
     Object.assign(newConf,{newPct,renewalPct,autoRenewalPct,marginTiers:tiers});
+    // workbook fields: split & release, term conversion, portfolio bonuses
+    const im=(+$('cfg_imm').value)/100, hb=(+$('cfg_hb').value)/100;
+    if(isNaN(im)||isNaN(hb)||Math.abs((im+hb)-1)>0.005) errs.push('Initial + deferred must add up to 100%.');
+    const relMode=(document.querySelector('input[name=cfg_release]:checked')||{}).value||'revenue';
+    const off=+$('cfg_offset').value, thr=(+$('cfg_hbthr').value)/100;
+    if(relMode==='offset'&&(isNaN(off)||off<0)) errs.push('Release offset (months) is invalid.');
+    if(relMode!=='offset'&&(isNaN(thr)||thr<0||thr>1)) errs.push('Release threshold % is invalid.');
+    const cm=+$('cfg_convmult').value, cmin=+$('cfg_convmin').value;
+    if(isNaN(cm)||cm<0) errs.push('Term-conversion incentive is invalid.');
+    const grr=[],nrr=[];
+    document.querySelectorAll('[data-grrmin]').forEach(i=>{const k=+i.dataset.grrmin; grr[k]={min:(+i.value)/100,pct:(+document.querySelector(`[data-grrpct="${k}"]`).value)/100};});
+    document.querySelectorAll('[data-nrrmin]').forEach(i=>{const k=+i.dataset.nrrmin; nrr[k]={min:(+i.value)/100,pct:(+document.querySelector(`[data-nrrpct="${k}"]`).value)/100};});
+    [...grr,...nrr].forEach(t=>{ if(!t||isNaN(t.min)||isNaN(t.pct)||t.pct<0) errs.push('A portfolio-bonus tier is invalid.'); });
+    if(errs.length){ msg.style.color='var(--held)'; msg.textContent=errs[0]; return; }
+    grr.sort((a,b)=>a.min-b.min); nrr.sort((a,b)=>a.min-b.min);
+    Object.assign(newConf,{immediatePct:im,holdbackPct:hb,releaseMode:relMode,releaseOffsetMonths:relMode==='offset'?off:(CONFIG.releaseOffsetMonths||3),holdbackThresholdPct:relMode!=='offset'?thr:(CONFIG.holdbackThresholdPct!=null?CONFIG.holdbackThresholdPct:0.25),
+      termConversionMult:cm,termConversionMinTerm:cmin,portfolioBonus:!!($('cfg_pbon')&&$('cfg_pbon').checked),grrBonus:grr,nrrBonus:nrr});
   }
   const isNew=(EDIT_PLAN_ID==null);
   const assigned=Object.values(USER_PLAN).filter(pid=>String(pid)===String(EDIT_PLAN_ID)).length;
@@ -2392,6 +2529,44 @@ function saveAdmin(){
   });
   audit(isNew?'Commission plan created':'Commission plan modified','Admin',null,before,{planVersion:plan,planType,basis},null);
   toast('Commission plan saved');
+}
+/* ── Create the three workbook plans in one click; Hybrid 2026 becomes the default ── */
+async function seedWorkbookPlans(){
+  if(!can('editConfig')){ toast('Administrator only'); return; }
+  if(!confirm('Create the workbook plans Hunter 2026, Farmer 2026 and Hybrid 2026 (skipping any that already exist) and make Hybrid 2026 the default plan? Every UNPAID commission for reps on the default plan will re-price.')) return;
+  let made=[], hybridId=null;
+  for(const r of ['Hunter','Farmer','Hybrid']){
+    const cfg=workbookPreset(r);
+    const ex=PLANS.find(p=>(p.plan_name||'')===cfg.planVersion);
+    if(ex){ if(r==='Hybrid') hybridId=ex.id; continue; }
+    const res=await persistPlan(cfg,null,false);
+    if(res.ok){ made.push(cfg.planVersion); if(r==='Hybrid') hybridId=res.id; } else { toast(res.err||'Could not create '+cfg.planVersion); return; }
+  }
+  if(hybridId!=null){ const h=PLANS.find(p=>String(p.id)===String(hybridId)); if(h) await persistPlan(h.config,hybridId,true); EDIT_PLAN_ID=hybridId; CONFIG=normalizeConfig(JSON.parse(JSON.stringify((PLANS.find(p=>String(p.id)===String(hybridId))||{}).config||CONFIG))); saveConfig(); }
+  audit('Workbook plans created','Admin',null,null,{created:made,defaultPlan:'Hybrid 2026'});
+  toast(made.length?`Created ${made.join(', ')} — Hybrid 2026 is the default`:'Workbook plans already exist — Hybrid 2026 set as default');
+  renderAdmin(); render();
+}
+/* ── Re-price PAID commissions: rewrite frozen snapshots at each rep's current plan (audited; original paid dates kept) ── */
+async function repricePaidCommissions(){
+  if(!can('editConfig')){ toast('Administrator only'); return; }
+  if(!confirm('Re-price every already-PAID commission at the plan each rep is on today?\n\nThis rewrites the frozen paid amounts in Commission History and the ledger (paid dates are kept). Unpaid commissions already follow the current plan. This cannot be undone except by editing snapshots by hand.')) return;
+  const PIECES=[['initial','initial_snapshot','paid_initial'],['immediate','immediate_snapshot','paid_immediate'],['holdback','holdback_snapshot','paid_holdback'],['renewal','renewal_snapshot','renewal_paid']];
+  let n=0, delta=0, failed=0;
+  for(const a of AGREEMENTS){
+    if(!isLiveAgreement(a)) continue;
+    const upd={};
+    PIECES.forEach(([type,snapCol,paidCol])=>{ if(a[paidCol]&&a[snapCol]&&a[snapCol].amount!=null){ const s=buildSnapshot(a,type); s.paid_date=a[snapCol].paid_date||s.paid_date; s.repriced_on=todayISO(); s.previous_amount=+a[snapCol].amount||0; delta+=(+s.amount||0)-(+a[snapCol].amount||0); upd[snapCol]=s; } });
+    if(a.accel_paid&&typeof a.accel_paid==='object'){ const c=compute(a); let changed=false; const map=JSON.parse(JSON.stringify(a.accel_paid));
+      Object.keys(map).forEach(seq=>{ const p=(c.acceleratorPieces||[]).find(x=>String(x.seq)===String(seq)); if(map[seq]&&map[seq].paid&&map[seq].snapshot&&p){ delta+=p.amount-(+map[seq].snapshot.amount||0); map[seq].snapshot={...map[seq].snapshot,previous_amount:+map[seq].snapshot.amount||0,amount:p.amount,plan_version:c.planVersion,repriced_on:todayISO()}; changed=true; } });
+      if(changed) upd.accel_paid=map; }
+    if(!Object.keys(upd).length) continue;
+    try{ const {error}=await sb.from('rmr_agreements').update({...upd,updated_at:new Date().toISOString()}).eq('id',a.id); if(error)throw error; Object.assign(a,upd); n++; }
+    catch(e){ failed++; }
+  }
+  audit('Paid commissions re-priced under current plans','Admin',null,null,{agreements:n,net_change:Math.round(delta*100)/100,failed});
+  toast(`Re-priced ${n} agreement${n===1?'':'s'} (${delta>=0?'+':'−'}${fmt(Math.abs(delta))} net)${failed?` · ${failed} failed`:''}`);
+  render();
 }
 function renderLegend(){
   const items=[['c-payable','Payable — owed to you'],['c-paid','Paid — collected'],['c-maturing','Manual renewal needed'],['c-held','Urgent — renewal due / overdue']];
@@ -2426,6 +2601,12 @@ function readSchedule(){
   })).filter(x=>x.amount>0);
 }
 function toggleBilling(){ $('billWrap').classList.toggle('show',$('f_custom').checked); updatePreview(); }
+function refreshTermLabels(cfg){   // show each term's multiple of Monthly RMR under the plan that will price this agreement
+  const sel=$('f_term'); if(!sel||!cfg)return;
+  [...sel.options].forEach(o=>{ const t=+o.value; if(!t){ o.textContent='Month-to-month'; return; }
+    const nm=(pctFor(cfg.newPct||{},t)||0)*(cfg.basis==='ACV'?12:t), rm=(pctFor(cfg.renewalPct||{},t)||0)*(cfg.basis==='ACV'?12:t);
+    o.textContent=`${t} months (${nm.toFixed(2)}× MRR new${rm>0?` · ${rm.toFixed(2)}× renewal`:''})`; });
+}
 function todayISO(){return new Date().toISOString().slice(0,10);}
 function openModal(id,promote){
   if(!can('editAgreements')){ toast('Your role can view agreements but not add or edit them.'); return; }
@@ -2450,6 +2631,8 @@ function openModal(id,promote){
   $('f_soft').value=v('software_cost_annual');$('f_sub').value=v('subcontractor_annual_cost');$('f_other').value=v('other_direct_annual');
   $('f_target').value=(a&&a.target_margin!=null&&a.target_margin!=='')?Math.round(a.target_margin*100):'';
   $('f_type').value=(a&&a.agreement_type)||((a&&a.autorenew)?'auto':'manual');
+  if($('f_termconv')) $('f_termconv').checked=!!(a&&a.term_conversion);
+  refreshTermLabels(resolvePlan(a||{owner_email:CURRENT_EMAIL}));
   // Renewal section — date/credit are editable once renewed; Revert appears only for renewed agreements
   const renewed=!!(a&&a.renewed);
   $('f_rendate').value=(a&&a.renewal_date)?String(a.renewal_date).slice(0,10):'';
@@ -3034,6 +3217,7 @@ function readForm(){return{
   target_margin:($('f_target').value.trim()===''?null:(+$('f_target').value/100)),
   owner_email:(canViewAll()&&$('ownerFld')&&$('ownerFld').style.display!=='none'&&$('f_owner').value)?$('f_owner').value:(editingId?((AGREEMENTS.find(a=>a.id===editingId)||{}).owner_email||CURRENT_EMAIL||null):(CURRENT_EMAIL||null)),
   autorenew:($('f_type').value==='auto'),agreement_type:$('f_type').value,notes:$('f_notes').value.trim(),
+  term_conversion:!!($('f_termconv')&&$('f_termconv').checked),
   renewal_date:($('f_rendate')&&$('f_rendate').value)||null,
   renewal_credit_month:($('f_rencredit')&&$('f_rencredit').value)||null,
   stage:($('f_stage')&&$('f_stage').value)||null,
@@ -3113,12 +3297,14 @@ function calcPanelHTML(c, B, row, acvId, tcvId){
     <div><span>Net profit <span style="color:var(--none)">(${B==='ACV'?'annual':'full contract'} · after costs · commission · overhead)</span></span><b style="font-size:15px;color:${vNet<0?'var(--held)':'var(--paid)'}">${fmt(vNet)}</b></div>
     ${alert}
     <div style="grid-column:1/-1;border-top:1px solid var(--line);margin-top:2px;padding-top:6px"></div>
-    <div><span>New: base ${Math.round(c.newPct*1000)/10}%</span><b style="font-size:13px;color:var(--muted)">${fmt(c.baseCommissionNew)}</b></div>
+    <div><span>New: base ${Math.round(c.newPct*1000)/10}% <span style="color:var(--none)">= ${(c.newPct*(c.basis==='ACV'?12:c.months)).toFixed(2)}× MRR</span></span><b style="font-size:13px;color:var(--muted)">${fmt(c.baseCommissionNew)}</b></div>
     <div><span>New commission <span style="color:var(--none)">× ${c.marginMultiplier.toFixed(2)}</span></span><b style="color:var(--payable);font-size:17px">${fmt(c.initialCommission)}</b></div>
     <div><span>When</span><b style="font-size:13px">${initWhen}</b></div>
-    ${!c.legacyFull?`<div style="grid-column:1/-1;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.03em;text-transform:uppercase;margin-top:2px">Payout schedule — new-agreement holdback</div>
-    <div><span>Standard 75% <span style="color:var(--none)">now · ${initWhen.replace('pays ','')}</span></span><b style="color:var(--payable);font-size:15px">${fmt(c.immediateCommission)}</b></div>
-    <div><span>Holdback 25% <span style="color:var(--none)">→ ${c.holdbackQI!=null?qLabel(c.holdbackQI):'set date'} · 25% of Yr-1</span></span><b style="font-size:15px;color:var(--orange)">${fmt(c.holdbackCommission)}</b></div>
+    ${c.quotaAccelExtra>0?`<div><span>Quota accelerator <span style="color:var(--none)">${fmt2(c.quotaAboveRmr)}/mo above the ${fmt(c.quota)}/mo quota × ${c.accelX}</span></span><b style="font-size:13px;color:#5a3fb8">+${fmt(c.quotaAccelExtra)}</b></div>`:(c.quota>0?`<div><span>Monthly quota <span style="color:var(--none)">${fmt(c.quota)}/mo · this month so far ${fmt2(c.quotaMonthRmr)}/mo</span></span><b style="font-size:13px;color:var(--muted)">${c.accelX>1?'no accelerator yet':'performance measure'}</b></div>`:'')}
+    ${c.conversionCommission>0?`<div><span>Term-conversion incentive <span style="color:var(--none)">${(c.conversionCommission/(c.mrr||1)).toFixed(2)}× MRR · one time</span></span><b style="font-size:13px;color:#5a3fb8">+${fmt(c.conversionCommission)}</b></div>`:''}
+    ${!c.legacyFull?`<div style="grid-column:1/-1;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.03em;text-transform:uppercase;margin-top:2px">Payout schedule — new-agreement split</div>
+    <div><span>${splitLabels(c).imm} <span style="color:var(--none)">now · ${initWhen.replace('pays ','')}</span></span><b style="color:var(--payable);font-size:15px">${fmt(c.immediateCommission)}</b></div>
+    <div><span>${splitLabels(c).def} <span style="color:var(--none)">→ ${c.holdbackQI!=null?qLabel(c.holdbackQI):'set date'} · ${splitLabels(c).defWhen}</span></span><b style="font-size:15px;color:var(--orange)">${fmt(c.holdbackCommission)}</b></div>
     ${c.acceleratorHeld>0?`<div><span>Accelerator <span style="color:var(--none)">${(c.acceleratorPieces||[]).length} installments, released as collected</span></span><b style="font-size:15px;color:#5a3fb8">${fmt(c.acceleratorHeld)}</b></div><div><span style="color:var(--none)">held for profitability</span><b></b></div>`:''}`:''}
     <div><span>Renewal: base ${Math.round(c.renewalPct*1000)/10}%</span><b style="font-size:13px;color:var(--muted)">${fmt(c.baseCommissionRenewal)}</b></div>
     <div><span>Renewal commission</span><b style="font-size:16px">${fmt(c.renewalCommission)}</b></div>
@@ -3148,7 +3334,7 @@ function quarterRange(qi){
   return {label:`Q${q} ${y}`, range:`${mn[s[0]]} ${s[1]} – ${mn[e[0]]} ${e[1]}, ${y}`};
 }
 function repName(email){
-  if(!email) return 'Sales Representative';
+  if(!email) return 'Rep';
   return email.split('@')[0].split(/[._-]/).filter(Boolean).map(s=>s.charAt(0).toUpperCase()+s.slice(1)).join(' ');
 }
 function exportQuarterPDF(details){
@@ -3162,9 +3348,9 @@ function exportQuarterPDF(details){
       if(c.initialQI===selQI&&fi.amount>0) initials.push({a,amount:fi.amount,paid:!!a.paid_initial,mult:c.initMult,frozen:fi.frozen,piece:'Initial'});
     } else {
       const fim=frozenAmount(a,'immediate');
-      if(c.initialQI===selQI&&fim.amount>0) initials.push({a,amount:fim.amount,paid:!!a.paid_immediate,mult:c.initMult,frozen:fim.frozen,piece:'Standard 75%'});
+      if(c.initialQI===selQI&&fim.amount>0) initials.push({a,amount:fim.amount,paid:!!a.paid_immediate,mult:c.initMult,frozen:fim.frozen,piece:splitLabels(c).imm});
       const fh=frozenAmount(a,'holdback');
-      if(c.holdbackQI===selQI&&fh.amount>0) initials.push({a,amount:fh.amount,paid:!!a.paid_holdback,mult:c.initMult,frozen:fh.frozen,piece:'Holdback 25%'});
+      if(c.holdbackQI===selQI&&fh.amount>0) initials.push({a,amount:fh.amount,paid:!!a.paid_holdback,mult:c.initMult,frozen:fh.frozen,piece:splitLabels(c).def});
       (c.acceleratorPieces||[]).forEach(p=>{ if(p.qi===selQI){ const pd=(a.accel_paid&&a.accel_paid[p.seq])||null; const amt=(pd&&pd.paid&&pd.snapshot)?+pd.snapshot.amount:p.amount; if(amt>0) initials.push({a,amount:amt,paid:!!(pd&&pd.paid),mult:c.initMult,frozen:!!(pd&&pd.paid),piece:`Accelerator ${p.seq}`}); } });
     }
     if(a.autorenew){
@@ -3236,7 +3422,7 @@ function exportQuarterPDF(details){
   doc.text(`Prepared by — ${name}`,M,y+5);doc.text('Date: ____________',M,y+10);
   doc.text('Approved by (signature)',M+colW+12,y+5);doc.text('Date: ____________',M+colW+12,y+10);
   doc.setFontSize(7.5);doc.setTextColor(150,150,150);
-  doc.text('Generated by P1 Bonus Tracking Tool. Initial % by term (12mo 100% · 24mo 125% · 36/60 200%); renewal % once at renewal (12mo 150% · 24mo 125%).',M,288,{maxWidth:W-2*M});
+  doc.text('Generated by P1 Bonus Tracking Tool. Commission = Monthly RMR × term multiple per the assigned plan (Hunter / Farmer / Hybrid); see Admin ▸ plan for the schedule in force.',M,288,{maxWidth:W-2*M});
   doc.save(`P1-Bonus-${qr.label.replace(' ','-')}.pdf`);
 }
 
