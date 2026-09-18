@@ -2146,7 +2146,7 @@ function commStatusLabel(r){
   if(r.paid) return `${r.type} — Paid`;
   if(r.mult===0) return `${r.type} — Not eligible (below margin floor)`;
   switch(r.piece){
-    case 'holdback': return `Deferred — releases ${c?splitLabels(c).defWhen:'later'}${q?` · eligible ${q}`:''}`;
+    case 'holdback': return `Deferred — releases ${splitLabels(r.c||(r.a?compute(r.a):null)).defWhen}${q?` · eligible ${q}`:''}`;
     case 'accel':    return `Accelerator — held until 50% realized margin${q?` · eligible ${q}`:''}`;
     case 'renewal':  return r.pending?`Renewal — pending renewal`:`Renewal commission — eligible${q?` ${q}`:''}`;
     default:         return `Standard commission — eligible${q?` ${q}`:''}`;
