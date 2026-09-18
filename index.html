@@ -1275,7 +1275,7 @@ const APP_VERSION='P1RMR-55';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
-  CURRENT_EMAIL=email||''; const lc=(email||'').toLowerCase();
+  CURRENT_EMAIL=(email||'').trim().toLowerCase(); const lc=CURRENT_EMAIL;
   if(ADMIN_EMAILS.includes(lc)){ CURRENT_ROLE='Administrator'; return; }   // guaranteed admin
   try{ const {data,error}=await sb.from('rmr_users').select('role').eq('email',lc).limit(1); if(error)throw error; CURRENT_ROLE=normRole(data&&data[0]&&data[0].role); }
   catch(e){ CURRENT_ROLE='Hybrid'; }   // table missing → least privilege (Sean still admin via list above)
@@ -1298,7 +1298,7 @@ const PERMISSIONS={
 function can(fn){ return (PERMISSIONS[fn]||[]).includes(CURRENT_ROLE); }
 let USER_FILTER=null;   // null = all visible; else array of owner keys to include
 function canViewAll(){ return ['Administrator','Executive'].includes(CURRENT_ROLE); }
-function ownerKey(a){ return (a&&a.owner_email)?a.owner_email:'(unassigned)'; }
+function ownerKey(a){ return (a&&a.owner_email)?String(a.owner_email).trim().toLowerCase():'(unassigned)'; }   // e-mails compare case-insensitively
 /* ---- Opportunity pipeline: stage lives on the agreement record ----
    stage: undefined/null/'won'/'active' = a live agreement (counts toward commission);
           'opportunity'/'quoting' = open pipeline; 'lost' = terminal pipeline. */
@@ -1404,9 +1404,9 @@ async function loadUsers(){
   catch(e){ try{ const {data}=await sb.from('rmr_users').select('email,role'); users=data||[]; }catch(_){ try{ const {data}=await sb.from('rmr_users').select('email'); users=data||[]; }catch(__){ users=[]; } } }
   USER_PLAN={}; USER_ROLE={};
   const set=new Set();
-  users.forEach(u=>{ if(u&&u.email){ set.add(u.email); const em=String(u.email).toLowerCase(); if(u.plan_id!=null&&u.plan_id!=='') USER_PLAN[em]=u.plan_id; if(u.role) USER_ROLE[em]=normRole(u.role); } });
-  AGREEMENTS.forEach(a=>{ if(a.owner_email) set.add(a.owner_email); });
-  if(CURRENT_EMAIL) set.add(CURRENT_EMAIL);
+  users.forEach(u=>{ if(u&&u.email){ const em=String(u.email).trim().toLowerCase(); set.add(em); if(u.plan_id!=null&&u.plan_id!=='') USER_PLAN[em]=u.plan_id; if(u.role) USER_ROLE[em]=normRole(u.role); } });
+  AGREEMENTS.forEach(a=>{ if(a.owner_email) set.add(String(a.owner_email).trim().toLowerCase()); });
+  if(CURRENT_EMAIL) set.add(String(CURRENT_EMAIL).toLowerCase());
   KNOWN_USERS=[...set].filter(Boolean).sort();
 }
 let ACTIVE_PLAN_ID=null;
