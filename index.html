@@ -186,6 +186,16 @@
   .pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px 16px}
   .pgrid div span{display:block;font-size:11.5px;color:var(--muted)}
   .pgrid div b{font-size:16px;font-weight:700}
+  .wf{grid-column:1/-1;display:grid;grid-template-columns:minmax(150px,1.3fr) 86px minmax(140px,2fr);gap:4px 12px;align-items:center;font-size:12.5px}
+  .wf .wf-h{grid-column:1/-1;font-weight:700;color:var(--muted);font-size:11px;letter-spacing:.04em;text-transform:uppercase;margin-top:2px}
+  .wf .wf-l{color:var(--ink)} .wf .wf-l small{display:block;font-size:11px;color:var(--muted)}
+  .wf .wf-v{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .wf .wf-t{position:relative;height:12px;background:rgba(15,31,58,.05);border-radius:3px}
+  .wf .wf-z{position:absolute;top:-2px;bottom:-2px;width:1px;background:var(--line)}
+  .wf .wf-b{position:absolute;top:1px;height:10px;border-radius:2px}
+  .wf .wf-b.tot{background:var(--navy)} .wf .wf-b.neg{background:#c9622f} .wf .wf-b.loss{background:var(--held)}
+  .wf .wf-row{display:contents} .wf .wf-row:hover>*{background:rgba(15,31,58,.04)}
+  .wf .wf-sub{grid-column:1/-1;height:1px;background:var(--line);margin:2px 0}
   .modal-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:16px 22px;border-top:1px solid var(--line)}
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:14px;font-weight:500;box-shadow:0 10px 30px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:120}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
@@ -3225,6 +3235,15 @@ function readForm(){return{
   legacy_full_pay: (editingId ? (((AGREEMENTS.find(a=>a.id===editingId)||{}).legacy_full_pay)!==false) : false),
   billing_log: (EDIT_LOG&&EDIT_LOG.length)?EDIT_LOG:null};}
 let PREVIEW_BASIS='ACV';   // view-only deal-value basis for the live calculation panel (commission always uses the plan basis)
+/* Profit waterfall for the live-calculation panel: each step is a floating bar from the running balance; totals anchor at zero. */
+function waterfallHTML(title, steps){
+  let run=0; const rows=[];
+  steps.forEach(s=>{ if(s.kind==='minus'){ const from=run; run-=Math.abs(+s.amount||0); rows.push({...s,from,to:run}); } else { run=+s.amount||0; rows.push({...s,from:0,to:run}); } });
+  const lo=Math.min(0,...rows.map(r=>Math.min(r.from,r.to))), hi=Math.max(0,...rows.map(r=>Math.max(r.from,r.to))); const span=(hi-lo)||1; const X=v=>((v-lo)/span*100);
+  const body=rows.map(r=>{ const a=Math.min(r.from,r.to), b=Math.max(r.from,r.to); const cls=r.kind==='minus'?'neg':(r.to<0?'loss':'tot'); const val=r.kind==='minus'?'−'+fmt(Math.abs(r.amount)):fmt(r.to);
+    return `<div class="wf-row" title="${esc(r.label)}: ${val}${r.kind==='minus'?` · balance ${fmt(r.to)}`:''}">${r.rule?'<div class="wf-sub"></div>':''}<div class="wf-l">${esc(r.label)}${r.note?`<small>${r.note}</small>`:''}</div><div class="wf-v" style="color:${cls==='neg'?'#9a4a1f':(cls==='loss'?'var(--held)':'var(--ink)')}">${val}</div><div class="wf-t"><div class="wf-z" style="left:${X(0)}%"></div><div class="wf-b ${cls}" style="left:${X(a)}%;width:${Math.max(0.4,(b-a)/span*100)}%"></div></div></div>`; }).join('');
+  return `<div class="wf"><div class="wf-h">${title}</div>${body}</div>`;
+}
 function calcPanelB(c, B, acvId, tcvId){
   const tbtn=(id,l,on)=>`<button type="button" id="${id}" style="border:1px solid var(--line);background:${on?'var(--navy)':'#fff'};color:${on?'#fff':'var(--muted)'};border-radius:6px;padding:1px 8px;font-size:11px;font-weight:600;cursor:pointer">${l}</button>`;
   const gm=c.grossMargin, mPct=gm==null?'—':`${Math.round(gm*1000)/10}%`, floor=c.minMargin!=null?c.minMargin:0.45, floorHit=gm!=null&&gm<floor;
@@ -3237,13 +3256,14 @@ function calcPanelB(c, B, acvId, tcvId){
   <div class="pgrid">
     <div><span>MRR <span style="color:var(--none)">(annual billing ÷ 12)</span></span><b style="font-size:15px">${fmt2(c.mrr)}</b></div>
     <div><span>${pvLabel}</span><b style="font-size:15px">${fmt(pvVal)}</b></div>
-    <div style="grid-column:1/-1;font-weight:700;color:var(--muted);font-size:11px;letter-spacing:.04em;text-transform:uppercase;margin-top:2px">Margin Engine <span style="text-transform:none;font-weight:500">(flat rate — no margin multiplier)</span></div>
-    <div><span>${vRevLabel}</span><b style="font-size:14px">${fmt(vRev)}</b></div>
-    <div><span>Direct costs <span style="color:var(--none)">(${vDirNote} · labor ${fmt(c.laborCost)})</span></span><b style="font-size:14px">${fmt(vDirect)}</b></div>
-    <div><span>Gross profit</span><b style="font-size:14px">${fmt(vGP)}</b></div>
-    <div><span>Gross margin <span style="color:var(--none)">(floor ${Math.round(floor*100)}%)</span></span><b style="font-size:15px;color:${floorHit?'var(--held)':'var(--paid)'}">${mPct}</b></div>
-    <div><span>Overhead <span style="color:var(--none)">(${Math.round(c.overheadPct*100)}% of ${B} ${fmt(vRev)})</span></span><b style="font-size:14px;color:var(--held)">−${fmt(vOH)}</b></div>
-    <div><span>Net profit <span style="color:var(--none)">(${B==='ACV'?'annual':'full contract'} · after costs · commission · overhead)</span></span><b style="font-size:15px;color:${vNet<0?'var(--held)':'var(--paid)'}">${fmt(vNet)}</b></div>
+    ${waterfallHTML(`Margin Engine <span style="text-transform:none;font-weight:500">· flat rate — no margin multiplier · ${B==='ACV'?'annual':'full contract'}</span>`,[
+      {label:vRevLabel,amount:vRev,kind:'start'},
+      {label:'Direct costs',note:`${vDirNote} · labor ${fmt(c.laborCost)}`,amount:vDirect,kind:'minus'},
+      {label:'Gross profit',note:`${mPct} margin · floor ${Math.round(floor*100)}%${floorHit?' · below floor':''}`,amount:vGP,kind:'total',rule:true},
+      {label:'Commission',note:`RMR multiple · initial + deferred`,amount:c.bTotalCommission,kind:'minus'},
+      {label:'Overhead',note:`${Math.round(c.overheadPct*100)}% of ${B} ${fmt(vRev)}`,amount:vOH,kind:'minus'},
+      {label:'Net profit',note:`after costs · commission · overhead`,amount:vNet,kind:'total',rule:true}
+    ])}
     ${floorHit?`<div style="grid-column:1/-1;background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:7px 10px;font-size:12px;color:#9a2a2a"><b>⚠ Below minimum margin (${Math.round(floor*100)}%).</b> Commission pays $0 — management approval required.</div>`:''}
     <div style="grid-column:1/-1;border-top:1px solid var(--line);margin-top:2px;padding-top:6px"></div>
     <div><span>Commission rate <span style="color:var(--none)">(${Math.round((c.bRmrMultiple||2)*100)}% × MRR)</span></span><b style="font-size:13px;color:var(--muted)">${fmt2(c.mrr)}</b></div>
@@ -3287,14 +3307,14 @@ function calcPanelHTML(c, B, row, acvId, tcvId){
   <div class="pgrid">
     <div><span>MRR <span style="color:var(--none)">(annual billing ÷ 12)</span></span><b style="font-size:15px">${fmt2(c.mrr)}</b></div>
     <div><span>${pvLabel} <span style="color:var(--none)">${pvNote}</span></span><b style="font-size:15px">${fmt(pvVal)}</b></div>
-    <div style="grid-column:1/-1;font-weight:700;color:var(--muted);font-size:11px;letter-spacing:.04em;text-transform:uppercase;margin-top:2px">Margin Engine</div>
-    <div><span>${vRevLabel}</span><b style="font-size:14px">${fmt(vRev)}</b></div>
-    <div><span>Direct costs <span style="color:var(--none)">(${vDirNote} · labor ${fmt(c.laborCost)})</span></span><b style="font-size:14px">${fmt(vDirect)}</b></div>
-    <div><span>Gross profit</span><b style="font-size:14px">${fmt(vGP)}</b></div>
-    <div><span>Gross margin <span style="color:var(--none)">(${esc(c.marginStatus||'—')}${tgtTxt?' · '+tgtTxt:''})</span></span><b style="color:${mColor};font-size:15px">${mDot} ${mPct}</b></div>
-    <div><span>Margin multiplier</span><b style="color:${multColor};font-size:15px">×${c.marginMultiplier.toFixed(2)}</b></div>
-    <div><span>Overhead <span style="color:var(--none)">(${Math.round(c.overheadPct*100)}% of ${B} ${fmt(vRev)})</span></span><b style="font-size:14px;color:var(--held)">−${fmt(vOH)}</b></div>
-    <div><span>Net profit <span style="color:var(--none)">(${B==='ACV'?'annual':'full contract'} · after costs · commission · overhead)</span></span><b style="font-size:15px;color:${vNet<0?'var(--held)':'var(--paid)'}">${fmt(vNet)}</b></div>
+    ${waterfallHTML(`Margin Engine <span style="text-transform:none;font-weight:500">· ${B==='ACV'?'annual':'full contract'}</span>`,[
+      {label:vRevLabel,amount:vRev,kind:'start'},
+      {label:'Direct costs',note:`${vDirNote} · labor ${fmt(c.laborCost)}`,amount:vDirect,kind:'minus'},
+      {label:'Gross profit',note:`${mDot} ${mPct} margin · ${esc(c.marginStatus||'—')}${tgtTxt?' · '+tgtTxt:''}`,amount:vGP,kind:'total',rule:true},
+      {label:'Commission',note:`new-agreement · × ${c.marginMultiplier.toFixed(2)} margin multiplier`,amount:c.initialCommission,kind:'minus'},
+      {label:'Overhead',note:`${Math.round(c.overheadPct*100)}% of ${B} ${fmt(vRev)}`,amount:vOH,kind:'minus'},
+      {label:'Net profit',note:`after costs · commission · overhead`,amount:vNet,kind:'total',rule:true}
+    ])}
     ${alert}
     <div style="grid-column:1/-1;border-top:1px solid var(--line);margin-top:2px;padding-top:6px"></div>
     <div><span>New: base ${Math.round(c.newPct*1000)/10}% <span style="color:var(--none)">= ${(c.newPct*(c.basis==='ACV'?12:c.months)).toFixed(2)}× MRR</span></span><b style="font-size:13px;color:var(--muted)">${fmt(c.baseCommissionNew)}</b></div>
