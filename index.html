@@ -302,6 +302,7 @@
   <button data-view="agreements" id="tabAgreements" title="Every active RMR agreement with its RMR, term, margin, and commission. Managers can click a row to see the full live calculation (ACV/TCV, overhead, net) or Edit the deal.">Agreements</button>
   <button data-view="renewals" id="tabRenewals" title="Renewals due now or soon that you need to act on. Manual renewals pay every cycle (Renew button); auto-renewals pay once. Rows color green→amber→red as the date nears.">Pending Renewals</button>
   <button data-view="forecast" id="tabForecast" title="What upcoming renewals are worth — the estimated renewal bonus, the math behind it, and reminder dates. Planning only; it doesn't create commissions.">Renewal Forecast</button>
+  <button data-view="recon" id="tabRecon" title="Year-by-year reconciliation: what was paid under the 2025 plan, what the 2026 plan has earned, renewals, the portfolio bonus, and draws — with the balance owed.">Reconciliation</button>
   <button data-view="history" id="tabHistory" title="A full ledger of every commission event — initial, holdback, accelerator, and renewal — with amount, plan, and paid/pending status. Sortable and exportable.">Commission History</button>
   <button data-view="reports" id="tabReports" title="Analytics across all agreements: customer profitability with per-deal breakdowns, and an itemized list of every upcoming held & forecast release.">Reports</button>
   <button data-view="admin" id="tabAdmin" title="Admin tools: manage users and roles, commission plans, and build/verify the commission ledger. Restricted to administrators.">⚙ Admin</button>
@@ -366,6 +367,11 @@
       <div style="display:flex;flex-direction:column;gap:6px">
         <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)">Activated in
           <select id="agFilter" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:13px;background:#fff;font-weight:600;color:var(--ink)"></select>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)">Show
+          <select id="agShow" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:13px;background:#fff;font-weight:600;color:var(--ink)">
+            <option value="active">Active RMR agreements</option><option value="new">2026+ sales (commissionable)</option><option value="sla">SLAs</option><option value="vista">Differs from Vista</option><option value="ended">Ended / consolidated</option><option value="all">All, including ended</option>
+          </select>
         </div>
         <div style="font-size:13px;color:var(--muted)">Showing <b id="agShown" style="color:var(--ink)">0</b> · <b id="agRmrTotal" style="color:var(--orange)">$0</b>/mo RMR</div>
       </div>
@@ -433,6 +439,16 @@
       <div class="panel-head"><h2>Upcoming renewal bonus opportunities</h2><span class="qctx" id="fcCount"></span></div>
       <div id="fcTableWrap"></div>
     </div>
+  </section>
+
+  <section id="view-recon" style="display:none">
+    <div class="qbar" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)">Plan year
+        <select id="rcYear" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:13px;background:#fff;font-weight:600;color:var(--ink)"></select>
+      </div>
+      <span class="qctx" id="rcCtx"></span>
+    </div>
+    <div id="rcBody"></div>
   </section>
 
   <section id="view-history" style="display:none">
@@ -512,6 +528,9 @@
             <option value="60">60 months</option>
           </select>
         </div>
+        <div class="fld full"><label>Category <span class="hint">RMR = monitoring / inspection agreements · SLA = service-level agreements, paid at the plan's SLA rate</span></label>
+          <select id="f_cat"><option value="rmr">RMR agreement</option><option value="sla">SLA</option></select></div>
+        <div class="fld full"><label>Continues agreement # <span class="hint">account moved to a new owner or tenant, or replaces an earlier agreement — new-sale commission pays only on the MRR increase; retention counts it as one account</span></label><input id="f_transfer" placeholder="e.g. 150"></div>
         <div class="fld full"><label>Agreement type <span class="hint">manual renews each cycle · auto pays one one-time renewal & skips Pending Renewals · one-time / month-to-month earn no renewal commission</span></label>
           <select id="f_type">
             <option value="manual">Manual Renewal</option>
@@ -845,6 +864,7 @@ const DEFAULT_CONFIG={
   releaseOffsetMonths:3,                                    // workbook: 50% at execution, 50% ~90 days after installation & first billing
   termConversionMult:0,                                     // one-time incentive × Monthly RMR when a 12-month agreement is re-papered to ≥ termConversionMinTerm (Farmer/Hybrid 1.5)
   termConversionMinTerm:36,
+  slaNewMult:0, slaRenewMult:0, slaCap:0,                   // SLA agreements: × Monthly SLA value (new / manual renewal), optional $ cap per agreement · 0 = not set (pays nothing)
   portfolioBonus:false,                                     // Farmer / Hybrid: GRR + NRR bonuses as % of base salary (salary is NOT stored here — the tool reports the % earned)
   grrBonus:[{min:0.95,pct:0.02},{min:0.965,pct:0.04},{min:0.98,pct:0.06},{min:0.99,pct:0.08}],
   nrrBonus:[{min:1.03,pct:0.02},{min:1.05,pct:0.04},{min:1.08,pct:0.06},{min:1.10,pct:0.08}],
@@ -1172,7 +1192,219 @@ function compute(a,plan){
     R.bRenewalPct=renPctB; R.bEligible=eligibleB; R.bRmrMultiple=(cfg.rmrMultiple!=null?cfg.rmrMultiple:2); R.renInitialPct=(cfg.renInitialPct!=null?cfg.renInitialPct:0.5); R.renDeferredPct=(cfg.renDeferredPct!=null?cfg.renDeferredPct:0.5);
     R.bLumpy=bLumpyB; R.bMissedBilling=hasMissedBilling(a);
   } else { R.planType='A'; }
+  return applyBookRules(a,cfg,R);
+}
+
+/* ===================== Vista book · SLA · 2025 paid history · draws · reconciliation (v21) ===================== */
+const TODAY_ISO=new Date().toISOString().slice(0,10);
+let LEGACY_PAYOUTS=[], DRAWS=[], AG_SHOW='active', RC_YEAR=null, RC_BASE='';
+function isEnded(a){ return !!(a&&(a.consolidated_into||(a.ended_date&&String(a.ended_date).slice(0,10)<TODAY_ISO))); }
+function applyBookRules(a,cfg,R){
+  if(a&&a.category==='sla'){
+    const mult=+cfg.slaNewMult||0, rmult=+cfg.slaRenewMult||0, cap=+cfg.slaCap||0, lim=v=>cap>0?Math.min(v,cap):v;
+    const ok=R.eligible!==false, init=ok?lim(R.mrr*mult):0, ren=(ok&&!R.noRenewal&&R.term>0)?lim(R.mrr*rmult):0;
+    const im=R.immediatePct!=null?R.immediatePct:0.5;
+    Object.assign(R,{isSla:true,slaNewMult:mult,slaRenewMult:rmult,slaCap:cap,
+      initialCommission:init,baseCommissionNew:init,standardCommission:init,acceleratorCommission:0,acceleratorHeld:0,acceleratorPieces:[],acceleratorQI:null,
+      immediateCommission:R.legacyFull?init:init*im, holdbackCommission:R.legacyFull?0:init*(1-im),
+      renewalCommission:ren,baseCommissionRenewal:ren,
+      initMult:R.commissionableValue>0?init/R.commissionableValue:0, renewMult:R.commissionableValue>0?ren/R.commissionableValue:0});
+  }
+  if(a&&a.transfer_from&&!a.history_only&&R.initialCommission>0){
+    // Account moved to a new owner / tenant: the account isn't a new sale — pay new-sale commission only on the MRR increase over the agreement it continues
+    const pred=(typeof AGREEMENTS!=='undefined'?AGREEMENTS:[]).find(x=>String(x.agreement_number||'')===String(a.transfer_from)&&x.id!==a.id);
+    const predMrr=pred?agreementMrr(pred):0, share=R.mrr>0?Math.max(0,R.mrr-predMrr)/R.mrr:0;
+    ['initialCommission','baseCommissionNew','standardCommission','immediateCommission','holdbackCommission'].forEach(k=>{ R[k]=(+R[k]||0)*share; });
+    R.initMult=(R.initMult||0)*share; R.transferPredMrr=predMrr; R.transferShare=share;
+  }
+  if(a&&a.history_only){
+    Object.assign(R,{historyOnly:true,initialCommission:0,baseCommissionNew:0,standardCommission:0,acceleratorCommission:0,acceleratorHeld:0,acceleratorPieces:[],
+      immediateCommission:0,holdbackCommission:0,conversionCommission:0,quotaAccelExtra:0,initialQI:null,holdbackQI:null,acceleratorQI:null,holdbackReleaseDate:null});
+  }
+  R.ended=isEnded(a);
+  if(R.ended){ R.renewalCommission=0; R.baseCommissionRenewal=0; R.renewalQI=null; R.renewalDate=null; }
   return R;
+}
+async function loadLedgerExtras(){
+  try{ const {data,error}=await sb.from('rmr_legacy_payouts').select('*').order('year').order('quarter'); LEGACY_PAYOUTS=error?[]:(data||[]); }catch(e){ LEGACY_PAYOUTS=[]; }
+  try{ const {data,error}=await sb.from('rmr_draws').select('*').order('paid_date'); DRAWS=error?[]:(data||[]); }catch(e){ DRAWS=[]; }
+}
+function scopeRowsByOwner(list){
+  if(!canViewAll()){ const me=(CURRENT_EMAIL||'').toLowerCase(); return list.filter(x=>String(x.owner_email||'').toLowerCase()===me); }
+  if(USER_FILTER&&USER_FILTER.length) return list.filter(x=>USER_FILTER.includes(String(x.owner_email||'').toLowerCase()));
+  return list;
+}
+function legacyLedgerRows(){
+  const rows=[];
+  scopeRowsByOwner(LEGACY_PAYOUTS).forEach(L=>{
+    const qi=qIndexFromYM(+L.year,(+L.quarter-1)*3);
+    (Array.isArray(L.lines)?L.lines:[]).forEach(ln=>{
+      const a={id:'legacy-'+L.id+'-'+(ln.agreement_number||ln.ref),agreement_number:ln.agreement_number||'',customer_name:ln.description||ln.ref,owner_email:L.owner_email};
+      rows.push({a,type:'Initial (2025 plan)',cat:'Initial',piece:'legacy',legacy:true,paid:true,frozen:true,pending:false,date:`${L.year}-${String(+L.quarter*3).padStart(2,'0')}-28`,qi,
+        term:null,commissionable:ln.contract_value||null,margin:null,rate:null,mult:1,amount:+ln.bonus||0,plan:L.plan_label||'2025 plan'});
+    });
+  });
+  return rows;
+}
+function renderLegacyQuarterNote(qi){
+  const host=$('view-quarter'); if(!host) return; let el=$('legacyQNote');
+  const y=Math.floor(qi/4), q=(qi%4)+1;
+  const L=scopeRowsByOwner(LEGACY_PAYOUTS).filter(x=>+x.year===y&&+x.quarter===q);
+  if(!L.length){ if(el) el.remove(); return; }
+  if(!el){ el=document.createElement('div'); el.id='legacyQNote'; el.className='panel'; el.style.marginBottom='16px'; host.insertBefore(el,host.children[1]||null); }
+  const tot=L.reduce((s,x)=>s+(+x.amount||0),0);
+  el.innerHTML=`<div class="panel-head"><h2>Paid under the 2025 plan — Q${q} ${y}</h2><span class="qctx">signed bonus sheet · locked</span></div>
+    <div style="padding:12px 18px;font-size:13px">${fmt(tot)} paid (2 × Monthly RMR on new agreements, 10% of gross profit on closed jobs). This amount comes from the signed sheet and is never recalculated. Line detail is in <b>Reconciliation</b> and <b>Commission History</b>.</div>`;
+}
+function vistaDiffs(a){
+  if(!a||!a.vista_synced_at) return [];
+  const d=[], m=agreementMrr(a);
+  if(a.vista_mrr!=null && Math.abs(m-(+a.vista_mrr))>0.5) d.push(`RMR ${fmt(m)} here vs ${fmt(+a.vista_mrr)} in Vista`);
+  if(a.vista_term!=null && +a.contract_term!==+a.vista_term) d.push(`term ${a.contract_term} vs ${a.vista_term} months`);
+  if(a.vista_start && String(a.activation_date||'').slice(0,10)!==String(a.vista_start).slice(0,10)) d.push(`start ${String(a.activation_date||'—').slice(0,10)} vs ${String(a.vista_start).slice(0,10)}`);
+  return d;
+}
+function agShowList(){
+  const book=scopedBook();
+  if(AG_SHOW==='all') return book;
+  if(AG_SHOW==='ended') return book.filter(isEnded);
+  const live=book.filter(a=>!isEnded(a));
+  if(AG_SHOW==='new') return live.filter(a=>!a.history_only);
+  if(AG_SHOW==='active') return live.filter(a=>a.category!=='sla');
+  if(AG_SHOW==='sla') return live.filter(a=>a.category==='sla');
+  if(AG_SHOW==='vista') return book.filter(a=>vistaDiffs(a).length);
+  return live;
+}
+function agBadges(a,c){
+  let h='';
+  if(a.category==='sla') h+=' <span class="chip c-maturing" style="font-size:9px">SLA</span>';
+  if(a.history_only) h+=` <span class="chip" style="font-size:9px;background:#eef1f5;color:#5c6776" title="${a.legacy_paid?'New-sale commission paid under the 2025 plan':'Started before 2026, or an account move / consolidation — no new-sale commission; renewals still pay'}">${a.legacy_paid?'paid 2025':'book'}</span>`;
+  if(isEnded(a)) h+=` <span class="chip c-held" style="font-size:9px" title="${esc(a.vista_note||'')}">${a.consolidated_into?'consolidated → #'+esc(a.consolidated_into):'ended '+esc(String(a.ended_date).slice(0,10))}</span>`;
+  if(a.transfer_from) h+=` <span class="chip" style="font-size:9px;background:#eef1f5;color:#5c6776" title="${esc(a.vista_note||'')}">continues #${esc(a.transfer_from)}</span>`;
+  const d=vistaDiffs(a);
+  if(d.length) h+=` <span class="chip c-held" style="font-size:9px" title="${esc(d.join(' · '))}">Vista ≠</span>${can('editAgreements')?` <button class="iconbtn" style="font-size:10px;padding:2px 7px" data-vistafix="${a.id}" title="${esc(d.join(' · '))}">Use Vista</button>`:''}`;
+  return h;
+}
+async function useVistaValues(id){
+  const a=AGREEMENTS.find(x=>String(x.id)===String(id)); if(!a) return;
+  const d=vistaDiffs(a); if(!d.length) return;
+  if(!confirm(`Update #${a.agreement_number} to the Vista values?\n\n${d.join('\n')}\n\nPaid commission lines stay frozen at what was paid.`)) return;
+  const patch={}; if(a.vista_mrr!=null){ patch.monthly_rmr=+a.vista_mrr; patch.custom_billing=false; } if(a.vista_term!=null) patch.contract_term=+a.vista_term; if(a.vista_start) patch.activation_date=String(a.vista_start).slice(0,10);
+  const {error}=await sb.from('rmr_agreements').update({...patch,updated_at:new Date().toISOString()}).eq('id',a.id);
+  if(error){ toast(error.message||'Update failed'); return; }
+  audit('Vista values applied','Agreements',a.agreement_number,{monthly_rmr:a.monthly_rmr,contract_term:a.contract_term,activation_date:a.activation_date},patch,null);
+  Object.assign(a,patch); toast(`#${a.agreement_number} now matches Vista`); render();
+}
+/* ---- gross / net retention from Vista billing history (RMR agreements; moves & consolidations are one account) ---- */
+function mrrAt(a,ym){
+  const h=a&&a.mrr_history;
+  if(h&&typeof h==='object'&&Object.keys(h).length){ if(h[ym]!=null) return +h[ym]||0; const ks=Object.keys(h).sort(); if(ym<=ks[ks.length-1]) return 0; }
+  else if(a&&a.vista_synced_at&&ym<=String(a.vista_synced_at).slice(0,7)) return 0;   // loaded from Vista with no billing through the load month (e.g. replaced or never billed)
+  if(a.consolidated_into) return 0;
+  if(a.ended_date && String(a.ended_date).slice(0,7)<ym) return 0;
+  const st=String(a.first_billing_date||a.activation_date||'').slice(0,7); if(!st||st>ym) return 0;
+  return agreementMrr(a);
+}
+function portfolioMetrics(year,list){
+  list=(list||scopedBook()).filter(a=>(a.category||'rmr')==='rmr'&&isLiveAgreement(a));
+  const byNum={}; list.forEach(a=>{ if(a.agreement_number) byNum[String(a.agreement_number)]=a; });
+  const parent={}; const find=x=>{ while(parent[x]&&parent[x]!==x) x=parent[x]; return x; };
+  list.forEach(a=>{ const n=String(a.agreement_number||a.id); parent[n]=parent[n]||n; });
+  list.forEach(a=>{ const n=String(a.agreement_number||a.id); [a.transfer_from,a.consolidated_into].forEach(o=>{ if(o){ o=String(o); parent[o]=parent[o]||o; parent[find(n)]=find(o); } }); });
+  const now=new Date(), curYm=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const startYm=`${year-1}-12`; let endYm=`${year}-12`; if(endYm>curYm) endYm=curYm;
+  let lastSync=''; list.forEach(a=>{ const h=a.mrr_history; if(h&&typeof h==='object'){ const ks=Object.keys(h).sort(); if(ks.length&&ks[ks.length-1]>lastSync) lastSync=ks[ks.length-1]; } });
+  if(lastSync && endYm>lastSync && endYm===curYm) endYm=lastSync;   // measure through the last month Vista billing is loaded
+  const B={},E={}; list.forEach(a=>{ const k=find(String(a.agreement_number||a.id)); B[k]=(B[k]||0)+mrrAt(a,startYm); E[k]=(E[k]||0)+mrrAt(a,endYm); });
+  let start=0,end=0,churn=0,exp=0,con=0,nw=0; const lost=[];
+  Object.keys({...B,...E}).forEach(k=>{ const b=B[k]||0,e=E[k]||0; start+=b; end+=e;
+    if(b>0&&e<=0){ churn+=b; lost.push({k,b}); } else if(b<=0&&e>0){ nw+=e; } else if(b>0){ const d=e-b; if(d>0) exp+=d; else con+=-d; } });
+  return {year,startYm,endYm,startMrr:start,endMrr:end,churn,expansion:exp,contraction:con,newMrr:nw,lost,
+    grr:start>0?(start-churn-con)/start:0, nrr:start>0?(start-churn-con+exp)/start:0, partial:endYm<`${year}-12`};
+}
+/* ---- reconciliation view ---- */
+function planYears(){ const ys=new Set([new Date().getFullYear()]); LEGACY_PAYOUTS.forEach(l=>ys.add(+l.year)); DRAWS.forEach(d=>ys.add(+d.plan_year)); return [...ys].sort((a,b)=>b-a); }
+function renderRecon(){
+  const years=planYears(); if(RC_YEAR==null) RC_YEAR=years.includes(2026)?2026:years[0];
+  $('rcYear').innerHTML=years.map(y=>`<option value="${y}">${y}</option>`).join(''); $('rcYear').value=RC_YEAR;
+  $('rcYear').onchange=function(){ RC_YEAR=+this.value; renderRecon(); };
+  const y=RC_YEAR, qFirst=y*4, qLast=y*4+3, money=v=>fmt(Math.round((+v||0)*100)/100);
+  const leg=scopeRowsByOwner(LEGACY_PAYOUTS).filter(l=>+l.year===y);
+  let html='';
+  if(leg.length){
+    const tot=leg.reduce((s,l)=>s+(+l.amount||0),0);
+    html+=`<div class="cards"><div class="stat blue"><div class="lbl">Paid under the ${y} plan</div><div class="val">${money(tot)}</div></div><div class="stat"><div class="lbl">Quarters</div><div class="val">${leg.length}</div></div></div>
+    <div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>${y} — paid as signed</h2><span class="qctx">2 × Monthly RMR on new agreements · 10% of GP on closed jobs · locked</span></div>
+    <table><thead><tr><th>Quarter</th><th>Agreement / job</th><th class="num">Monthly RMR</th><th class="num">Bonus</th></tr></thead><tbody>${leg.map(l=>(Array.isArray(l.lines)?l.lines:[]).map((ln,i)=>`<tr><td>${i===0?'Q'+l.quarter:''}</td><td>${ln.agreement_number?'#'+esc(ln.agreement_number)+' · ':''}${esc(ln.description||ln.ref)}</td><td class="num mono">${ln.monthly_rmr?money(ln.monthly_rmr):'—'}</td><td class="num mono">${money(ln.bonus)}</td></tr>`).join('')+`<tr class="tot"><td></td><td><b>Q${l.quarter} total</b> <span class="qctx">${esc(l.source_doc||'')}</span></td><td></td><td class="num mono"><b>${money(l.amount)}</b></td></tr>`).join('')}</tbody></table></div>`;
+  }
+  if(y>=2026){
+    const book=scopedBook();
+    // new-sale commission from agreements activated this year
+    const sales=book.filter(a=>!a.history_only&&!isEnded(a)).map(a=>({a,c:compute(a)})).filter(x=>x.c.initialQI!=null&&x.c.initialQI>=qFirst&&x.c.initialQI<=qLast);
+    const piece=(qi,amt,paid)=>({qi,amt,paid,due:qi!=null&&qi<=CUR_QI});
+    let earnedDue=0, earnedYear=0, paidComm=0;
+    const saleRows=sales.sort((x,y)=>String(x.a.activation_date).localeCompare(String(y.a.activation_date))).map(({a,c})=>{
+      const legacy=c.legacyFull;
+      const p1=piece(c.initialQI,legacy?c.initialCommission:c.immediateCommission,legacy?!!a.paid_initial:!!a.paid_immediate);
+      const p2=legacy?null:piece(c.holdbackQI,c.holdbackCommission,!!a.paid_holdback);
+      [p1,p2].forEach(p=>{ if(!p) return; earnedYear+=p.amt; if(p.due) earnedDue+=p.amt; if(p.paid) paidComm+=p.amt; });
+      const cell=p=>p?`${money(p.amt)} <span class="qctx">${p.qi!=null?qLabel(p.qi):''}${p.paid?' · paid':(p.due?' · due':'')}</span>`:'—';
+      const why=c.eligible===false?' <span class="chip c-held" style="font-size:9px" title="Gross margin is under the plan floor">below margin floor</span>':'';
+      return `<tr><td>#${esc(a.agreement_number||'')}</td><td>${esc(a.customer_name||'')}${a.category==='sla'?' <span class="chip c-maturing" style="font-size:9px">SLA</span>':''}${why}</td><td>${esc(String(a.activation_date||'').slice(0,10))}</td><td>${a.contract_term}mo</td><td class="num mono">${money(c.mrr)}</td><td class="num mono">${money(c.initialCommission)}</td><td class="num mono">${cell(p1)}</td><td class="num mono">${cell(p2)}</td></tr>`; }).join('');
+    // renewals credited this year
+    const renRows=[]; let renDue=0, renYear=0;
+    book.forEach(a=>{ const c=compute(a);
+      renewalCycles(a).forEach(r=>{ if(r.commission_amount!=null&&r.credit_qi!=null&&r.credit_qi>=qFirst&&r.credit_qi<=qLast){ const amt=+r.commission_amount||0; renYear+=amt; if(r.credit_qi<=CUR_QI) renDue+=amt; if(r.paid) paidComm+=amt;
+        renRows.push(`<tr><td>#${esc(a.agreement_number||'')}</td><td>${esc(a.customer_name||'')}</td><td>${esc(String(r.renewal_date||'').slice(0,10))}</td><td class="num mono">${money(r.previous_rmr)} → ${money(r.renewed_rmr!=null?r.renewed_rmr:a.monthly_rmr)}</td><td class="num mono">${money(amt)} <span class="qctx">${qLabel(r.credit_qi)}${r.paid?' · paid':''}</span></td></tr>`); } });
+      if(a.autorenew&&c.renewalQI!=null&&c.renewalQI>=qFirst&&c.renewalQI<=qLast&&c.renewalCommission>0){ renYear+=c.renewalCommission; if(c.renewalQI<=CUR_QI) renDue+=c.renewalCommission; if(a.renewal_paid) paidComm+=c.renewalCommission;
+        renRows.push(`<tr><td>#${esc(a.agreement_number||'')}</td><td>${esc(a.customer_name||'')} <span class="qctx">auto · one-time</span></td><td>${c.renewalDate?fmtDate(c.renewalDate):''}</td><td class="num mono">${money(c.mrr)}</td><td class="num mono">${money(c.renewalCommission)} <span class="qctx">${qLabel(c.renewalQI)}</span></td></tr>`); } });
+    // Vista renewals this year not yet recorded in the tracker
+    const toConfirm=book.filter(a=>a.history_only&&!isEnded(a)&&a.vista_start&&String(a.vista_start).slice(0,4)===String(y)&&a.original_start&&String(a.original_start)<String(a.vista_start)&&!renewalCycles(a).some(r=>r.credit_qi!=null&&r.credit_qi>=qFirst&&r.credit_qi<=qLast)&&!a.autorenew)
+      .map(a=>({a,c:compute(a)})).sort((x,y)=>y.c.renewalCommission-x.c.renewalCommission);
+    const confirmPot=toConfirm.reduce((s,x)=>s+(x.c.renewalCommission||0),0);
+    // portfolio bonus
+    const pm=portfolioMetrics(y,book); const pcfg=defaultPlanConfig()||CONFIG;
+    const r1=v=>Math.round(v*1000)/1000;   // tiers read at the one-decimal % shown (102.99% counts as 103.0%)
+    const tg=bonusTier(pcfg.grrBonus||[],r1(pm.grr)), tn=bonusTier(pcfg.nrrBonus||[],r1(pm.nrr)), pbPct=(tg?tg.pct:0)+(tn?tn.pct:0);
+    const base=+RC_BASE||0, pbAmt=base*pbPct;
+    // draws
+    const dr=scopeRowsByOwner(DRAWS).filter(d=>+d.plan_year===y), drawTot=dr.reduce((s,d)=>s+(+d.amount||0),0);
+    const recov=dr.filter(d=>d.recoverable!=='non-recoverable').reduce((s,d)=>s+(+d.amount||0),0);
+    const earnedNow=earnedDue+renDue, balRecov=earnedNow-paidComm-recov, balNon=earnedNow-paidComm;
+    html+=`<div class="cards">
+      <div class="stat accent"><div class="lbl">New-sale commission ${y}</div><div class="val">${money(earnedYear)}</div><div class="qctx">${money(earnedDue)} due through ${qLabel(Math.min(CUR_QI,qLast))}</div></div>
+      <div class="stat accent"><div class="lbl">Renewal commission ${y}</div><div class="val">${money(renYear)}</div><div class="qctx">+ up to ${money(confirmPot)} if the Vista renewals below were manual</div></div>
+      <div class="stat green"><div class="lbl">Portfolio bonus (due Feb 15, ${y+1})</div><div class="val">${Math.round(pbPct*1000)/10}% of base</div><div class="qctx">GRR ${Math.round(pm.grr*1000)/10}% · NRR ${Math.round(pm.nrr*1000)/10}%${pm.partial?' · to date':''}${base?' · '+money(pbAmt):''}</div></div>
+      <div class="stat blue"><div class="lbl">Draws paid ${y}</div><div class="val">${money(drawTot)}</div><div class="qctx">${dr.map(d=>d.recoverable).join(', ')||'none'}</div></div>
+      <div class="stat orange"><div class="lbl">Balance owed now</div><div class="val">${money(dr.some(d=>d.recoverable==='undecided')||!dr.length?balRecov:(recov?balRecov:balNon))}</div><div class="qctx">${dr.some(d=>d.recoverable==='undecided')?`if the draw is recoverable · ${money(balNon)} if it isn't`:'earned so far − commissions paid − recoverable draws'}</div></div>
+    </div>
+    <div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>New-sale commission — agreements started in ${y}</h2><span class="qctx">plan: ${esc((defaultPlanConfig()||CONFIG).planVersion||'')} · initial / deferred</span></div>
+      ${saleRows?`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Start</th><th>Term</th><th class="num">MRR</th><th class="num">Total</th><th class="num">Initial</th><th class="num">Deferred</th></tr></thead><tbody>${saleRows}<tr class="tot"><td></td><td><b>Total</b></td><td></td><td></td><td></td><td class="num mono"><b>${money(earnedYear)}</b></td><td></td><td></td></tr></tbody></table>`:'<div class="empty">No new agreements in this year.</div>'}</div>
+    <div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Renewals credited in ${y}</h2><span class="qctx">recorded with the Renew button</span></div>
+      ${renRows.length?`<table><thead><tr><th>Agr #</th><th>Customer</th><th>Renewed</th><th class="num">MRR before → after</th><th class="num">Commission</th></tr></thead><tbody>${renRows.join('')}</tbody></table>`:'<div class="empty">No renewals recorded yet.</div>'}</div>
+    ${toConfirm.length?`<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Vista renewals in ${y} to confirm</h2><span class="qctx">${toConfirm.length} agreements · up to ${money(confirmPot)} if manual</span></div>
+      <div style="padding:10px 18px;font-size:12.5px;color:var(--muted)">Vista shows a new term starting in ${y} for these agreements. Manual renewals pay under the plan; auto-renewals of 36+ months pay nothing. For each one: set the agreement to <b>Auto-Renewal</b>, or use <b>Renew</b> in Pending Renewals to record the manual renewal.</div>
+      <table><thead><tr><th>Agr #</th><th>Customer</th><th>New term started</th><th>Term</th><th class="num">MRR</th><th class="num">If manual</th></tr></thead><tbody>${toConfirm.map(({a,c})=>`<tr><td>#${esc(a.agreement_number||'')}</td><td>${esc(a.customer_name||'')}</td><td>${esc(String(a.vista_start).slice(0,10))}</td><td>${a.contract_term}mo</td><td class="num mono">${money(c.mrr)}</td><td class="num mono">${money(c.renewalCommission)}</td></tr>`).join('')}</tbody></table></div>`:''}
+    <div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Portfolio bonus — ${y}</h2><span class="qctx">measured ${pm.startYm} → ${pm.endYm} · RMR agreements · paid by Feb 15, ${y+1}</span></div>
+      <div style="padding:12px 18px;font-size:13px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
+        <div>Starting MRR<br><b>${money(pm.startMrr)}</b></div><div>Churn<br><b>−${money(pm.churn)}</b></div><div>Contraction<br><b>−${money(pm.contraction)}</b></div><div>Expansion<br><b>+${money(pm.expansion)}</b></div><div>New (not in GRR/NRR)<br><b>+${money(pm.newMrr)}</b></div>
+        <div>Gross retention<br><b>${Math.round(pm.grr*1000)/10}%</b> → ${tg?Math.round(tg.pct*1000)/10:0}% of base</div><div>Net retention<br><b>${Math.round(pm.nrr*1000)/10}%</b> → ${tn?Math.round(tn.pct*1000)/10:0}% of base</div>
+        <div>Base salary (not saved)<br><input id="rcBase" type="number" step="1000" placeholder="e.g. 91000" value="${esc(RC_BASE)}" style="width:110px;border:1px solid var(--line);border-radius:7px;padding:5px 7px"></div>
+        <div>Estimated bonus<br><b>${base?money(pbAmt):'enter base'}</b></div>
+      </div>
+      <div style="padding:0 18px 12px;font-size:11px;color:var(--muted)">Account moves (e.g. BOSS → Operation Dignity, Sundt/Walsh → Mountain Cascade) and consolidations (LSS) count as one account, not churn. Uses Vista billing history loaded with the agreements; months after the last Vista load use each agreement's current RMR.</div></div>
+    <div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Draws — ${y}</h2><span class="qctx">advances paid while the plan is settled</span></div>
+      ${dr.length?`<table><thead><tr><th>Paid</th><th class="num">Amount</th><th>Recoverable?</th><th>Approved by</th><th>Notes</th></tr></thead><tbody>${dr.map(d=>`<tr><td>${esc(String(d.paid_date||'').slice(0,10))}</td><td class="num mono">${money(d.amount)}</td><td>${can('editConfig')?`<select data-drawrec="${d.id}" style="border:1px solid var(--line);border-radius:7px;padding:4px 6px">${['undecided','recoverable','non-recoverable'].map(o=>`<option ${d.recoverable===o?'selected':''}>${o}</option>`).join('')}</select>`:esc(d.recoverable)}</td><td>${esc(d.approved_by||'')}</td><td style="white-space:normal;font-size:12px">${esc(d.notes||'')}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">No draws recorded.</div>'}
+      ${can('editConfig')?`<div style="padding:10px 18px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12.5px;border-top:1px solid var(--line)">Add draw: <input id="drAmt" type="number" step="100" placeholder="Amount" style="width:100px;border:1px solid var(--line);border-radius:7px;padding:5px 7px"> <input id="drDate" type="date" style="border:1px solid var(--line);border-radius:7px;padding:5px 7px"> <input id="drBy" placeholder="Approved by" style="width:140px;border:1px solid var(--line);border-radius:7px;padding:5px 7px"> <input id="drNote" placeholder="Notes" style="min-width:180px;border:1px solid var(--line);border-radius:7px;padding:5px 7px"> <button class="iconbtn" id="drAdd">Add</button></div>`:''}</div>`;
+  }
+  $('rcCtx').textContent=y>=2026?'Earned amounts use the plan assigned to each agreement owner':'';
+  $('rcBody').innerHTML=html||'<div class="empty">Nothing recorded for this year.</div>';
+  if($('rcBase')) $('rcBase').onchange=function(){ RC_BASE=this.value; renderRecon(); };
+  document.querySelectorAll('[data-drawrec]').forEach(s=>s.onchange=async function(){ const {error}=await sb.from('rmr_draws').update({recoverable:this.value}).eq('id',this.dataset.drawrec); if(error){toast(error.message);return;} const d=DRAWS.find(x=>String(x.id)===String(this.dataset.drawrec)); if(d) d.recoverable=this.value; audit('Draw status changed','Draws',null,null,{id:this.dataset.drawrec,recoverable:this.value},null); renderRecon(); });
+  if($('drAdd')) $('drAdd').onclick=async()=>{ const amt=+$('drAmt').value; if(!(amt>0)){toast('Enter a draw amount');return;}
+    const own=(USER_FILTER&&USER_FILTER.length===1)?USER_FILTER[0]:(CURRENT_EMAIL||'').toLowerCase();
+    const row={owner_email:own,plan_year:RC_YEAR,amount:amt,paid_date:$('drDate').value||null,approved_by:$('drBy').value.trim()||null,notes:$('drNote').value.trim()||null,recoverable:'undecided'};
+    const {data,error}=await sb.from('rmr_draws').insert(row).select(); if(error){toast(error.message);return;} DRAWS.push((data&&data[0])||row); audit('Draw added','Draws',null,null,row,null); renderRecon(); };
 }
 function deferredStatus(c,selQI,paid){return 'none';}     // legacy no-op (deferred model removed)
 const STATUS_META={none:{cls:'c-none',label:'Paid upfront'},held:{cls:'c-held',label:'Deferred held'},maturing:{cls:'c-maturing',label:'Maturing'},payable:{cls:'c-payable',label:'Payable'},paid:{cls:'c-paid',label:'Paid'}};
@@ -1310,7 +1542,8 @@ function scopeOwner(list){
   if(USER_FILTER&&USER_FILTER.length) return list.filter(a=>USER_FILTER.includes(ownerKey(a)));
   return list;
 }
-function scopedAgreements(){ return scopeOwner(AGREEMENTS).filter(isLiveAgreement); }
+function scopedAgreements(){ return scopeOwner(AGREEMENTS).filter(a=>isLiveAgreement(a)&&!isEnded(a)); }
+function scopedBook(){ return scopeOwner(AGREEMENTS).filter(isLiveAgreement); }   // includes ended / consolidated (history, retention)
 function scopedOpps(){ return scopeOwner(AGREEMENTS).filter(isPipeline); }
 function pad3(n){return String(n).padStart(3,'0');}
 function yy2(){return String(new Date().getFullYear()).slice(-2);}
@@ -1394,6 +1627,7 @@ async function load(){
   await loadPlans();
   await loadRenewals();
   await loadUsers();
+  await loadLedgerExtras();
   render();
 }
 let KNOWN_USERS=[];
@@ -1413,6 +1647,7 @@ let ACTIVE_PLAN_ID=null;
 function normalizeConfig(j){ j=j||{}; if(j.targetMargin==null)j.targetMargin=0.50; if(j.minMargin==null)j.minMargin=0.45; if(!j.planVersion)j.planVersion='2026 v1.0'; if(!j.basis)j.basis='TCV'; if(!j.autoRenewalPct)j.autoRenewalPct={12:0.02,24:0.025}; if(j.immediatePct==null)j.immediatePct=0.75; if(j.holdbackPct==null)j.holdbackPct=0.25; if(j.holdbackThresholdPct==null)j.holdbackThresholdPct=0.25; if(j.accelReleasePct==null)j.accelReleasePct=0.50; if(j.overheadPct==null)j.overheadPct=0.28; if(!j.planType)j.planType='A'; if(j.rmrMultiple==null)j.rmrMultiple=2.00; if(j.newInitialPct==null)j.newInitialPct=0.50; if(j.newDeferredPct==null)j.newDeferredPct=0.50; if(j.renInitialPct==null)j.renInitialPct=0.50; if(j.renDeferredPct==null)j.renDeferredPct=0.50; if(j.bManualRenewalPct==null)j.bManualRenewalPct=0.04; if(j.bAutoRenewalPct==null)j.bAutoRenewalPct=0.01;
   if(j.role==null)j.role=''; if(j.quotaMonthlyRmr==null)j.quotaMonthlyRmr=0; if(j.accelMultiplier==null)j.accelMultiplier=1; if(!j.releaseMode)j.releaseMode='revenue'; if(j.releaseOffsetMonths==null)j.releaseOffsetMonths=3;
   if(j.termConversionMult==null)j.termConversionMult=0; if(j.termConversionMinTerm==null)j.termConversionMinTerm=36; if(j.portfolioBonus==null)j.portfolioBonus=false;
+  if(j.slaNewMult==null)j.slaNewMult=0; if(j.slaRenewMult==null)j.slaRenewMult=0; if(j.slaCap==null)j.slaCap=0;
   if(!Array.isArray(j.grrBonus)||!j.grrBonus.length)j.grrBonus=JSON.parse(JSON.stringify(DEFAULT_CONFIG.grrBonus)); if(!Array.isArray(j.nrrBonus)||!j.nrrBonus.length)j.nrrBonus=JSON.parse(JSON.stringify(DEFAULT_CONFIG.nrrBonus));
   return j; }
 /* ===== Workbook presets — Point1 Service Sales Executive Planning Workbook (Sep-2026 actuals) =====
@@ -1493,6 +1728,7 @@ async function upsert(row){
   async function go(p){ if(p.id){const {error}=await sb.from('rmr_agreements').update(p).eq('id',p.id);if(error)throw error;} else {const {error}=await sb.from('rmr_agreements').insert(p);if(error)throw error;} }
   try{ await go(payload); }
   catch(e){ // ref columns not migrated yet → retry without them so saving still works
+    if(/category|transfer_from/i.test(e.message||'')){ const {category,transfer_from,...rest}=payload; try{ await go(rest); toast('Saved — run migration_v21a_vista_schema.sql to store RMR / SLA'); return; }catch(e2){ e=e2; } }
     if(/term_conversion/i.test(e.message||'')){ const {term_conversion,...rest}=payload; try{ await go(rest); toast('Saved — run migration_v20_workbook_roles.sql to enable the term-conversion flag'); return; }catch(e2){ e=e2; } }
     if(/customer_number|site_number|owner_email|converted_to_manual|conversion_|renewal_date|renewal_credit_month|prerenewal_state|stage|opportunity_number|estimate_ref|est_monthly_rmr|expected_close|lost_reason|agreement_type|legacy_full_pay|first_billing_date|billing_log|accel_paid|term_conversion|column/i.test(e.message||'')){ const {customer_number,site_number,owner_email,converted_to_manual,conversion_date,conversion_notes,conversion_ref,renewal_date,renewal_credit_month,prerenewal_state,stage,opportunity_number,estimate_ref,est_monthly_rmr,expected_close,lost_reason,agreement_type,legacy_full_pay,first_billing_date,billing_log,accel_paid,term_conversion,...rest}=payload; await go(rest); }
     else throw e;
@@ -1577,9 +1813,10 @@ function renderScopeBar(){
     `<span class="scopecount">${n} agreement${n===1?'':'s'}</span>`;
   $('scopeSel').onchange=function(){ USER_FILTER=(this.value==='__all')?null:[this.value]; render(); };
 }
-function render(){ renderScopeBar(); if(view==='quarter')renderQuarter(); if(view==='opportunities')renderOpportunities(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='forecast')renderForecast(); if(view==='history')renderHistory(); if(view==='reports')renderReports(); if(view==='admin'){renderAdmin(); const lp=$('ledgerPanel'); if(lp){ if(can('editConfig')){ lp.style.display=''; renderLedgerRecon(); } else lp.style.display='none'; } } renderLegend(); if($('guideScrim')&&$('guideScrim').classList.contains('show'))renderGuide(); }
+function render(){ renderScopeBar(); if(view==='quarter')renderQuarter(); if(view==='opportunities')renderOpportunities(); if(view==='agreements')renderAgreements(); if(view==='renewals')renderRenewals(); if(view==='forecast')renderForecast(); if(view==='history')renderHistory(); if(view==='recon')renderRecon(); if(view==='reports')renderReports(); if(view==='admin'){renderAdmin(); const lp=$('ledgerPanel'); if(lp){ if(can('editConfig')){ lp.style.display=''; renderLedgerRecon(); } else lp.style.display='none'; } } renderLegend(); if($('guideScrim')&&$('guideScrim').classList.contains('show'))renderGuide(); }
 function renderQuarter(){
   buildQuarterOptions();$('qSelect').value=selQI;
+  setTimeout(()=>renderLegacyQuarterNote(selQI),0);
   $('qCtx').textContent=selQI===CUR_QI?'Current quarter':(selQI<CUR_QI?'Past quarter':'Upcoming quarter');
   const q=(selQI%4)+1,y=Math.floor(selQI/4);
   $('qRangeTxt').textContent=`${['Jan–Mar','Apr–Jun','Jul–Sep','Oct–Dec'][q-1]} ${y}`;
@@ -1692,7 +1929,8 @@ function renderAgreements(){
   const qsorted=[...qset].sort((a,b)=>b-a);
   $('agFilter').innerHTML='<option value="all">All time</option>'+qsorted.map(qi=>`<option value="${qi}">${qLabel(qi)}</option>`).join('');
   $('agFilter').value=(agFilter==='all')?'all':String(agFilter);
-  const _sa=scopedAgreements(); let list=(agFilter==='all')?_sa:_sa.filter(a=>compute(a).initialQI===agFilter);
+  if($('agShow')){ $('agShow').value=AG_SHOW; $('agShow').onchange=function(){ AG_SHOW=this.value; renderAgreements(); }; }
+  const _sa=agShowList(); let list=(agFilter==='all')?_sa:_sa.filter(a=>compute(a).initialQI===agFilter);
   if(agSort&&AG_SORT[agSort.key]){
     const f=AG_SORT[agSort.key],dir=agSort.dir==='asc'?1:-1;
     list=[...list].sort((x,y)=>{const a=f(x),b=f(y);
@@ -1721,7 +1959,7 @@ function renderAgreements(){
     const missed=hasMissedBilling(a);
     return `<tr class="${canViewAll()?'exp-row':''}" ${canViewAll()?`data-agexp="${a.id}"`:''} ${missed?'style="background:#fdecec"':''}>
       <td class="ag-no">#${esc(a.agreement_number||'—')}${missed?' <span title="Customer payment missed — deferred commission at risk; bring the account current." style="color:#c0392b;font-size:12px">⚠</span>':''}</td>
-      <td>${esc(a.customer_name||'—')}${missed?' <span class="chip" style="background:#f8d7d7;color:#9a2a2a;font-size:9px">payment missed</span>':''}${(a.customer_number||a.site_number)?`<div style="font-size:10px;color:var(--muted)">${a.customer_number?'Cust #'+esc(a.customer_number):''}${a.customer_number&&a.site_number?' · ':''}${a.site_number?'Site #'+esc(a.site_number):''}</div>`:''}${showOwner?`<div style="font-size:10px;color:var(--orange);font-weight:600;margin-top:2px">${esc(a.owner_email||'(unassigned)')}<span style="color:var(--muted);font-weight:500"> · plan ${esc(c.planVersion||'—')}</span></div>`:''}</td>
+      <td>${esc(a.customer_name||'—')}${agBadges(a,c)}${missed?' <span class="chip" style="background:#f8d7d7;color:#9a2a2a;font-size:9px">payment missed</span>':''}${(a.customer_number||a.site_number)?`<div style="font-size:10px;color:var(--muted)">${a.customer_number?'Cust #'+esc(a.customer_number):''}${a.customer_number&&a.site_number?' · ':''}${a.site_number?'Site #'+esc(a.site_number):''}</div>`:''}${showOwner?`<div style="font-size:10px;color:var(--orange);font-weight:600;margin-top:2px">${esc(a.owner_email||'(unassigned)')}<span style="color:var(--muted);font-weight:500"> · plan ${esc(c.planVersion||'—')}</span></div>`:''}</td>
       <td class="mono">${fmt(c.mrr)}${c.scheduled?'<div style="font-size:10px;color:var(--orange);font-weight:600;letter-spacing:.03em">SCHEDULED</div>':''}</td>
       <td>${termTxt}</td>
       <td>${mCell}</td>
@@ -1743,6 +1981,7 @@ function renderAgreements(){
     renderAgreements();
   });
   $('agTableWrap').querySelectorAll('[data-edit]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();openModal(b.dataset.edit);});
+  $('agTableWrap').querySelectorAll('[data-vistafix]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();useVistaValues(b.dataset.vistafix);});
   $('agTableWrap').querySelectorAll('[data-agexp]').forEach(row=>row.onclick=(e)=>{ if(e.target.closest('button,input,a,select'))return; const id=row.dataset.agexp; AG_OPEN=(AG_OPEN===id?null:id); renderAgreements(); });
   if(AG_OPEN){ const acv=$('agcvacv_'+AG_OPEN), tcv=$('agcvtcv_'+AG_OPEN); if(acv)acv.onclick=()=>{AG_CALC_BASIS[AG_OPEN]='ACV';renderAgreements();}; if(tcv)tcv.onclick=()=>{AG_CALC_BASIS[AG_OPEN]='TCV';renderAgreements();}; }
 }
@@ -2174,7 +2413,8 @@ function historyLedger(){
   scopedAgreements().forEach(a=>{
     const c=compute(a);
     // ---- initial commission pieces ----
-    if(c.legacyFull){
+    if(c.historyOnly){ /* new-sale commission paid under the 2025 plan (legacy rows below) or not commissionable */ }
+    else if(c.legacyFull){
       if(c.initialCommission>0||a.paid_initial) rows.push(mkLedgerRow(a,c,'Initial','Initial','initial',(a.paid_initial&&a.initial_snapshot)?a.initial_snapshot:null,!!a.paid_initial,c.initialQI,iso(a.activation_date),c.initialCommission,c.newPct,false));
     } else {
       const isB=c.planType==='B';
@@ -2196,7 +2436,8 @@ function historyLedger(){
       if(c.renewalCommission>0||a.renewal_paid) rows.push(mkLedgerRow(a,c,'Renewal','Renewal','renewal',(a.renewal_paid&&a.renewal_snapshot)?a.renewal_snapshot:null,!!a.renewal_paid,c.renewalQI,iso(c.renewalDate),c.renewalCommission,c.renewalPct,false));
     }
   });
-  rows.forEach(r=>{ r.status = r.paid?'Paid' : (r.mult===0?'Not eligible' : (r.pending?'Forecast':'Pending')); r.statusLabel=commStatusLabel(r); });
+  legacyLedgerRows().forEach(r=>rows.push(r));
+  rows.forEach(r=>{ r.status = r.paid?'Paid' : (r.mult===0?'Not eligible' : (r.pending?'Forecast':'Pending')); r.statusLabel=r.legacy?'Paid (2025 plan)':commStatusLabel(r); });
   return rows.sort((x,y)=>String(y.date||'').localeCompare(String(x.date||'')));
 }
 function renderHistory(){
@@ -2327,6 +2568,14 @@ function renderAdmin(){
         </div>
         <div style="font-size:11px;color:var(--muted);margin-top:10px">Paid when an agreement is saved with the <b>Term conversion</b> box ticked and its term meets the minimum. It rides with the new-agreement commission (same initial / deferred split). Workbook: 1.5× for converting a 12-month agreement to 36 months.</div>
       </div></div>
+      <div class="panel"><div class="panel-head"><h2>SLA agreements</h2><span class="qctx">set once agreed · 0 = no SLA commission</span></div><div class="admin-body">
+        <div class="cfg-two">
+          <div><label class="cfg-lbl">New SLA <span style="color:var(--none)">(× Monthly SLA value)</span></label><input class="cfg-in" id="cfg_slanew" type="number" step="0.05" min="0" value="${+c.slaNewMult||0}"> ×</div>
+          <div><label class="cfg-lbl">Manual SLA renewal <span style="color:var(--none)">(× Monthly SLA value)</span></label><input class="cfg-in" id="cfg_slaren" type="number" step="0.05" min="0" value="${+c.slaRenewMult||0}"> ×</div>
+        </div>
+        <div style="margin-top:10px"><label class="cfg-lbl">Cap per SLA agreement <span style="color:var(--none)">($ · 0 = no cap)</span></label><input class="cfg-in" id="cfg_slacap" type="number" step="100" min="0" value="${+c.slaCap||0}"></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:10px">Applies to agreements marked <b>SLA</b>. Uses the same initial / deferred split as new agreements. Example: Airbnb bills about $49.4K a month, so 1× would pay $49.4K — set a low multiple or a cap.</div>
+      </div></div>
       <div class="panel"><div class="panel-head"><h2>Portfolio bonuses (GRR / NRR)</h2><span class="qctx">% of base salary · salary is not stored here</span></div><div class="admin-body">
         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:10px"><input type="checkbox" id="cfg_pbon" ${c.portfolioBonus?'checked':''}> This plan earns retention and growth bonuses (Farmer / Hybrid)</label>
         <div class="cfg-two">
@@ -2334,8 +2583,9 @@ function renderAdmin(){
           <div><table class="cfg-table"><thead><tr><th>NRR ≥</th><th>Bonus</th></tr></thead><tbody>${(c.nrrBonus||[]).map((t,i)=>`<tr><td><input class="cfg-in" data-nrrmin="${i}" type="number" step="0.1" value="${Math.round(t.min*1000)/10}"> %</td><td><input class="cfg-in" data-nrrpct="${i}" type="number" step="0.5" value="${Math.round(t.pct*1000)/10}"> % of base</td></tr>`).join('')}</tbody></table></div>
         </div>
         <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
-          <label class="cfg-lbl">Check a year <span style="color:var(--none)">(enter the measured figures from the CRM — the tracker does not compute GRR/NRR itself)</span></label>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:12.5px">GRR <input class="cfg-in" id="pb_grr" type="number" step="0.1" style="width:70px" value="96.5"> % &nbsp; NRR <input class="cfg-in" id="pb_nrr" type="number" step="0.1" style="width:70px" value="108"> % &nbsp; <span id="pb_out" style="font-weight:700"></span></div>
+          <label class="cfg-lbl">Check a year <span style="color:var(--none)">(pre-filled with the tracker's own figures from Vista billing, ${new Date().getFullYear()} year to date — edit to test other values)</span></label>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:12.5px">GRR <input class="cfg-in" id="pb_grr" type="number" step="0.1" style="width:70px" value="${(()=>{const m=portfolioMetrics(new Date().getFullYear());return m.startMrr>0?Math.round(m.grr*1000)/10:96.5;})()}"> % &nbsp; NRR <input class="cfg-in" id="pb_nrr" type="number" step="0.1" style="width:70px" value="${(()=>{const m=portfolioMetrics(new Date().getFullYear());return m.startMrr>0?Math.round(m.nrr*1000)/10:108;})()}"> % &nbsp; <span id="pb_out" style="font-weight:700"></span></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:8px">Measured January 1 – December 31 on RMR agreements; account moves and consolidations aren't counted as churn. Paid by February 15 of the following year (see Reconciliation).</div>
         </div>
       </div></div>`}
     </div>
@@ -2516,6 +2766,8 @@ function saveAdmin(){
     if(relMode!=='offset'&&(isNaN(thr)||thr<0||thr>1)) errs.push('Release threshold % is invalid.');
     const cm=+$('cfg_convmult').value, cmin=+$('cfg_convmin').value;
     if(isNaN(cm)||cm<0) errs.push('Term-conversion incentive is invalid.');
+    const sn=$('cfg_slanew')?+$('cfg_slanew').value:0, sr=$('cfg_slaren')?+$('cfg_slaren').value:0, sc=$('cfg_slacap')?+$('cfg_slacap').value:0;
+    if([sn,sr,sc].some(v=>isNaN(v)||v<0)) errs.push('An SLA rate or cap is invalid.');
     const grr=[],nrr=[];
     document.querySelectorAll('[data-grrmin]').forEach(i=>{const k=+i.dataset.grrmin; grr[k]={min:(+i.value)/100,pct:(+document.querySelector(`[data-grrpct="${k}"]`).value)/100};});
     document.querySelectorAll('[data-nrrmin]').forEach(i=>{const k=+i.dataset.nrrmin; nrr[k]={min:(+i.value)/100,pct:(+document.querySelector(`[data-nrrpct="${k}"]`).value)/100};});
@@ -2523,6 +2775,7 @@ function saveAdmin(){
     if(errs.length){ msg.style.color='var(--held)'; msg.textContent=errs[0]; return; }
     grr.sort((a,b)=>a.min-b.min); nrr.sort((a,b)=>a.min-b.min);
     Object.assign(newConf,{immediatePct:im,holdbackPct:hb,releaseMode:relMode,releaseOffsetMonths:relMode==='offset'?off:(CONFIG.releaseOffsetMonths||3),holdbackThresholdPct:relMode!=='offset'?thr:(CONFIG.holdbackThresholdPct!=null?CONFIG.holdbackThresholdPct:0.25),
+      slaNewMult:sn,slaRenewMult:sr,slaCap:sc,
       termConversionMult:cm,termConversionMinTerm:cmin,portfolioBonus:!!($('cfg_pbon')&&$('cfg_pbon').checked),grrBonus:grr,nrrBonus:nrr});
   }
   const isNew=(EDIT_PLAN_ID==null);
@@ -2641,6 +2894,8 @@ function openModal(id,promote){
   $('f_soft').value=v('software_cost_annual');$('f_sub').value=v('subcontractor_annual_cost');$('f_other').value=v('other_direct_annual');
   $('f_target').value=(a&&a.target_margin!=null&&a.target_margin!=='')?Math.round(a.target_margin*100):'';
   $('f_type').value=(a&&a.agreement_type)||((a&&a.autorenew)?'auto':'manual');
+  if($('f_cat')) $('f_cat').value=(a&&a.category)||'rmr';
+  if($('f_transfer')) $('f_transfer').value=(a&&a.transfer_from)||'';
   if($('f_termconv')) $('f_termconv').checked=!!(a&&a.term_conversion);
   refreshTermLabels(resolvePlan(a||{owner_email:CURRENT_EMAIL}));
   // Renewal section — date/credit are editable once renewed; Revert appears only for renewed agreements
@@ -3227,6 +3482,7 @@ function readForm(){return{
   target_margin:($('f_target').value.trim()===''?null:(+$('f_target').value/100)),
   owner_email:(canViewAll()&&$('ownerFld')&&$('ownerFld').style.display!=='none'&&$('f_owner').value)?$('f_owner').value:(editingId?((AGREEMENTS.find(a=>a.id===editingId)||{}).owner_email||CURRENT_EMAIL||null):(CURRENT_EMAIL||null)),
   autorenew:($('f_type').value==='auto'),agreement_type:$('f_type').value,notes:$('f_notes').value.trim(),
+  category:($('f_cat')&&$('f_cat').value)||'rmr', transfer_from:($('f_transfer')&&$('f_transfer').value.trim().replace(/^#/,''))||null,
   term_conversion:!!($('f_termconv')&&$('f_termconv').checked),
   renewal_date:($('f_rendate')&&$('f_rendate').value)||null,
   renewal_credit_month:($('f_rencredit')&&$('f_rencredit').value)||null,
@@ -3341,7 +3597,7 @@ function updatePreview(){
 
 /* ---- view switching ---- */
 function switchView(v){
-  view=v;['quarter','opportunities','agreements','renewals','forecast','history','reports','admin'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
+  view=v;['quarter','opportunities','agreements','renewals','forecast','recon','history','reports','admin'].forEach(x=>{$('view-'+x).style.display=x===v?'block':'none';});
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   render();
 }
