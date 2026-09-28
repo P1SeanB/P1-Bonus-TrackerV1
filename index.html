@@ -1135,6 +1135,8 @@ function compute(a,plan){
   }}
   // Once renewed, the credited quarter follows the Renewal Month entered on the Renew form (not the activation+term math).
   if(a.renewed && a.renewal_credit_month){const m=String(a.renewal_credit_month).match(/^(\d{4})-(\d{2})$/);if(m){renewalQI=qIndexFromYM(+m[1],+m[2]-1);}}
+  // Vista's expiration date for the current term is the renewal date until a renewal is recorded here
+  if(a.term_end && !a.renewed && term>0 && !noRenewal){ const te=new Date(String(a.term_end).slice(0,10)+'T00:00:00'); if(!isNaN(te)){ renewalDate=te; renewalQI=qIndexFromYM(te.getFullYear(),te.getMonth()); } }
   const R={term,rmr:mrr,mrr,acv,tcv,months,commissionableValue,basis:cfg.basis,
           planVersion:cfg.planVersion,minMargin:cfg.minMargin,targetMargin:cfg.targetMargin,
           laborHours,laborCost,materialCost,monitoringCost,softwareCost,subCost,otherCost,directCosts,
@@ -1255,6 +1257,13 @@ function renderLegacyQuarterNote(qi){
   const tot=L.reduce((s,x)=>s+(+x.amount||0),0);
   el.innerHTML=`<div class="panel-head"><h2>Paid under the 2025 plan — Q${q} ${y}</h2><span class="qctx">signed bonus sheet · locked</span></div>
     <div style="padding:12px 18px;font-size:13px">${fmt(tot)} paid (2 × Monthly RMR on new agreements, 10% of gross profit on closed jobs). This amount comes from the signed sheet and is never recalculated. Line detail is in <b>Reconciliation</b> and <b>Commission History</b>.</div>`;
+}
+function termEndCell(a,c){
+  const d=c.renewalDate; if(!d||c.noRenewal||!(c.term>0)) return '<span style="color:var(--none)">—</span>';
+  const days=Math.round((d-new Date())/864e5);
+  const col=days<0?'var(--held)':(days<=60?'var(--maturing)':(days<=120?'var(--orange)':'var(--muted)'));
+  const src=a.term_end&&!a.renewed?'Vista expiration':'start + term';
+  return `<span style="color:${col};font-weight:${days<=60?700:500}" title="${src}${a.original_start?' · customer since '+esc(String(a.original_start).slice(0,7)):''}">${fmtDate(d)}<div style="font-size:10px;font-weight:500">${days<0?Math.abs(days)+' days overdue':days+' days'}</div></span>`;
 }
 function vistaDiffs(a){
   if(!a||!a.vista_synced_at) return [];
@@ -1449,6 +1458,7 @@ const AG_SORT={
   cust:a=>String(a.customer_name||'').toLowerCase(),
   rmr:a=>+a.monthly_rmr||0,
   term:a=>+a.contract_term||0,
+  ends:a=>{const d=compute(a).renewalDate;return d?d.getTime():Infinity;},
   margin:a=>{const g=compute(a).grossMargin;return g==null?-Infinity:g;},
   init:a=>compute(a).initialCommission,
   renew:a=>compute(a).renewalCommission,
@@ -1962,18 +1972,19 @@ function renderAgreements(){
       <td>${esc(a.customer_name||'—')}${agBadges(a,c)}${missed?' <span class="chip" style="background:#f8d7d7;color:#9a2a2a;font-size:9px">payment missed</span>':''}${(a.customer_number||a.site_number)?`<div style="font-size:10px;color:var(--muted)">${a.customer_number?'Cust #'+esc(a.customer_number):''}${a.customer_number&&a.site_number?' · ':''}${a.site_number?'Site #'+esc(a.site_number):''}</div>`:''}${showOwner?`<div style="font-size:10px;color:var(--orange);font-weight:600;margin-top:2px">${esc(a.owner_email||'(unassigned)')}<span style="color:var(--muted);font-weight:500"> · plan ${esc(c.planVersion||'—')}</span></div>`:''}</td>
       <td class="mono">${fmt(c.mrr)}${c.scheduled?'<div style="font-size:10px;color:var(--orange);font-weight:600;letter-spacing:.03em">SCHEDULED</div>':''}</td>
       <td>${termTxt}</td>
+      <td>${termEndCell(a,c)}</td>
       <td>${mCell}</td>
       <td class="num mono">${fmt(c.initialCommission)} <span style="font-size:10px;color:var(--muted)">(${pct(c.initMult)})</span></td>
       <td class="num mono">${renewTxt}</td>
       <td>${autoTag}</td>
       <td>${can('editAgreements')?`<button class="iconbtn" data-edit="${a.id}">Edit</button>`:'<span class="qctx">view</span>'}</td>
-    </tr>${(canViewAll()&&AG_OPEN===a.id)?`<tr class="ag-detail"><td colspan="9" style="background:#f7f7f8;padding:14px 18px">${calcPanelHTML(c, AG_CALC_BASIS[a.id]||'ACV', a, 'agcvacv_'+a.id, 'agcvtcv_'+a.id)}</td></tr>`:''}`;}).join('');
+    </tr>${(canViewAll()&&AG_OPEN===a.id)?`<tr class="ag-detail"><td colspan="10" style="background:#f7f7f8;padding:14px 18px">${calcPanelHTML(c, AG_CALC_BASIS[a.id]||'ACV', a, 'agcvacv_'+a.id, 'agcvtcv_'+a.id)}</td></tr>`:''}`;}).join('');
   const th=(key,label,numCls)=>{
     const active=agSort&&agSort.key===key;
     const arrow=active?(agSort.dir==='asc'?' ▲':' ▼'):' ↕';
     return `<th class="${numCls||''} agsort" data-sort="${key}" style="cursor:pointer;user-select:none;white-space:nowrap">${label}<span style="font-size:9px;color:${active?'var(--orange)':'var(--line)'}">${arrow}</span></th>`;
   };
-  $('agTableWrap').innerHTML=`<table><thead><tr>${th('num','Agr #')}${th('cust','Customer')}${th('rmr','RMR')}${th('term','Term')}${th('margin','Margin')}${th('init','Initial comm.','num')}${th('renew','Renewal comm.','num')}${th('rtype','Renewal')}<th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('agTableWrap').innerHTML=`<table><thead><tr>${th('num','Agr #')}${th('cust','Customer')}${th('rmr','RMR')}${th('term','Term')}${th('ends','Term ends')}${th('margin','Margin')}${th('init','Initial comm.','num')}${th('renew','Renewal comm.','num')}${th('rtype','Renewal')}<th></th></tr></thead><tbody>${rows}</tbody></table>`;
   $('agTableWrap').querySelectorAll('[data-sort]').forEach(h=>h.onclick=()=>{
     const k=h.dataset.sort;
     if(agSort&&agSort.key===k){agSort={key:k,dir:agSort.dir==='asc'?'desc':'asc'};}
