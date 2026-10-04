@@ -5385,19 +5385,23 @@ function publishForm27(v){
   if(val.length){ box.innerHTML=`<div class="panel" style="margin-top:12px"><div class="admin-body" style="color:var(--held);font-size:12.5px"><b>Publication rejected:</b><br>${val.map(esc).join('<br>')}</div></div>`; return; }
   if(!v.preview_checked_at&&!(ADM_PREVIEW&&ADM_PREVIEW.id===v.id)){ box.innerHTML=`<div class="panel" style="margin-top:12px"><div class="admin-body" style="color:var(--held)">Run <b>Preview calculation</b> on this draft first (ADM-06).</div></div>`; return; }
   box.innerHTML=`<div class="panel" style="margin-top:12px;border:2px solid var(--navy)"><div class="panel-head"><h2>Publish ${esc(v.label)}</h2><span class="qctx">creates an immutable version · cannot rewrite historical events</span></div><div class="admin-body" style="font-size:12.5px">
-    <div class="cfg-two"><div><label class="cfg-lbl">Effective date (not before ${REVISED_CUTOVER})</label><input type="date" class="cfg-in" id="pf_eff" min="${REVISED_CUTOVER}"></div><div><label class="cfg-lbl">Approved by</label><input class="cfg-in wide" id="pf_by" value="Sean Bithell"></div></div>
-    <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="pf_48"> I approve the 48-month multiple of ${esc((v.config.newMult||{})[48]||'—')}× explicitly (carried from the planning workbook — COM-06)</label>
+    <div class="cfg-two"><div><label class="cfg-lbl">Effective date (not before ${REVISED_CUTOVER})</label><input type="date" class="cfg-in" id="pf_eff" min="${REVISED_CUTOVER}" value="${[REVISED_CUTOVER,E27.businessToday()].sort().pop()}" style="min-width:170px"></div><div><label class="cfg-lbl">Approved by</label><input class="cfg-in wide" id="pf_by" value="Sean Bithell"></div></div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="pf_48"> I approve the 48-month multiple of ${esc((v.config.newMult||{})[48]||'—')}× (carried from the planning workbook)</label>
     <label style="display:flex;gap:8px;align-items:center;margin-top:4px"><input type="checkbox" id="pf_terms"> These earning terms match the written compensation agreement (Labor Code §2751)</label>
     <div class="qctx" style="margin-top:6px">Approver and sole representative are the same person at this revision — recorded deliberately; add a second approver when the team grows (COM-07).</div>
-    <div style="margin-top:10px"><button class="btn-primary" id="pf_go">Publish version</button> <span id="pf_msg" class="qctx"></span></div></div></div>`;
+    <div style="margin-top:10px"><button class="btn-primary" id="pf_go">Publish version</button> <span id="pf_msg" style="color:var(--held);font-weight:600;font-size:13px;margin-left:8px"></span></div></div></div>`;
+  const pfSay=(m)=>{ $('pf_msg').textContent=m; toast(m); };
   $('pf_go').onclick=async()=>{ const eff=$('pf_eff').value, by=$('pf_by').value.trim();
-    if(!eff||eff<REVISED_CUTOVER){ $('pf_msg').textContent='Pick an effective date on or after '+REVISED_CUTOVER+' — the plan is not retroactive.'; return; }
-    if(!by||!$('pf_48').checked||!$('pf_terms').checked){ $('pf_msg').textContent='Approval, the 48-month confirmation and the written-terms confirmation are all required.'; return; }
+    if(!eff||eff<REVISED_CUTOVER){ pfSay('Pick an effective date on or after '+REVISED_CUTOVER+'.'); $('pf_eff').focus(); return; }
+    if(!by){ pfSay('Enter who approved it.'); $('pf_by').focus(); return; }
+    if(!$('pf_48').checked||!$('pf_terms').checked){ pfSay('Tick both confirmation boxes to publish.'); return; }
+    $('pf_go').disabled=true; $('pf_go').textContent='Publishing…';
     const cfg=JSON.parse(JSON.stringify(v.config)); cfg.approvedTermNote48=`48-month ${cfg.newMult[48]}× approved explicitly by ${by} at publication`;
-    const upd1=await sb.from('rmr_plan_versions').update({config:cfg}).eq('id',v.id); if(upd1.error){ $('pf_msg').textContent=upd1.error.message; return; }
+    const fail=(m)=>{ pfSay(m); $('pf_go').disabled=false; $('pf_go').textContent='Publish version'; };
+    const upd1=await sb.from('rmr_plan_versions').update({config:cfg}).eq('id',v.id); if(upd1.error){ fail(upd1.error.message); return; }
     const pv=Object.assign({},v,{config:cfg,effective_date:eff,approved_by:by});
     const {error}=await sb.from('rmr_plan_versions').update({status:'published',effective_date:eff,approved_by:by,approved_at:new Date().toISOString(),preview_checked_at:v.preview_checked_at||(ADM_PREVIEW&&ADM_PREVIEW.at),published_at:new Date().toISOString(),published_by:CURRENT_EMAIL,terms_text:termsText(pv)}).eq('id',v.id);
-    if(error){ $('pf_msg').textContent=error.message; return; }
+    if(error){ fail(error.message); return; }
     const prior=P27.versions.filter(x=>x.family===v.family&&x.status==='published'&&x.id!==v.id);
     audit('Plan version published','Admin',v.label,null,{effective:eff,approved_by:by,supersedes:prior.map(p=>p.label)},null);
     await load27(); renderAdmin27(); toast(v.label+' published — assign it to employees below'); };
