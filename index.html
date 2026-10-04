@@ -6124,15 +6124,16 @@ const ICON27={
   recon:'<path d="M12 4v16M6 20h12M5 8h14"/><path d="M5 8l-2.5 6h5zM19 8l-2.5 6h5z"/>',
   reports:'<path d="M5 20V11M11 20V5M17 20v-7M3 20h18"/>',
   admin:'<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
-  myplan:'<path d="M6 3h9l3 3v15H6z"/><path d="M9 12l2 2 4-4"/>'
+  myplan:'<path d="M6 3h9l3 3v15H6z"/><path d="M9 12l2 2 4-4"/>',
+  guides:'<path d="M4 5a2 2 0 0 1 2-2h5v17H6a2 2 0 0 0-2 2z"/><path d="M20 5a2 2 0 0 0-2-2h-5v17h5a2 2 0 0 1 2 2z"/>'
 };
 const svg27=p=>`<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 const TAB27={today:'tabToday',opportunities:'tabOpportunities',agreements:'tabAgreements',renewals:'tabRenewals',quarter:'tabQuarter',worklist:'tabWorklist',imports:'tabImports',
-  history:'tabHistory',forecast:'tabForecast',recon:'tabRecon',reports:'tabReports',admin:'tabAdmin',myplan:'tabMyPlan'};
+  history:'tabHistory',forecast:'tabForecast',recon:'tabRecon',reports:'tabReports',admin:'tabAdmin',myplan:'tabMyPlan',guides:'tabGuides'};
 const NAV27={
   team:[['today','Today'],['opportunities','Pipeline'],['agreements','Agreements'],['renewals','Renewals'],['quarter','Payouts'],['worklist','Worklist'],['imports','Vista imports'],
-    '§Reports',['history','Commission history'],['forecast','Renewal forecast'],['recon','Reconciliation'],['reports','Reports'],'§Settings',['admin','Admin']],
-  rep:[['quarter','My pay'],['opportunities','Pipeline'],['agreements','My deals'],['renewals','Renewals'],['history','Payment history'],['myplan','My plan']]
+    '§Reports',['history','Commission history'],['forecast','Renewal forecast'],['recon','Reconciliation'],['reports','Reports'],'§Settings',['guides','Guides'],['admin','Admin']],
+  rep:[['quarter','My pay'],['opportunities','Pipeline'],['agreements','My deals'],['renewals','Renewals'],['history','Payment history'],['myplan','My plan'],'§Help',['guides','Guides']]
 };
 const PAGE27={
   today:['Today','What needs you next, soonest first.'],
@@ -6147,7 +6148,8 @@ const PAGE27={
   recon:['Reconciliation','Year by year: paid under the old plan, earned under the revised plan.'],
   reports:['Reports','Profitability by customer, and every upcoming release.'],
   admin:['Admin','Plans, employees, payout calendar and the audit log.'],
-  myplan:['My plan','The commission terms you accepted, and how you are paid.']
+  myplan:['My plan','The commission terms you accepted, and how you are paid.'],
+  guides:['Guides','How to use the tool, and how commissions work.']
 };
 const isTeam27=()=>canViewAll();
 const lc27=s=>String(s||'').toLowerCase();
@@ -6166,12 +6168,13 @@ function nameOf27(email){ const u=(P27.users||[]).find(x=>lc27(x.email)===lc27(e
   const foot=document.createElement('div'); foot.className='foot27'; foot.id='foot27'; side.appendChild(foot);
   app.insertBefore(side,app.firstChild);
   const main=app.querySelector('main');
-  [['today','tabToday'],['imports','tabImports'],['myplan','tabMyPlan']].forEach(([v,id])=>{
+  [['today','tabToday'],['imports','tabImports'],['myplan','tabMyPlan'],['guides','tabGuides']].forEach(([v,id])=>{
     const b=document.createElement('button'); b.id=id; b.dataset.view=v; b.onclick=()=>switchView(v); nav.appendChild(b);
     const sec=document.createElement('section'); sec.id='view-'+v; sec.style.display='none'; sec.innerHTML=`<div id="${v}Host27" class="pg27"></div>`; main.appendChild(sec); });
   const hdr=app.querySelector('header'); const ph=document.createElement('div'); ph.id='pageHead27';
   ph.innerHTML='<h1 id="pgTitle27">Bonus Tracker</h1><div class="sub" id="pgSub27"></div>'; hdr.insertBefore(ph,hdr.querySelector('.session'));
   const tip=document.createElement('div'); tip.id='tip27'; document.body.appendChild(tip);
+  const gb=$('guideBtn'); if(gb){ gb.textContent='Guides'; gb.onclick=()=>switchView('guides'); }
   decorateNav27();
 })();
 function decorateNav27(){
@@ -6213,7 +6216,8 @@ let HOMED27='';
   const ea=window.enterApp; if(typeof ea==='function') window.enterApp=function(){ HOMED27=''; return ea.apply(this,arguments); };
   const rd=window.render;
   window.render=function(){ rd.apply(this,arguments);
-    try{ if(view==='quarter'&&!can('editConfig')) setTimeout(()=>document.querySelectorAll('#qTableWrap .paidbtn.is-paid').forEach(b=>{ b.disabled=true; b.title='Only an Administrator can undo a paid mark.'; b.style.cursor='not-allowed'; }),0);
+    try{ if(view==='guides')renderGuides27();
+      if(view==='quarter'&&!can('editConfig')) setTimeout(()=>document.querySelectorAll('#qTableWrap .paidbtn.is-paid').forEach(b=>{ b.disabled=true; b.title='Only an Administrator can undo a paid mark.'; b.style.cursor='not-allowed'; }),0);
       if(view==='today')renderToday27(); if(view==='imports')renderImports27(); if(view==='myplan')renderMyPlan27(); if(view==='quarter'&&!isTeam27())renderMyPay27(); }
     catch(e){ console.warn('render27',e); } };
 })();
@@ -6452,6 +6456,55 @@ function openMarkPaid27(d){
     closeDrawer27(); await load27(); render(); toast('Marked paid — the quarter is locked'); };
 }
 
+/* ---------------- Guides: role-based, stored privately, opened in a new tab ---------------- */
+const GUIDE27={admin:{path:'admin/user-guide.html',title:'Admin & Executive user guide',who:'Administrators, Executives and Managers'},rep:{path:'rep/user-guide.html',title:'Sales rep user guide',who:'Sales reps'}};
+const myGuide27=()=>isTeam27()?GUIDE27.admin:GUIDE27.rep;
+async function guideInfo27(g){ try{ const dir=g.path.split('/')[0], name=g.path.split('/')[1]; const {data,error}=await sb.storage.from('guides').list(dir); if(error)return {error:error.message}; const f=(data||[]).find(x=>x.name===name); return f?{at:f.updated_at||f.created_at||null,size:(f.metadata&&f.metadata.size)||null}:{missing:true}; }catch(e){ return {error:e.message||String(e)}; } }
+async function openUserGuide27(g){
+  g=g||myGuide27(); const w=window.open('','_blank');
+  if(w){ try{ w.document.write('<!doctype html><title>Opening guide…</title><body style="font-family:system-ui,sans-serif;color:#242424;padding:40px">Opening the guide…</body>'); }catch(_){} }
+  const {data,error}=await sb.storage.from('guides').download(g.path);
+  if(error||!data){ if(w)w.close(); toast(/not found|404/i.test((error&&error.message)||'')?'That guide hasn\'t been published yet.':((error&&error.message)||'Could not open the guide')); return; }
+  const url=URL.createObjectURL(new Blob([await data.text()],{type:'text/html'}));
+  if(w){ w.location.href=url; } else { const a=document.createElement('a'); a.href=url; a.target='_blank'; a.rel='noopener'; document.body.appendChild(a); a.click(); a.remove(); }
+  setTimeout(()=>URL.revokeObjectURL(url),120000);
+  audit('User guide opened','Guides',g.path,null,null,null);
+}
+async function renderGuides27(){
+  const host=$('guidesHost27'); if(!host)return; const g=myGuide27(); const admin=can('editConfig');
+  host.innerHTML=`<div class="row27">
+    <div class="card27" style="flex:1 1 380px"><div class="hd"><h2>How to use the tool</h2></div><div class="bd" style="display:flex;flex-direction:column;gap:12px">
+      <div style="font-size:15px;font-weight:800">${esc(g.title)}</div>
+      <div class="qctx" style="font-size:13.5px;line-height:1.55">${isTeam27()?'Step by step, with screenshots: adding a rep, setting up won deals, Vista imports, the five payout steps, adjustments and reverting a step.':'Step by step, with screenshots: your pipeline, marking a deal won, My pay and your questions.'} Opens in a new tab, with a table of contents, search, and a print button.</div>
+      <div id="gd27stat" class="qctx">Checking…</div>
+      <div><button class="btn-primary" id="gd27open">Open the guide</button></div></div></div>
+    <div class="card27" style="flex:1 1 380px"><div class="hd"><h2>How commissions work</h2></div><div class="bd" style="display:flex;flex-direction:column;gap:12px">
+      <div style="font-size:15px;font-weight:800">Commission plan guide</div>
+      <div class="qctx" style="font-size:13.5px;line-height:1.55">The plan's multiples, when Payment 1 and Payment 2 are earned, renewals, and a worked example on $100/month.</div>
+      <div><button class="btn-ghost" id="gd27plan">Open the plan guide</button></div></div></div>
+   </div>
+   ${admin?`<div class="card27"><div class="hd"><h2>Publish a guide</h2><span class="qctx">Administrators only · guides are private and shown by role</span></div><div class="bd" style="display:flex;flex-direction:column;gap:12px">
+     <div id="gd27list" class="qctx">Loading…</div>
+     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+       <label class="fld27">Guide<select id="gd27which"><option value="admin">${esc(GUIDE27.admin.title)} — ${esc(GUIDE27.admin.who)}</option><option value="rep">${esc(GUIDE27.rep.title)} — ${esc(GUIDE27.rep.who)}</option></select></label>
+       <label class="fld27">Guide file (.html)<input type="file" id="gd27file" accept=".html,.htm,text/html"></label>
+       <button class="btn-primary" id="gd27up">Publish</button></div>
+     <div id="gd27msg" style="font-size:13px;font-weight:700"></div></div></div>`:''}`;
+  $('gd27open').onclick=()=>openUserGuide27(g);
+  $('gd27plan').onclick=()=>openGuide();
+  const st=await guideInfo27(g); if($('gd27stat')) $('gd27stat').textContent=st.missing?'Not published yet.':(st.error?('Unavailable: '+st.error):`Last updated ${fmtD27(st.at)}.`);
+  if(st.missing&&$('gd27open')) $('gd27open').disabled=true;
+  if(admin){ const rows=[]; for(const k of ['admin','rep']){ const i=await guideInfo27(GUIDE27[k]); rows.push(`<div><b style="color:var(--ink)">${esc(GUIDE27[k].title)}</b> · ${esc(GUIDE27[k].who)} · ${i.missing?'not published yet':(i.error?esc(i.error):'updated '+esc(fmtD27(i.at)))}${!i.missing&&!i.error?` · <button class="lnk27" data-gd27o="${k}">Open</button>`:''}</div>`); }
+    if($('gd27list')){ $('gd27list').innerHTML=rows.join(''); $('gd27list').querySelectorAll('[data-gd27o]').forEach(b=>b.onclick=()=>openUserGuide27(GUIDE27[b.dataset.gd27o])); }
+    $('gd27up').onclick=async()=>{ const f=$('gd27file').files[0], k=$('gd27which').value, msg=t=>{ $('gd27msg').textContent=t; };
+      if(!f)return msg('Choose the guide file first.'); if(!/\.html?$/i.test(f.name))return msg('The guide must be an .html file.');
+      $('gd27up').disabled=true; msg('Publishing…');
+      const {error}=await sb.storage.from('guides').upload(GUIDE27[k].path,f,{upsert:true,contentType:'text/html'});
+      $('gd27up').disabled=false;
+      if(error){ $('gd27msg').style.color='#8a1f1f'; return msg(/bucket|not found/i.test(error.message)?'The database needs the v26 update (migration_v26_guides.sql) first.':error.message); }
+      audit('User guide published','Guides',GUIDE27[k].path,null,{file:f.name,size:f.size},null); $('gd27msg').style.color='#17603f'; msg(`Published — ${GUIDE27[k].who} now see the new version.`); renderGuides27(); }; }
+}
+
 /* ---------------- Administrator: revert one payout step ---------------- */
 function openRevert27(d){
   if(!can('editConfig')){ toast('Only an Administrator can revert a payout step.'); return; }
@@ -6644,7 +6697,7 @@ function renderMyPlan27(){
       <button class="btn-ghost" id="mp27guide" style="align-self:flex-start">Open the full guide</button></div></div>
     <div class="card27" style="flex:1 1 420px"><div class="hd"><h2>The terms you accepted</h2></div><div class="bd"><div style="white-space:pre-wrap;font-size:13px;line-height:1.6;color:#3d4452;max-height:520px;overflow:auto">${esc(ack&&ack.text_shown?ack.text_shown:termsText(v))}</div></div></div>
    </div>`;
-  if($('mp27guide')) $('mp27guide').onclick=()=>$('guideBtn').click();
+  if($('mp27guide')) $('mp27guide').onclick=()=>openGuide();
   if($('mp27ack')) $('mp27ack').onclick=()=>checkAcknowledgement();
 }
 

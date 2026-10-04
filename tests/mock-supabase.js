@@ -47,6 +47,14 @@
         (DBx.rmr_payout_reversals=DBx.rmr_payout_reversals||[]).push({id:Date.now(),run_id:r.id,year:r.year,quarter:r.quarter,step,reason:args.p_reason,reverted_by:me,reverted_at:new Date().toISOString(),removed_entries:removed});
         return {data:step,error:null}; }
       if(fn==='rmr_password_set'){ (window.__DB.rmr_users||[]).forEach(u=>{ if(u.email===(window.__EMAIL||'sean.bithell@point1.com'))u.must_set_password=false; }); } return {data:null,error:null}; },
-    storage:{from:()=>({list:async()=>({data:[],error:null}),upload:async()=>({error:null}),createSignedUrl:async()=>({data:{signedUrl:'#'}})})}
+    storage:{from:(bucket)=>{ const S=window.__STORE=window.__STORE||{}; const key=p=>bucket+'/'+p; return {
+      list:async(dir)=>({data:Object.keys(S).filter(k=>k.startsWith(bucket+'/'+(dir?dir+'/':''))).map(k=>({name:k.split('/').pop(),updated_at:S[k].at,metadata:{size:S[k].size}})),error:null}),
+      upload:async(p,f,o)=>{ if(bucket==='guides'){ const me=window.__EMAIL||'sean.bithell@point1.com'; const u=(window.__DB.rmr_users||[]).find(x=>x.email===me); if(!u||(u.permission_role||u.role)!=='Administrator')return {error:{message:'new row violates row-level security policy'}}; if(S[key(p)]&&!(o&&o.upsert))return {error:{message:'The resource already exists'}}; }
+        const text=f&&f.text?await f.text():String(f); S[key(p)]={text,at:new Date().toISOString(),size:text.length}; return {data:{path:p},error:null}; },
+      download:async(p)=>{ const me=window.__EMAIL||'sean.bithell@point1.com'; const u=(window.__DB.rmr_users||[]).find(x=>x.email===me); const role=u&&(u.permission_role||u.role);
+        if(bucket==='guides'&&p.startsWith('admin/')&&!['Administrator','Executive','Manager'].includes(role))return {data:null,error:{message:'Object not found'}};
+        const o=S[key(p)]; return o?{data:new Blob([o.text],{type:'text/html'}),error:null}:{data:null,error:{message:'Object not found'}}; },
+      remove:async()=>({data:null,error:null}),
+      createSignedUrl:async()=>({data:{signedUrl:'#'}}) }; }}
   })};
 })();

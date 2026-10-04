@@ -30,9 +30,9 @@ async function open(browser,email){ const ctx=await browser.newContext({viewport
     if(u.includes('jspdf.umd'))return route.fulfill({contentType:'text/javascript',body:fs.readFileSync(path.join(__dirname,'node_modules/jspdf/dist/jspdf.umd.min.js'),'utf8')});
     if(u.includes('jspdf.plugin.autotable'))return route.fulfill({contentType:'text/javascript',body:fs.readFileSync(path.join(__dirname,'node_modules/jspdf-autotable/dist/jspdf.plugin.autotable.min.js'),'utf8')});
     if(u.startsWith('http'))return route.fulfill({contentType:'text/javascript',body:''}); return route.continue(); });
-  await page.addInitScript(([seed,em])=>{ localStorage.setItem('rmr_url','https://x.supabase.co'); localStorage.setItem('rmr_key','k'); window.__DB=seed; window.__EMAIL=em; },[DB,email]);
+  await page.addInitScript(([seed,em])=>{ localStorage.setItem('rmr_url','https://x.supabase.co'); localStorage.setItem('rmr_key','k'); window.__STORE=seed.__STORE||{}; window.__DB=seed; window.__EMAIL=em; },[DB,email]);
   await page.goto('file://'+path.join(ROOT,'index.html')); await page.waitForTimeout(1600); page.__errors=errors; return page; }
-const save=async page=>{ DB=await page.evaluate(()=>JSON.parse(JSON.stringify(window.__DB))); await page.context().close(); };
+const save=async page=>{ DB=await page.evaluate(()=>JSON.parse(JSON.stringify(Object.assign({},window.__DB,{__STORE:window.__STORE||{}})))); await page.context().close(); };
 const tmp=f=>{ const p=path.join(require('os').tmpdir(),f); fs.writeFileSync(p,'%PDF-1.4 signed'); return p; };
 (async()=>{
   const browser=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
@@ -40,7 +40,7 @@ const tmp=f=>{ const p=path.join(require('os').tmpdir(),f); fs.writeFileSync(p,'
   let p=await open(browser,'jordan.lee@point1.com');
   ok(await p.evaluate(()=>view==='quarter'&&document.getElementById('pgTitle27').textContent==='My pay'),'rep lands on My pay with the page header');
   const repNav=await p.evaluate(()=>[...document.querySelectorAll('#side27 nav button')].filter(b=>b.offsetParent).map(b=>b.textContent.trim()).join('|'));
-  ok(repNav==='My pay|Pipeline|My deals|Renewals|Payment history|My plan','rep side menu: '+repNav);
+  ok(repNav==='My pay|Pipeline|My deals|Renewals|Payment history|My plan|Guides','rep side menu: '+repNav);
   await p.evaluate(()=>switchView('opportunities')); await p.waitForTimeout(300);
   await p.click('tr:has-text("Lakeside") .paidbtn:has-text("Mark won")'); await p.waitForTimeout(200);
   ok(await p.evaluate(()=>!!document.getElementById('mw27')&&document.getElementById('mw27_go').disabled),'Mark won opens the side panel; Send stays off without the contract');
@@ -57,7 +57,7 @@ const tmp=f=>{ const p=path.join(require('os').tmpdir(),f); fs.writeFileSync(p,'
   p=await open(browser,'sean.bithell@point1.com');
   ok(await p.evaluate(()=>view==='today'),'admin lands on Today');
   const admNav=await p.evaluate(()=>[...document.querySelectorAll('#side27 nav button')].filter(b=>b.offsetParent).map(b=>b.textContent.trim()).join('|'));
-  ok(/^Today\|Pipeline\|Agreements\|Renewals\|Payouts\|Worklist.*\|Vista imports\|Commission history\|Renewal forecast\|Reconciliation\|Reports\|Admin$/.test(admNav),'admin side menu: '+admNav);
+  ok(/^Today\|Pipeline\|Agreements\|Renewals\|Payouts\|Worklist.*\|Vista imports\|Commission history\|Renewal forecast\|Reconciliation\|Reports\|Guides\|Admin$/.test(admNav),'admin side menu: '+admNav);
   const close=async(id,bill,hrs,signed)=>{ await p.evaluate(id=>winOpp(id),id); await p.waitForTimeout(250); await p.selectOption('#cd_term','36'); if(signed) await p.fill('#cd_date',signed); if(bill) await p.fill('#cd_bill',bill); await p.fill('#cd_hrs',String(hrs)); await p.fill('#cd_rate','110'); await p.fill('#cd_mat','60'); await p.fill('#cd_mon','180'); await p.waitForTimeout(150); await p.click('#cdGo27'); await p.waitForTimeout(800); };
   await close('o1','2026-11-01',1); await close('o3','2026-12-01',1);
   await close('o2','2026-11-01',1,'2026-10-25');
@@ -117,7 +117,19 @@ const tmp=f=>{ const p=path.join(require('os').tmpdir(),f); fs.writeFileSync(p,'
   await p.evaluate(()=>switchView('imports')); await p.waitForTimeout(400); await p.evaluate(()=>{ const d=document.querySelector('#view-imports details'); if(d)d.open=true; });
   ok(await p.evaluate(()=>document.querySelectorAll('#view-imports [data-feed27]').length===5),'Vista imports page: five slots with dropdowns');
   await shot(p,'admin_imports');
+  // Guides: Administrator publishes the admin guide; it opens in a new tab
+  await p.evaluate(()=>switchView('guides')); await p.waitForTimeout(500);
+  ok(await p.evaluate(()=>!!document.getElementById('gd27up')&&document.getElementById('gd27open').disabled),'Guides page: admin guide not published yet, Publish panel shown to the Administrator');
+  { const f=require('path').join(require('os').tmpdir(),'user-guide.html'); fs.writeFileSync(f,'<!doctype html><title>Admin guide</title><h1>Admin & Executive user guide</h1>'); await p.setInputFiles('#gd27file',f); }
+  await p.selectOption('#gd27which','admin'); await p.click('#gd27up'); await p.waitForTimeout(700);
+  ok(await p.evaluate(()=>/Published/.test(document.getElementById('gd27msg').textContent)||!document.getElementById('gd27open').disabled),'Administrator publishes the guide');
+  await p.waitForTimeout(400);
+  const [pop]=await Promise.all([p.context().waitForEvent('page'),p.click('#gd27open')]); await pop.waitForURL(/^blob:/,{timeout:5000}).catch(()=>{}); await pop.waitForTimeout(300);
+  const popTxt=await pop.content(); if(process.env.DBG)console.log(pop.url(),popTxt.slice(0,300));
+  ok(/Admin &amp; Executive user guide|Admin & Executive user guide/.test(popTxt),'Open the guide shows it in a new tab');
+  await pop.close();
   ok(p.__errors.length===0,'admin: no page errors '+JSON.stringify(p.__errors.slice(0,3)));
+  DB.__STORE=await p.evaluate(()=>window.__STORE);
   await save(p);
   // ===== REP: My pay, chart, question
   p=await open(browser,'jordan.lee@point1.com');
@@ -127,6 +139,8 @@ const tmp=f=>{ const p=path.join(require('os').tmpdir(),f); fs.writeFileSync(p,'
   await shot(p,'rep_my_pay');
   await p.click('#myPay27 [data-q27]'); await p.waitForTimeout(200); await p.fill('#q27_t','The customer paid on Jan 16 — is payment 1 in this payout?'); await shot(p,'rep_question_panel'); await p.click('#q27_go'); await p.waitForTimeout(600);
   ok(await p.evaluate(()=>__DB.rmr_worklist.some(w=>w.type==='rep_question'&&w.detail.requested_by==='jordan.lee@point1.com'&&w.status==='open')),'question lands on the Worklist for the admin');
+  ok(await p.evaluate(async()=>{ switchView('guides'); const r=await sb.storage.from('guides').download('admin/user-guide.html'); return !!r.error&&[...document.querySelectorAll('#side27 nav button')].some(b=>b.offsetParent&&b.textContent.trim()==='Guides'); }),'rep has Guides in the menu but cannot read the admin guide');
+  await p.waitForTimeout(400); ok(await p.evaluate(()=>/Sales rep user guide/.test(document.getElementById('guidesHost27').innerText)&&!document.getElementById('gd27up')),'rep sees the sales rep guide slot and no Publish panel');
   await p.evaluate(()=>switchView('myplan')); await p.waitForTimeout(300);
   ok(/Hybrid v1 \(revised\)/.test(await p.evaluate(()=>document.getElementById('myplanHost27').innerText)),'My plan shows the accepted plan and terms');
   await shot(p,'rep_my_plan');
