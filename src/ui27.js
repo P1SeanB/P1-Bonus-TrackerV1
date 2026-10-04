@@ -425,11 +425,15 @@ async function stageFile(feed,file,route){
   const liveAgs=AGREEMENTS.filter(a=>isLiveAgreement(a));
   // An invoice with no billing-row match is only worth a person's time if it looks like a tracked agreement's billing row
   // that has no invoice number yet: same Vista customer (when known), same amount, dated within a month.
-  const billingCandidates=x=>{ const c=custNo(x.customer), out=[]; const tot=+x.total||+x.amount||0; if(!tot||!x.invoice_date)return out;
-    liveAgs.forEach(a=>{ const ac=agCust[String(a.agreement_number)]; if(ac&&c&&ac!==c)return;
-      (Array.isArray(a.billing_log)?a.billing_log:[]).forEach(e=>{ if(e.invoice_no)return; if(Math.abs((+e.amount||0)-tot)>0.005)return;
-        const dd=Math.abs(E27.daysBetween(String(e.date||'').slice(0,10),x.invoice_date)); if(dd<=31)out.push({a,e}); }); });
+  // Needs the Vista customer number (from the Agreement List import) — without it amount-and-date alone is too loose to suggest anything.
+  const claimed=new Set();   // a billing row is suggested for one invoice only
+  const billingCandidates=x=>{ const c=custNo(x.customer), out=[]; const tot=+x.total||+x.amount||0; if(!tot||!x.invoice_date||!c)return out;
+    liveAgs.forEach(a=>{ const ac=agCust[String(a.agreement_number)]; if(!ac||ac!==c)return; let best=null;
+      (Array.isArray(a.billing_log)?a.billing_log:[]).forEach(e=>{ if(e.invoice_no)return; if(Math.abs((+e.amount||0)-tot)>0.005)return; const rk=a.id+'|'+String(e.date||'').slice(0,10)+'|'+e.amount; if(claimed.has(rk))return;
+        const dd=Math.abs(E27.daysBetween(String(e.date||'').slice(0,10),x.invoice_date)); if(dd<=15&&(!best||dd<best.dd))best={a,e,dd,rk}; });
+      if(best)out.push(best); });
     return out; };
+  const linkByAg={}, ambByCust={};
   const vistaActive=feed==='agreement_terms'?new Set(parsed.rows.filter(t=>/^(active|future active)\b/i.test(String(t.status||''))).map(t=>String(t.agreement_number))):null;
   const flaggedAg=new Set();
   const exists={invoices:x=>INV_BY_NO[x.invoice_number],receipts:x=>P27.receipts.find(r=>r.receipt_key===x.receipt_key),agreement_terms:x=>P27.terms.find(t=>t.term_key===x.term_key),
@@ -439,8 +443,8 @@ async function stageFile(feed,file,route){
     if(feed==='invoices'){ const m=V27.mapInvoice(x,maps); x.agreement_number=m.agreement; x.map_method=m.method; if(m.agreement)matched++; else { unmatched++;
         const cand=billingCandidates(x);
         if(m.candidate)unmatchedRows.push({key:x.invoice_number,why:`description mentions Agmt ${m.candidate} (corroborating only)`});
-        else if(cand.length===1)unmatchedRows.push({key:x.invoice_number,why:`${fmt2(+x.total||0)} on ${x.invoice_date} (${x.customer||''}) looks like the ${String(cand[0].e.date||'').slice(0,10)} billing row on agreement #${cand[0].a.agreement_number} — if it is, add invoice ${x.invoice_number} to that row`});
-        else if(cand.length>1)unmatchedRows.push({key:x.invoice_number,why:`${fmt2(+x.total||0)} on ${x.invoice_date} (${x.customer||''}) could belong to ${cand.length} agreements (${[...new Set(cand.map(c=>'#'+c.a.agreement_number))].slice(0,4).join(', ')}) — add the invoice number to the right billing row`});
+        else if(cand.length===1){ const {a,e,rk}=cand[0]; claimed.add(rk); const g=linkByAg[a.id]=linkByAg[a.id]||{a,pairs:[]}; g.pairs.push({inv:x.invoice_number,date:String(e.date||'').slice(0,10),amount:+e.amount||0,inv_date:x.invoice_date}); }
+        else if(cand.length>1){ const c=custNo(x.customer); const g=ambByCust[c]=ambByCust[c]||{name:x.customer,invs:[],ags:new Set()}; g.invs.push(x.invoice_number+' ('+x.invoice_date+' '+fmt2(+x.total||0)+')'); cand.forEach(k=>g.ags.add('#'+k.a.agreement_number)); }
         else notLinked++; } }
     else if(feed==='receipts'){ const inv=x.invoice_number&&(INV_BY_NO[x.invoice_number]||parsed.rows.find(()=>false)); if(inv&&inv.agreement_number)matched++; else { unmatched++; unmatchedRows.push({key:x.receipt_key,why:inv?'invoice not mapped to an agreement':'invoice not in the invoice feed — import invoices first'}); } }
     else if(feed==='agreement_terms'){ if(AGREEMENTS.some(a=>String(a.agreement_number)===x.agreement_number))matched++; else { unmatched++;
@@ -451,7 +455,14 @@ async function stageFile(feed,file,route){
         if(ag&&x.bucket==='unresolved')unmatchedRows.push({key:x.line_key,why:`agreement #${ag} work order ${x.work_order}: "${x.description||''}" (${x.line_type}) — cost classification unresolved`,kind:'cost_classification'}); }
     else if(feed==='invoice_attribution'){ if(x.agreement_number)matched++; else unmatched++; }
   });
-  STAGED27={feed,file:file.name,sha,route,parsed,matched,unmatched,already,notLinked,unmatchedRows};
+  Object.values(linkByAg).forEach(({a,pairs})=>unmatchedRows.push({key:`Agreement ${a.agreement_number} invoices`,count:pairs.length,
+    why:`${pairs.length} Vista invoice${pairs.length>1?'s':''} look${pairs.length>1?'':'s'} like billing row${pairs.length>1?'s':''} with no invoice number (same customer, same amount, within 15 days): ${pairs.map(q=>`${q.inv} → ${q.date} row ${fmt2(q.amount)}`).join('; ')}. Check, then Link invoices`,
+    link:{agreement_id:a.id,agreement_number:a.agreement_number,pairs}}));
+  Object.entries(ambByCust).forEach(([c,g])=>unmatchedRows.push({key:`Customer ${c} invoices`,count:g.invs.length,
+    why:`${g.invs.length} invoice${g.invs.length>1?'s':''} for ${g.name} match billing rows on more than one agreement (${[...g.ags].slice(0,6).join(', ')}): ${g.invs.slice(0,12).join(', ')}${g.invs.length>12?' …':''}. Check each in Vista ▸ SM Agreements ▸ Invoices tab and type the invoice number on the right billing row`}));
+  if(feed==='invoices'&&!Object.keys(agCust).length)parsed.flags.push('Import the Agreement List (Agreement term history) first — it supplies the Vista customer number used to suggest invoice links. Without it, unmatched invoices are only stored.');
+  const linkCount=Object.values(linkByAg).reduce((n,g)=>n+g.pairs.length,0), ambCount=Object.values(ambByCust).reduce((n,g)=>n+g.invs.length,0);
+  STAGED27={feed,file:file.name,sha,route,parsed,matched,unmatched,already,notLinked,unmatchedRows,linkCount,ambCount};
   if(route==='scheduled'){ if(!parsed.flags.length||feed!=='invoices') return commitStaged(); await sb.from('rmr_import_batches').insert({feed,route,filename:file.name,file_sha256:sha,status:'held',rows_read:parsed.rows.length,param_echo:parsed.paramEcho,param_flags:parsed.flags,created_by:'scheduled'}); return; }
   renderStage27(); return STAGED27;
 }
@@ -460,7 +471,7 @@ function renderStage27(){
   if(s.error){ box.innerHTML=`<div style="background:#fbeaea;border:1px solid #f3c0c0;border-radius:8px;padding:10px 12px;font-size:12.5px;color:#9a2a2a"><b>${esc(V27.FEEDS[s.feed].label)} — ${esc(s.file)}: nothing was imported.</b><br>${esc(s.error)} <button class="iconbtn" id="st27x" style="margin-left:8px">Dismiss</button></div>`; $('st27x').onclick=()=>{STAGED27=null;renderStage27();}; return; }
   const p=s.parsed;
   box.innerHTML=`<div style="border:2px solid var(--navy);border-radius:10px;padding:12px 14px;font-size:12.5px;background:#f7f9fc"><b>${esc(V27.FEEDS[s.feed].label)} — ${esc(s.file)}</b> · result summary (nothing is written until you confirm)
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:8px 0"><div>Rows read<br><b>${p.rows.length+p.duplicates}</b></div><div>Matched<br><b>${s.matched}</b></div><div>Unmatched<br><b>${s.unmatched}</b>${s.notLinked?`<div class="qctx">${s.notLinked} not tied to a tracked agreement (${({invoices:'T&M / project invoices',agreement_terms:'old, expired or quoted agreements',posted_cost:'non-agreement work orders'})[s.feed]||'other'}) — kept for reference, not sent to the Worklist</div>`:''}</div><div>To the Worklist<br><b>${s.unmatchedRows.length}</b></div><div>Duplicates ignored<br><b>${p.duplicates} in file · ${s.already} already stored</b></div><div>Data-through<br><b>${esc(p.dataThrough||'—')}</b></div>${p.statusCounts?`<div>Statuses<br><b>${Object.entries(p.statusCounts).map(([k,v])=>esc(k)+' '+v).join(' · ')}</b></div>`:''}${p.offset?'<div>Column offset<br><b>data rows shifted +1 (handled)</b></div>':''}</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:8px 0"><div>Rows read<br><b>${p.rows.length+p.duplicates}</b></div><div>Matched<br><b>${s.matched}</b></div><div>Unmatched<br><b>${s.unmatched}</b>${s.notLinked?`<div class="qctx">${s.notLinked} not tied to a tracked agreement (${({invoices:'T&M / project invoices',agreement_terms:'old, expired or quoted agreements',posted_cost:'non-agreement work orders'})[s.feed]||'other'}) — kept for reference, not sent to the Worklist</div>`:''}</div><div>To the Worklist<br><b>${s.unmatchedRows.length}</b>${s.feed==='invoices'&&(s.linkCount||s.ambCount)?`<div class="qctx">${s.linkCount} invoices ready to link on ${s.unmatchedRows.filter(u=>u.link).length} agreements · ${s.ambCount} that fit more than one agreement</div>`:''}</div><div>Duplicates ignored<br><b>${p.duplicates} in file · ${s.already} already stored</b></div><div>Data-through<br><b>${esc(p.dataThrough||'—')}</b></div>${p.statusCounts?`<div>Statuses<br><b>${Object.entries(p.statusCounts).map(([k,v])=>esc(k)+' '+v).join(' · ')}</b></div>`:''}${p.offset?'<div>Column offset<br><b>data rows shifted +1 (handled)</b></div>':''}</div>
     ${p.flags.length?`<div style="background:#fff4e8;border:1px solid #f3d4ad;border-radius:8px;padding:8px 10px;color:#8a5a17;margin-bottom:8px"><b>Flagged:</b><br>${p.flags.map(esc).join('<br>')}</div>`:''}
     <details><summary style="cursor:pointer">Parameter echo (recorded with the batch)</summary><pre style="white-space:pre-wrap;font-size:11px">${esc(p.paramEcho||'(none)')}</pre></details>
     ${s.unmatchedRows.length?`<details><summary style="cursor:pointer">Worklist items (${s.unmatchedRows.length}) — created when you confirm</summary><div style="max-height:160px;overflow:auto;font-size:11px">${s.unmatchedRows.slice(0,300).map(u=>esc(u.key)+' — '+esc(u.why)).join('<br>')}</div></details>`:''}
@@ -487,11 +498,14 @@ async function commitStaged(){
   if(error){ toast('Import stopped: '+error.message); return; }
   // exceptions → Worklist; previously open items resolved by this batch close with the batch as basis (NAV-03)
   const owner=((P27.settings.feed_owners||{})[s.feed]||{}).owner||CURRENT_EMAIL;
-  const items=s.unmatchedRows.map(u=>({item_uid:`${u.kind||'unmatched'}:${s.feed}:${u.key}`,type:u.kind||'unmatched_vista',record_ref:u.key,title:`${V27.FEEDS[s.feed].label}: ${u.key} — ${u.why}`,detail:{feed:s.feed,batch},owner_email:owner,due_date:E27.payoutCalendar(P27.settings.payout_calendar).cutoff}));
+  const items=s.unmatchedRows.map(u=>({item_uid:`${u.kind||'unmatched'}:${s.feed}:${u.key}`,type:u.kind||'unmatched_vista',status:'open',record_ref:u.key,title:`${V27.FEEDS[s.feed].label}: ${u.key} — ${u.why}`,detail:Object.assign({feed:s.feed,batch},u.link?{link:u.link}:{}),owner_email:owner,due_date:E27.payoutCalendar(P27.settings.payout_calendar).cutoff}));
   for(const c of chunks(items,500)) await sb.from('rmr_worklist').upsert(c,{onConflict:'item_uid',ignoreDuplicates:true});
   const stillOpen=new Set(items.map(i=>i.item_uid));
   const toClose=P27.worklist.filter(w=>w.status==='open'&&w.detail&&w.detail.feed===s.feed&&!stillOpen.has(w.item_uid)&&String(w.item_uid).startsWith('unmatched:'+s.feed+':')&&p.rows.some(x=>(x.invoice_number||x.receipt_key||x.term_key)===w.record_ref));
   for(const w of toClose){ await sb.from('rmr_worklist').update({status:'closed',closed_by:CURRENT_EMAIL,closed_at:new Date().toISOString(),close_basis:`Resolved by import batch #${batch}`}).eq('id',w.id); }
+  const mapsNow=agreementMaps();
+  for(const w of P27.worklist.filter(w=>w.status==='open'&&w.detail&&w.detail.link&&!stillOpen.has(w.item_uid)&&(w.detail.link.pairs||[]).every(q=>mapsNow.byInvoiceNo[q.inv]))){
+    await sb.from('rmr_worklist').update({status:'closed',closed_by:CURRENT_EMAIL,closed_at:new Date().toISOString(),close_basis:`Invoices now on the billing rows (batch #${batch})`}).eq('id',w.id); }
   audit('Vista import committed','Import',String(batch),null,{feed:s.feed,file:s.file,rows:p.rows.length,matched:s.matched,unmatched:s.unmatched,dataThrough:p.dataThrough,flags:p.flags},null);
   toast(`Imported ${p.rows.length} ${V27.FEEDS[s.feed].label.toLowerCase()} rows · batch #${batch}`);
   STAGED27=null; await load27(); render();
@@ -547,15 +561,34 @@ async function renderWorklist(){
    ${L.length?`<table><thead><tr><th>Type</th><th>Item</th><th>Owner</th><th class="num">Age</th><th>Due</th><th>Resolve in</th><th></th></tr></thead><tbody>${L.slice(0,500).map(w=>{ const T=WL_TYPES[w.type]||[w.type,'',''];
       const overdue=w.status==='open'&&w.due_date&&w.due_date<today;
       return `<tr><td><span class="chip" style="font-size:9px">${esc(T[0])}</span><div class="qctx">${esc(T[1])}</div></td><td style="white-space:normal;font-size:12.5px">${esc(w.title)}${w.status==='closed'?`<div class="qctx">Closed by ${esc(w.closed_by||'')} ${esc(String(w.closed_at||'').slice(0,10))} — ${esc(w.close_basis||'')}</div>`:''}</td><td>${esc(w.owner_email||'—')}</td><td class="num">${age(w)}d</td><td style="color:${overdue?'var(--held)':'inherit'}">${esc(w.due_date||'—')}</td>
-       <td><button class="iconbtn" data-wlgo="${esc(T[2])}" data-wltype2="${esc(w.type)}" data-wlref="${esc(w.record_ref||'')}">${w.type==='deal_won'?'Set up deal':w.type==='sale_unrecorded'?'Record sale':w.type==='rep_question'?'Open payouts':'Open '+esc(({imports:'Vista imports',recon:'reconciliation',agreements:'agreements',admin:'admin',opportunities:'pipeline'})[T[2]]||T[2])}</button></td><td>${w.status==='open'?`<button class="iconbtn" data-wlclose="${w.id}" data-wlq="${w.type==='rep_question'?1:''}">${w.type==='rep_question'?'Answer…':'Close…'}</button>`:''}</td></tr>`; }).join('')}</tbody></table>`:'<div class="empty">Nothing in this view.</div>'}</div>`;
+       <td><button class="iconbtn" data-wlgo="${esc(T[2])}" data-wltype2="${esc(w.type)}" data-wlref="${esc(w.record_ref||'')}">${w.type==='deal_won'?'Set up deal':w.type==='sale_unrecorded'?'Record sale':w.type==='rep_question'?'Open payouts':'Open '+esc(({imports:'Vista imports',recon:'reconciliation',agreements:'agreements',admin:'admin',opportunities:'pipeline'})[T[2]]||T[2])}</button></td><td>${w.status==='open'&&w.detail&&w.detail.link&&can('editAgreements')?`<button class="btn-primary" style="padding:4px 10px;font-size:12px;margin-bottom:4px" data-wllink="${w.id}">Link ${(w.detail.link.pairs||[]).length} invoice${(w.detail.link.pairs||[]).length>1?'s':''}</button><br>`:''}${w.status==='open'?`<button class="iconbtn" data-wlclose="${w.id}" data-wlq="${w.type==='rep_question'?1:''}">${w.type==='rep_question'?'Answer…':'Close…'}</button>`:''}</td></tr>`; }).join('')}</tbody></table>`:'<div class="empty">Nothing in this view.</div>'}</div>`;
   [['wlOwner','owner'],['wlType','type'],['wlAge','age'],['wlStatus','status']].forEach(([id,k])=>$(id).onchange=function(){ WL_FILTER[k]=this.value; renderWorklist(); });
   box.querySelectorAll('[data-wltype]').forEach(c=>c.onclick=()=>{ WL_FILTER.type=c.dataset.wltype; WL_FILTER.owner='__all'; renderWorklist(); });
   box.querySelectorAll('[data-wlgo]').forEach(b=>b.onclick=()=>{ const v=b.dataset.wlgo; switchView(v); if(b.dataset.wltype2==='deal_won'&&can('editAgreements')){ openCloseDeal27(b.dataset.wlref); return; } if(v==='agreements'){ const a=AGREEMENTS.find(x=>String(x.agreement_number)===b.dataset.wlref); if(a&&can('editAgreements'))openModal(a.id); } });
+  box.querySelectorAll('[data-wllink]').forEach(b=>b.onclick=async()=>{ const w=P27.worklist.find(x=>String(x.id)===b.dataset.wllink); if(!w)return; b.disabled=true;
+    const r=await linkSuggestedInvoices(w); if(r.error){ toast(r.error); b.disabled=false; return; } toast(`Linked ${r.n} invoice${r.n===1?'':'s'} to agreement #${w.detail.link.agreement_number}`); P27.worklist=await fetchAll('rmr_worklist','id'); updateWlBadge(); renderWorklist(); });
   box.querySelectorAll('[data-wlclose]').forEach(b=>b.onclick=()=>{ const tr=b.closest('td'); tr.innerHTML=b.dataset.wlq?`<textarea class="cfg-in" placeholder="Your answer — the rep sees this" style="width:240px;height:64px" id="wlb${b.dataset.wlclose}"></textarea> <button class="iconbtn" id="wlc${b.dataset.wlclose}">Send answer</button>`:`<input class="cfg-in" placeholder="Basis for closing (required)" style="width:200px" id="wlb${b.dataset.wlclose}"> <button class="iconbtn" id="wlc${b.dataset.wlclose}">Close</button>`;
     $('wlc'+b.dataset.wlclose).onclick=async()=>{ const basis=($('wlb'+b.dataset.wlclose).value||'').trim(); if(!basis){toast('State the basis for closing');return;}
       const {error}=await sb.from('rmr_worklist').update({status:'closed',closed_by:CURRENT_EMAIL,closed_at:new Date().toISOString(),close_basis:basis}).eq('id',b.dataset.wlclose); if(error){toast(error.message);return;}
       audit('Worklist item closed','Worklist',b.dataset.wlclose,null,{basis},basis); P27.worklist=await fetchAll('rmr_worklist','id'); updateWlBadge(); renderWorklist(); }; });
   updateWlBadge();
+}
+/* A person confirms a suggested invoice link from the Worklist: the invoice number is written onto the matching billing row
+   (same date, same amount, no invoice number yet). Never automatic; audited; the item closes with what was linked. */
+async function linkSuggestedInvoices(w){
+  const L=w.detail&&w.detail.link; if(!L)return {error:'Nothing to link'}; if(!can('editAgreements'))return {error:'Only an Administrator or Executive can link invoices'};
+  const a=AGREEMENTS.find(x=>String(x.id)===String(L.agreement_id)); if(!a)return {error:'Agreement not found'};
+  const before=JSON.parse(JSON.stringify(a.billing_log||[])); const log=JSON.parse(JSON.stringify(a.billing_log||[])); const done=[], skipped=[];
+  for(const q of (L.pairs||[])){ const e=log.find(r=>!r.invoice_no&&String(r.date||'').slice(0,10)===q.date&&Math.abs((+r.amount||0)-q.amount)<0.005);
+    if(e&&!log.some(r=>String(r.invoice_no)===String(q.inv))){ e.invoice_no=q.inv; done.push(q.inv); } else skipped.push(q.inv); }
+  if(!done.length)return {error:'Those billing rows already have invoice numbers — close the item instead'};
+  const {error}=await sb.from('rmr_agreements').update({billing_log:log,updated_at:new Date().toISOString()}).eq('id',a.id); if(error)return {error:error.message};
+  a.billing_log=log;
+  await sb.from('rmr_vista_invoices').update({agreement_number:String(a.agreement_number),map_method:'invoice number on billing row (linked from Worklist)'}).in('invoice_number',done);
+  audit('Vista invoices linked to billing rows','Agreement',a.id,{billing_log:before},{linked:done,skipped},`Worklist suggestion confirmed by ${CURRENT_EMAIL}`);
+  await sb.from('rmr_worklist').update({status:'closed',closed_by:CURRENT_EMAIL,closed_at:new Date().toISOString(),close_basis:`Linked ${done.join(', ')}${skipped.length?` · skipped ${skipped.join(', ')} (row already numbered)`:''}`}).eq('id',w.id);
+  try{ P27.invoices=await fetchAll('rmr_vista_invoices'); indexEvidence(); }catch(_){}
+  return {n:done.length,skipped};
 }
 function updateWlBadge(){ const b=$('wlBadge'); if(!b)return; const me=(CURRENT_EMAIL||'').toLowerCase(); const n=P27.worklist.filter(w=>w.status==='open'&&String(w.owner_email||'').toLowerCase()===me).length; b.style.display=n?'inline-block':'none'; b.textContent=n; }
 

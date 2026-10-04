@@ -125,12 +125,24 @@ const SEED={
   // Vista import: invoices file with offset trap, idempotent re-import, wrong-slot rejection
   const mk=(rows)=>{ const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'S'); return XLSX.write(wb,{type:'base64',bookType:'xlsx'}); };
   const inv=mk([['SM Invoice List'],['Status: all  Service Site, Work Order'],['Invoice','Status','Customer','Invoice Date','Post Month','Due Date','Amount','Tax','Total','Service Site','Work Order','Balance'],
-    [null,'34001','Invoiced','Cust 150','3/1/2026','2026-03','3/31/2026',1000,0,1000,'S1','WO1',0],[null,'35000','Voided','X','4/1/2026','2026-04','4/30/2026',500,0,500,'S9','WO9',0],[null,'35001','Invoiced','Y','9/30/2026','2026-09','10/30/2026',200,0,200,'S8','WO8',200],[null,'35002','Invoiced','Cust 150','4/2/2026','2026-04','5/2/2026',1000,0,1000,'S7','WO7',0]]);
+    [null,'34001','Invoiced','Cust 150','3/1/2026','2026-03','3/31/2026',1000,0,1000,'S1','WO1',0],[null,'35000','Voided','X','4/1/2026','2026-04','4/30/2026',500,0,500,'S9','WO9',0],[null,'35001','Invoiced','Y','9/30/2026','2026-09','10/30/2026',200,0,200,'S8','WO8',200],[null,'35002','Invoiced','77 Cust 150','4/2/2026','2026-04','5/2/2026',1000,0,1000,'S7','WO7',0]]);
+  const terms=mk([['SM Agreement List'],['Displaying: All Statuses'],['Dates','Amount Billed','Previous Revision','Rev.','Effective',null,'Activated','Cancelled','Terminated','Expiration','Price','Status'],
+    ['Customer: 77 (Cust 150)'],['Agreement: 150 - Test agreement','Status: Active'],[1,'2026-02-18','2026-02-18',null,null,'2029-02-17',12000,'',3000,null,'Active'],
+    ['Customer: 88 (Somebody Else)'],['Agreement: 999 - Not in the tracker','Status: Active'],[1,'2026-01-01','2026-01-01',null,null,'2026-12-31',500,'',0,null,'Active'],
+    ['Agreement: 998 - Old one','Status: Inactive'],[1,'2020-01-01','2020-01-01',null,'2021-01-01','2021-01-01',500,'',0,null,'Terminated']]);
   const doImport=async(feed,b64,name)=>page.evaluate(async([feed,b64,name])=>{ const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0)); const f=new File([bin],name); await stageFile(feed,f,'manual'); const s=STAGED27; if(s&&s.parsed){ await commitStaged(); } return s&&(s.error||{matched:s.matched,unmatched:s.unmatched,rows:s.parsed.rows.length,offset:s.parsed.offset}); },[feed,b64,name]);
   await page.evaluate(()=>switchView('recon')); await page.waitForTimeout(200);
+  const t1=await doImport('agreement_terms',terms,'SM Agreement List.xlsx');
+  ok(t1&&t1.rows===3&&t1.matched===1&&t1.unmatched===2&&await page.evaluate(()=>__DB.rmr_worklist.filter(w=>/Agreement 999/.test(w.title)).length===1&&!__DB.rmr_worklist.some(w=>/Agreement 998/.test(w.title))),'Agreement List (grouped): only the Vista-active agreement missing from the tracker goes to the Worklist');
   const i1=await doImport('invoices',inv,'SM Invoice List.xlsx');
   ok(i1&&i1.rows===4&&i1.offset===1&&i1.matched===1&&i1.unmatched===3,'invoice import: offset handled, 1 matched via billing-row invoice #, 3 unmatched');
-  ok(await page.evaluate(()=>{ const w=__DB.rmr_worklist.filter(x=>x.type==='unmatched_vista'); return w.length===1&&/35002/.test(w[0].title)&&/#150/.test(w[0].title); }),'only the invoice that looks like an agreement billing row goes to the Worklist (T&M invoices do not)');
+  ok(await page.evaluate(()=>{ const w=__DB.rmr_worklist.filter(x=>x.type==='unmatched_vista'&&x.detail&&x.detail.feed==='invoices'); return w.length===1&&/35002/.test(w[0].title)&&/Agreement 150/.test(w[0].title)&&w[0].detail.link.pairs.length===1; }),'only the invoice that looks like an agreement billing row goes to the Worklist, grouped per agreement (T&M invoices do not)');
+  await page.evaluate(()=>switchView('worklist')); await page.waitForTimeout(400);
+  await page.evaluate(()=>{ WL_FILTER.owner='__all'; renderWorklist(); }); await page.waitForTimeout(300);
+  await page.click('[data-wllink]'); await page.waitForTimeout(500);
+  ok(await page.evaluate(()=>{ const a=__DB.rmr_agreements.find(x=>x.agreement_number==='150'); const row=a.billing_log.find(e=>e.date==='2026-04-01'); const w=__DB.rmr_worklist.find(x=>/Agreement 150 invoices/.test(x.title));
+    return row.invoice_no==='35002'&&w.status==='closed'&&/Linked 35002/.test(w.close_basis)&&__DB.rmr_vista_invoices.find(i=>i.invoice_number==='35002').agreement_number==='150'; }),'Link invoices writes the invoice number onto the billing row, maps the Vista invoice and closes the item');
+  await page.evaluate(()=>switchView('recon')); await page.waitForTimeout(200);
   const cnt1=await page.evaluate(()=>({inv:__DB.rmr_vista_invoices.length,wl:__DB.rmr_worklist.length}));
   await doImport('invoices',inv,'SM Invoice List.xlsx');
   const cnt2=await page.evaluate(()=>({inv:__DB.rmr_vista_invoices.length,wl:__DB.rmr_worklist.length}));
