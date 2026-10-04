@@ -97,19 +97,31 @@ const close=async(p,name,o)=>{ await p.evaluate(n=>winOpp(AGREEMENTS.find(a=>a.c
   // ========== 4. Vista imports + verification (Jan 10 2027)
   p=await open(browser,'sean.bithell@point1.com','2027-01-10');
   await p.evaluate(async()=>{ const id=n=>AGREEMENTS.find(a=>a.customer_name===n).id; const bl=(n,d,a)=>[{date:d,amount:a,invoice_no:n,status:'invoiced'}];
-    await sb.from('rmr_agreements').update({billing_log:bl('35388','2026-11-01',100)}).eq('id',id('Lakeside Medical Plaza'));
+    await sb.from('rmr_agreements').update({billing_log:bl('35388','2026-11-01',100).concat([{date:'2026-12-01',amount:100,invoice_no:'',status:'auto'}])}).eq('id',id('Lakeside Medical Plaza'));
     await sb.from('rmr_agreements').update({billing_log:bl('35301','2026-11-01',170)}).eq('id',id('Cedar Ridge HOA'));
     await sb.from('rmr_agreements').update({billing_log:bl('35702','2026-12-01',225)}).eq('id',id('Bayside Dental'));
     await sb.from('rmr_vista_receipts').insert({receipt_key:'R1',invoice_number:'35388',amount:100,receipt_date:'2026-11-20'});
     await load(); await load27(); });
+  // Agreement List first (grouped, as Vista prints it) — supplies each agreement's Vista customer number
+  await p.evaluate(async()=>{ const A=n=>AGREEMENTS.find(a=>a.customer_name===n).agreement_number; const D=s=>new Date(s+'T08:00:00Z');
+    const rows=[['SM Agreement List'],['Sorting by Customer Number','Showing All Agreements','Revision Status Filter Legend ','Displaying: All Statuses'],['Dates','Amount\nBilled ','Previous\nRevision','Rev.','Effective',null,'Activated','Cancelled','Terminated','Expiration','Price','Status']];
+    [['Lakeside Medical Plaza',612],['Cedar Ridge HOA',618],['Bayside Dental',640]].forEach(([n,c])=>{ rows.push([`Customer: ${c} (${n})`,'','']); rows.push([`Agreement: ${A(n)} - ${n} - Monitoring`,'Status: Active','']); rows.push(['Term: 11/01/26 to 10/31/29 (Active)','Total Term Price: 0.00','Total Term Billed: 0.00','']); rows.push([1,D('2026-11-01'),D('2026-10-28'),null,null,D('2029-10-31'),0,'',0,null,'Active']); });
+    rows.push(['Customer: 655 (Harbor Point Apartments)','','']); rows.push(['Agreement: 171 - Harbor Point Apartments - FA Monitoring','Status: Active','']); rows.push([1,D('2026-12-01'),D('2026-11-20'),null,null,D('2029-11-30'),0,'',0,null,'Active']);
+    const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'S'); const buf=XLSX.write(wb,{type:'array',bookType:'xlsx'});
+    await stageFile('agreement_terms',new File([buf],'SM Agreement List all statuses.xlsx'),'manual'); await commitStaged(); });
   await p.evaluate(()=>switchView('imports')); await p.waitForTimeout(500);
-  await p.evaluate(()=>{ const d=document.querySelector('#view-imports details'); if(d) d.open=true; });
-  await mark(p,[['#impIntro27 .kpis27',1],['#view-imports [data-feed27="invoices"]',2],['#view-imports details summary',3]]); await shot(p,'admin_imports');
+  await p.evaluate(()=>{ const d=document.querySelectorAll('#view-imports details')[1]; if(d) d.open=true; });
+  await mark(p,[['#impIntro27 .kpis27',1],['#view-imports [data-feed27="agreement_terms"]',2],['#view-imports [data-feed27="invoices"]',3],['#view-imports details[open] summary',4]]); await shot(p,'admin_imports');
   const mk=rows=>{ const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'S'); return XLSX.write(wb,{type:'base64',bookType:'xlsx'}); };
-  const inv=mk([['SM Invoice List'],['Status: all  Service Site, Work Order'],['Invoice','Status','Customer','Invoice Date','Post Month','Due Date','Amount','Tax','Total','Service Site','Work Order','Balance'],
-    [null,'35388','Paid','Lakeside Medical Plaza','11/1/2026','2026-11','12/1/2026',100,0,100,'S14','WO200',0],[null,'35301','Paid','Cedar Ridge HOA','11/1/2026','2026-11','12/1/2026',170,0,170,'S15','WO202',0],
-    [null,'35702','Invoiced','Bayside Dental','12/1/2026','2026-12','12/31/2026',225,0,225,'S16','WO201',225],[null,'35810','Invoiced','Unknown Tenant LLC','12/5/2026','2026-12','1/4/2027',90,0,90,'S99','WO999',90]]);
+  // the real SM Invoice List layout: parameter echo, header, and Customer # / Name printed as two cells
+  const inv=mk([['SM Invoice List','Sorted by:','Invoice','Show Only Open Balances:','N','Invoice Dates:','10/01/26 - 12/31/26','Status:','All','Service Site:',' ','Work Order:',0],
+    ['\nInvoice','\nStatus','\nCustomer # / Name','\nBill To Customer','Invoice\nDate',' Post Month','\nDue Date','\nAmount','\nTax','\nTotal','\nBalance'],
+    ['     35301','Invoiced',618,'Cedar Ridge HOA','','11/1/2026','11/1/2026','12/1/2026',170,0,170,0],['     35388','Invoiced',612,'Lakeside Medical Plaza','','11/1/2026','11/1/2026','12/1/2026',100,0,100,0],
+    ['     35702','Invoiced',640,'Bayside Dental','','12/1/2026','12/1/2026','12/31/2026',225,0,225,225],['     35711','Invoiced',612,'Lakeside Medical Plaza','','12/1/2026','12/1/2026','12/31/2026',100,0,100,100],
+    ['     35810','Invoiced',702,'Unknown Tenant LLC','','12/5/2026','12/1/2026','1/4/2027',90,0,90,90],['     35815','Voided',702,'Unknown Tenant LLC','','12/6/2026','12/1/2026','1/5/2027',0,0,0,0],
+    ['Grand Totals:',null,685,0,685,415],['2   Point One Electrical Systems','Page 1','01/10/27  09:35:19 AM','Date Format - MM/DD/YY','SMInvoiceList.rpt']]);
   await p.evaluate(async([b64])=>{ const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0)); await stageFile('invoices',new File([bin],'SM Invoice List Q4.xlsx'),'manual'); },[inv]); await p.waitForTimeout(400);
+  await p.evaluate(()=>{ const d=[...document.querySelectorAll('#stage27 details')].pop(); if(d) d.open=true; });
   await mark(p,[['#stage27',1],['#st27ok',2]],'#stage27'); await shot(p,'admin_import_preview');
   await p.click('#st27ok'); await p.waitForTimeout(800);
   await p.evaluate(()=>{ openModal(AGREEMENTS.find(a=>a.customer_name==='Cedar Ridge HOA').id); }); await p.waitForTimeout(500); await p.evaluate(()=>document.querySelector('#agTabs [data-tab="bill"]').click()); await p.waitForTimeout(300); await p.click('#blogToggle'); await p.waitForTimeout(300);
@@ -143,6 +155,11 @@ const close=async(p,name,o)=>{ await p.evaluate(n=>winOpp(AGREEMENTS.find(a=>a.c
   await p.click(`[data-wlclose="${qid}"]`); await p.fill(`#wlb${qid}`,'It was paid after the Jan 15 cutoff, so it moves to the April payout.');
   await mark(p,[[`#wlb${qid}`,1],[`#wlc${qid}`,2]]); await shot(p,'worklist_answer'); await p.click(`#wlc${qid}`); await p.waitForTimeout(500);
   for(const v of ['renewals','history','recon','reports']){ await p.evaluate(v=>switchView(v),v); await p.waitForTimeout(500); await shot(p,'page_'+v); }
+  await save(p);
+  // ========== Worklist: Link invoices the import suggested
+  p=await open(browser,'sean.bithell@point1.com','2027-01-20');
+  await p.evaluate(async()=>{ switchView('worklist'); WL_FILTER.owner='__all'; WL_FILTER.type='unmatched_vista'; WL_FILTER.status='open'; await renderWorklist(); }); await p.waitForTimeout(500);
+  await mark(p,[['#wlBody table tbody tr:nth-child(1) td:nth-child(2)',1],['#wlBody table tbody tr:nth-child(2) td:nth-child(2)',2],['[data-wllink]',3],['#wlBody table tbody tr:nth-child(2) [data-wlclose]',4]],'#wlBody table'); await shot(p,'worklist_link_invoices');
   await save(p);
   await browser.close(); fs.writeFileSync(path.join(OUT,'shots.json'),JSON.stringify(shots,null,1)); console.log(shots.join('\n'));
 })();
