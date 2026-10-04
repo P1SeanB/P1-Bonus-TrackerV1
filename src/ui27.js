@@ -1062,8 +1062,8 @@ function guide27HTML(fam){
    ===================================================================================================== */
 window.todayISO=function(){ return E27.businessToday(); };
 (function css27(){ const st=document.createElement('style'); st.id='cd27css'; st.textContent='.cd27grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}.cd27grid .fld.full{grid-column:1/-1}.cd27grid .fld{margin:0}#emp27 select.cfg-in{min-width:128px}@media(max-width:720px){.cd27grid{grid-template-columns:1fr}#cdScrim27 .modal-body{grid-template-columns:1fr!important}}'; document.head.appendChild(st); })();              // dates default to the Pacific business day, not UTC
-const BUILTIN_CONNECTION=false;                                          // flipped on once migration_v23_access.sql is applied
-const BUILTIN_URL='https://kjzugbyudhswdmhgnstp.supabase.co', BUILTIN_KEY='';
+const BUILTIN_CONNECTION=true;                                           // safe since migration_v23_access.sql: only listed employees can read anything
+const BUILTIN_URL='https://kjzugbyudhswdmhgnstp.supabase.co', BUILTIN_KEY='sb_publishable_tuIG6yrHOGmDSAecKSDTaw_ofkLEILa';   // publishable (client) key — designed to be public; access is enforced by row-level security
 if(BUILTIN_CONNECTION&&BUILTIN_KEY&&!(LS.get('rmr_url')||'').trim()){ LS.set('rmr_url',BUILTIN_URL); LS.set('rmr_key',BUILTIN_KEY); }
 
 const REQ_CODE='\\b(?:ADM|AGR|BIL|BON|CAT|COM|CST|LED|MIG|NAV|PAY|REL|TEC|UX|VIS|F)-\\d{2}';
