@@ -234,6 +234,10 @@ function tlFor(a){
 function currentVersionOf27(email){
   email=String(email||'').toLowerCase(); const today=E27.businessToday();
   const mine=(P27.assignments||[]).filter(x=>String(x.email).toLowerCase()===email);
+  // a version that applies to every agreement governs every date as soon as it is assigned (current or upcoming)
+  const all=mine.filter(x=>(!x.effective_to||today<x.effective_to)).map(x=>({x,v:versionById(x.plan_version_id)})).filter(o=>o.v&&o.v.status==='published'&&o.v.config&&o.v.config.appliesToAllAgreements)
+    .sort((a,b)=>String(b.x.effective_from).localeCompare(String(a.x.effective_from)));
+  if(all.length)return all[0].v;
   const asg=mine.filter(x=>x.effective_from<=today&&(!x.effective_to||today<x.effective_to));
   if(asg.length===1)return versionById(asg[0].plan_version_id);
   if(asg.length>1)return null;
@@ -1015,7 +1019,8 @@ async function renderEmployees27(){
       <td>${can('editConfig')?`<select class="cfg-in" data-prole27="${esc(u.email)}">${PERMISSION_ROLES.map(r=>`<option ${normRole(u.permission_role||u.role)===r?'selected':''}>${r}</option>`).join('')}</select>`:esc(normRole(u.permission_role||u.role))}<div class="qctx">${u.role_migrated_from?'migrated from '+esc(u.role_migrated_from):''}</div></td>
       <td>${(()=>{ const fam=compFamilyOf(em); return can('editConfig')?`<select class="cfg-in" data-cf27="${esc(em)}"><option value="">— not set —</option>${['Hybrid','Hunter','Farmer'].map(f=>`<option value="${f}" ${fam===f?'selected':''}>${f} (${esc(famStatus(f).txt.split(' · ')[0])})</option>`).join('')}</select>`:(fam?esc(fam):'—'); })()}</td>
       <td>${cv?`<b>${esc(cv.family)}</b> · ${esc(cv.label)}<div class="qctx">from ${esc(cur.effective_from)}${cur.effective_to?' to '+esc(cur.effective_to):''} · approved ${esc(cur.approved_by)}</div>`:'<span style="color:var(--orange)">Plan not configured</span>'}${hist?`<div class="qctx">historical: ${esc(hist)}</div>`:''}${(()=>{
-        const fam=compFamilyOf(em); if(!fam||(cv&&cv.family===fam))return '';
+        const fam=compFamilyOf(em); const lv0=fam?liveVersionOf(fam):null;
+        if(!fam||(cv&&cv.family===fam&&(!lv0||lv0.id===cv.id||asg.some(x=>String(x.plan_version_id)===String(lv0.id)))))return '';
         const up=asg.find(x=>x.effective_from>today); if(up){ const uv=versionById(up.plan_version_id); return `<div class="qctx">${esc(uv?uv.label:'Next plan')} starts ${esc(up.effective_from)}</div>`; }
         const lv=liveVersionOf(fam);
         if(!lv)return `<div class="qctx">${esc(fam)} chosen — ${P27.versions.some(v=>v.family===fam&&!(v.config&&v.config.placeholder))?'assignable once the draft is published':'assignable once its numbers are entered and published'}.</div>`;

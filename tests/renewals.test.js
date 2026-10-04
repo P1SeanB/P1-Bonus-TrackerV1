@@ -40,7 +40,7 @@ let DB={
   rmr_receipt_verifications:[ver('50001',120,'2026-07-10'),ver('50002',120,'2026-08-10'),ver('50003',120,'2026-09-10'),ver('50011',55,'2026-08-12')],
   rmr_plan_versions:[{id:'v-hyb1',family:'Hybrid',version_no:1,label:'Hybrid v1 (revised)',status:'published',effective_date:'2026-10-04',approved_by:'Sean Bithell',rate_basis:'mrr_multiple',config:HYB_CFG},
     {id:'v-hyb2',family:'Hybrid',version_no:2,label:'Hybrid v2',status:'published',effective_date:'2026-10-05',approved_by:'Sean Bithell',rate_basis:'mrr_multiple',config:V2}],
-  rmr_plan_assignments:[{id:1,email:SEAN,plan_version_id:'v-hyb1',effective_from:'2026-10-04',effective_to:'2026-10-05',approved_by:SEAN},{id:2,email:SEAN,plan_version_id:'v-hyb2',effective_from:'2026-10-05',approved_by:SEAN}],
+  rmr_plan_assignments:[{id:1,email:SEAN,plan_version_id:'v-hyb1',effective_from:'2026-10-04',effective_to:'2026-10-25',approved_by:SEAN},{id:2,email:SEAN,plan_version_id:'v-hyb2',effective_from:'2026-10-25',approved_by:SEAN}],
   rmr_plan_acknowledgements:[{id:1,email:SEAN,plan_version_id:'v-hyb1',text_shown:'terms',created_at:'2026-10-04T10:00:00Z'},{id:2,email:SEAN,plan_version_id:'v-hyb2',text_shown:'terms v2',created_at:'2026-10-05T10:00:00Z'}],
   rmr_settings:[{key:'payout_calendar',value:{frequency:'quarterly',payWithinDays:30,verifyWithinDays:15}},{key:'comp_family',value:{[SEAN]:'Hybrid'}},
     {key:'vista_event_overrides',value:{'209':[{date:'2026-09-01',kind:'renewal',renewalType:'manual',term:12,prior:625,note:'Consolidation of three agreements renewed under 209'}]}}],
@@ -59,7 +59,7 @@ async function open(browser,email){ const ctx=await browser.newContext({viewport
   const p=await open(browser,SEAN);
   const ev=()=>p.evaluate(()=>{ const out={}; AGREEMENTS.forEach(a=>{ out[a.agreement_number]=(pricedEvents27(a)||[]).map(x=>({kind:x.e.kind,type:x.e.renewalType||null,et:x.et,date:x.date,term:x.term,override:x.override,noPay:!!x.noPay,blocked:x.blocked||null,total:x.calc?Number(x.calc.totalCents)/100:null,rec:!!x.evRow})); }); return out; });
   let E=await ev();
-  ok(await p.evaluate(()=>isRevisedTransaction(AGREEMENTS.find(a=>a.agreement_number==='201'))),'a history-only agreement of a Hybrid v2 rep runs on Hybrid (applies to every agreement)');
+  ok(await p.evaluate(()=>isRevisedTransaction(AGREEMENTS.find(a=>a.agreement_number==='201'))),'a history-only agreement of a Hybrid v2 rep runs on Hybrid (applies to every agreement) — even before its start date (assigned from 10/25, today 10/20)');
   ok(E['201'].length===2&&E['201'][0].override&&E['201'][1].kind==='renewal'&&E['201'][1].type==='auto'&&E['201'][1].total===20,'36-month auto-renewal pays only the $20 increase × 1.0 (new money); the sale before Q3 is override-paid');
   ok(E['202'][1].kind==='renewal'&&E['202'][1].type==='manual'&&E['202'][1].total===15,'12-month manual renewal: 0.25 × $50 retained + $5 increase × 0.5 = $15');
   ok(E['203'][0].override&&E['203'][0].total===100,'pre-Q3 sale below the margin floor is still paid in full by the manager override');
