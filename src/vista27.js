@@ -91,18 +91,21 @@ function parseGrouped(feed,rows){
              +(feed==='posted_cost'&&rows[0]?'\n'+cellText(rows[0][1]):'');
   const out=[]; const seen=new Set(); let dupes=0;
   if(feed==='agreement_terms'){
-    let cust=null, ag=null;
+    let cust=null, ag=null, desc=null, term=null;
     const STAT=/^(original quote|renewal quote|amendment quote|active|future active|terminated|expired|cancelled|canceled|quote)\b/i;
     for(let r=hi+1;r<rows.length;r++){ const row=rows[r]||[]; const c0=cellText(row[0]); if(!row.some(v=>v!=null&&String(v).trim()!==''))continue; if(isFooterRow(row))continue;
       let m;
       if((m=c0.match(/^customer:\s*(.*)$/i))){ cust=m[1]||null; continue; }
-      if((m=c0.match(/^agreement:\s*(.+)$/i))){ const t=m[1]; const k=t.indexOf(' - '); ag=(k>=0?t.slice(0,k):t).trim(); continue; }
-      if(/^term:/i.test(c0))continue;
+      if((m=c0.match(/^agreement:\s*(.+)$/i))){ const t=m[1]; const k=t.indexOf(' - '); ag=(k>=0?t.slice(0,k):t).trim(); desc=k>=0?t.slice(k+3).trim():null; term=null; continue; }
+      // "Term: 11/01/24 to 05/31/27 (Active)" + "Total Term Price: 1,767.00" — every revision below it belongs to this contract term
+      if((m=c0.match(/^term:\s*(\S+)\s+to\s+(\S+)\s*(?:\((.*)\))?/i))){ const pm=cellText(row[1]).match(/total term price:\s*([\d,.\-()]+)/i);
+        term={start:toIsoDate(m[1])||null,end:toIsoDate(m[2])||null,status:m[3]||null,price:pm?toMoney(pm[1]):null}; if(term.start&&term.start<'1990')term.start=null; continue; }
       if(typeof row[0]==='number'&&ag){
         const st=cellText(row[10]); if(!STAT.test(st))return fail(`Could not read the revision status on data row ${r+1} ("${st}") — the SM Agreement List layout has changed. Nothing was imported.`);
         const rec={agreement_number:ag,revision:String(row[0]),previous_revision:row[9]!=null&&String(row[9]).trim()!==''?String(row[9]):null,status:st,
           effective_date:toIsoDate(row[1]),activated_date:toIsoDate(row[2]),cancelled_date:toIsoDate(row[3]),terminated_date:toIsoDate(row[4]),expiration_date:toIsoDate(row[5]),
-          term_price:toMoney(row[6]),customer:cust};
+          term_price:toMoney(row[6]),customer:cust,description:desc,
+          term_start:term?term.start:null,term_end:term?term.end:null,term_status:term?term.status:null,term_total_price:term&&term.price!=null&&term.price!==undefined?term.price:null};
         for(const [k,v] of Object.entries(rec)){ if(v===undefined)return fail(`Could not read "${k.replace(/_/g,' ')}" on data row ${r+1}. Nothing was imported.`); }
         rec.term_key=rec.agreement_number+'|'+rec.revision; if(seen.has(rec.term_key)){dupes++;continue;} seen.add(rec.term_key); out.push(rec); }
     }
