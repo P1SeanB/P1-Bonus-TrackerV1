@@ -5710,9 +5710,11 @@ const BUILTIN_URL='https://kjzugbyudhswdmhgnstp.supabase.co', BUILTIN_KEY='';
 if(BUILTIN_CONNECTION&&BUILTIN_KEY&&!(LS.get('rmr_url')||'').trim()){ LS.set('rmr_url',BUILTIN_URL); LS.set('rmr_key',BUILTIN_KEY); }
 
 const REQ_CODE='\\b(?:ADM|AGR|BIL|BON|CAT|COM|CST|LED|MIG|NAV|PAY|REL|TEC|UX|VIS|F)-\\d{2}';
-function plainText27(s){ if(!s)return s; return String(s)
-  .replace(new RegExp(`\\s*\\((?:${REQ_CODE})(?:\\s*[,/;·&]\\s*(?:${REQ_CODE}|and\\s+${REQ_CODE}))*\\)`,'g'),'')
-  .replace(new RegExp(`^\\s*${REQ_CODE}(?:\\s*[·,/]\\s*${REQ_CODE})*\\s*$`),''); }
+function plainText27(s){ if(!s)return s; const C=`${REQ_CODE}(?:\\/\\d{2})?`; return String(s)
+  .replace(new RegExp(`\\s*\\((?:${C})(?:\\s*[,/;·&]\\s*(?:${C}|and\\s+${C}))*\\)`,'g'),'')
+  .replace(new RegExp(`\\s*[,;·]\\s*${C}(?=\\s*\\))`,'g'),'')
+  .replace(new RegExp(`^\\s*${C}(?:\\s*[·,/]\\s*${C})*\\s*$`),'')
+  .replace(new RegExp(`\\s*\\b${C}\\b`,'g'),'').replace(/\(\s*\)/g,''); }
 
 function friendlyCond27(t){ t=plainText27(String(t||'')); let m;
   if(/no issued first invoice yet/.test(t))return "The first invoice hasn't been issued yet.";
