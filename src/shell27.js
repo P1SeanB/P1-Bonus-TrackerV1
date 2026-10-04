@@ -360,6 +360,7 @@ function openRevert27(d){
      <label style="display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.5"><input type="checkbox" id="rv_ok" style="margin-top:3px"> I understand this undoes the ${unlock?'paid &amp; lock':'approval'} step for the whole quarter.</label>
      <div id="rv_err" style="color:#8a1f1f;font-size:13px;font-weight:700"></div>`,
     `<button class="btn-primary" id="rv_go" style="padding:12px 16px;font-size:15px;background:#8a1f1f">${unlock?'Unlock and revert to Approved':'Undo the approval'}</button>`);
+  ['rv_why','rv_ok'].forEach(k=>{ $(k).oninput=()=>$('rv_err').textContent=''; $(k).onchange=()=>$('rv_err').textContent=''; });
   $('rv_go').onclick=async()=>{ const why=($('rv_why').value||'').trim(); const err=t=>$('rv_err').textContent=t;
     if(why.length<10)return err('Give the reason (at least 10 characters).'); if(!$('rv_ok').checked)return err('Tick the box to confirm.');
     $('rv_go').disabled=true; $('rv_go').textContent='Reverting…';
