@@ -1169,7 +1169,7 @@ function openCloseDeal27(oppId){
       ${fld('Assigned to',`<select id="cd_owner">${owners.map(e=>`<option ${String(e).toLowerCase()===String(opp.owner_email||'').toLowerCase()?'selected':''}>${esc(e)}</option>`).join('')}</select>`)}
       <div class="fld full"><label>Customer</label><input id="cd_cust" value="${esc(opp.customer_name||'')}"></div>
       ${fld('Monthly RMR',num('cd_rmr',rd.final_mrr||(+opp.monthly_rmr>0?opp.monthly_rmr:(opp.est_monthly_rmr||'')),'0.00'),'$ / month')}
-      ${fld('Term',`<select id="cd_term"><option value="">Pick…</option>${[12,24,36,48,60].map(t=>`<option value="${t}" ${+opp.contract_term===t?'selected':''}>${t} months</option>`).join('')}</select>`)}
+      ${fld('Term',`<select id="cd_term"><option value="">Pick…</option>${[12,24,36,48,60].map(t=>`<option value="${t}" ${(+rd.term||+opp.contract_term)===t?'selected':''}>${t} months</option>`).join('')}</select>`)}
       ${fld('Signed / activation date',`<input id="cd_date" type="date" value="${esc(rd.signed_date||(opp.activation_date?String(opp.activation_date).slice(0,10):E27.businessToday()))}">`)}
       ${fld('First billing date',`<input id="cd_bill" type="date" value="${esc(opp.first_billing_date?String(opp.first_billing_date).slice(0,10):'')}">`,'optional')}
       ${fld('Type',`<select id="cd_cat"><option value="rmr">RMR</option><option value="sla" ${opp.category==='sla'?'selected':''}>SLA (enter annual ÷ 12)</option></select>`)}
