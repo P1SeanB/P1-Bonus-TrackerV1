@@ -24,7 +24,8 @@ let DB={
     ag('205',{monthly_rmr:200,history_only:false,activation_date:'2026-09-01',stage:'won'}),
     ag('206',Object.assign({monthly_rmr:90,history_only:false,activation_date:'2026-09-01'},poor)),
     ag('207',{monthly_rmr:70}),
-    ag('208',{monthly_rmr:300,history_only:false,activation_date:'2026-08-17',contract_term:12})],
+    ag('208',{monthly_rmr:300,history_only:false,activation_date:'2026-08-17',contract_term:12}),
+    ag('209',{monthly_rmr:1725,contract_term:21})],
   rmr_vista_agreement_terms:[
     rv('201',1,'Expired','2023-07-01','2026-06-30',3600,3600,'2023-07-01','2026-06-30','Expired'),rv('201',2,'Active','2026-07-01','2029-06-30',4320,360,'2026-07-01','2029-06-30','Active'),
     rv('202',1,'Expired','2025-08-01','2026-07-31',600,600,'2025-08-01','2026-07-31','Expired'),rv('202',2,'Active','2026-08-01','2027-07-31',660,110,'2026-08-01','2027-07-31','Active'),
@@ -33,14 +34,16 @@ let DB={
     rv('205',1,'Active','2026-09-01','2029-08-31',7200,400,'2026-09-01','2029-08-31','Active'),
     rv('206',1,'Active','2026-09-01','2029-08-31',3240,180,'2026-09-01','2029-08-31','Active'),
     rv('207',1,'Terminated','2025-03-01','2028-02-29',2880,1520,'2025-03-01','2028-02-29','Active',{terminated_date:'2026-09-30'}),rv('207',2,'Active','2026-10-01','2028-02-29',2710,0,'2025-03-01','2028-02-29','Active'),
-    rv('208',1,'Active','2026-08-17','2029-08-31',10950,0,'2026-08-17','2029-08-31','Active')],
+    rv('208',1,'Active','2026-08-17','2029-08-31',10950,0,'2026-08-17','2029-08-31','Active'),
+    rv('209',1,'Terminated','2025-12-01','2027-08-31',4620,1980,'2025-12-01','2027-08-31','Active',{terminated_date:'2026-08-31'}),rv('209',2,'Active','2026-09-01','2027-08-31',22680,0,'2025-12-01','2027-08-31','Active')],
   rmr_vista_invoices:[inv('50001','201','2026-07-01',120),inv('50002','201','2026-08-01',120),inv('50003','201','2026-09-01',120),inv('50011','202','2026-08-01',55)],
   rmr_receipt_verifications:[ver('50001',120,'2026-07-10'),ver('50002',120,'2026-08-10'),ver('50003',120,'2026-09-10'),ver('50011',55,'2026-08-12')],
   rmr_plan_versions:[{id:'v-hyb1',family:'Hybrid',version_no:1,label:'Hybrid v1 (revised)',status:'published',effective_date:'2026-10-04',approved_by:'Sean Bithell',rate_basis:'mrr_multiple',config:HYB_CFG},
     {id:'v-hyb2',family:'Hybrid',version_no:2,label:'Hybrid v2',status:'published',effective_date:'2026-10-05',approved_by:'Sean Bithell',rate_basis:'mrr_multiple',config:V2}],
   rmr_plan_assignments:[{id:1,email:SEAN,plan_version_id:'v-hyb1',effective_from:'2026-10-04',effective_to:'2026-10-05',approved_by:SEAN},{id:2,email:SEAN,plan_version_id:'v-hyb2',effective_from:'2026-10-05',approved_by:SEAN}],
   rmr_plan_acknowledgements:[{id:1,email:SEAN,plan_version_id:'v-hyb1',text_shown:'terms',created_at:'2026-10-04T10:00:00Z'},{id:2,email:SEAN,plan_version_id:'v-hyb2',text_shown:'terms v2',created_at:'2026-10-05T10:00:00Z'}],
-  rmr_settings:[{key:'payout_calendar',value:{frequency:'quarterly',payWithinDays:30,verifyWithinDays:15}},{key:'comp_family',value:{[SEAN]:'Hybrid'}}],
+  rmr_settings:[{key:'payout_calendar',value:{frequency:'quarterly',payWithinDays:30,verifyWithinDays:15}},{key:'comp_family',value:{[SEAN]:'Hybrid'}},
+    {key:'vista_event_overrides',value:{'209':[{date:'2026-09-01',kind:'renewal',renewalType:'manual',term:12,prior:625,note:'Consolidation of three agreements renewed under 209'}]}}],
   rmr_cost_class_rules:[], rmr_draws:[], rmr_legacy_payouts:[], rmr_renewals:[], rmr_attachments:[], rmr_audit_log:[], rmr_worklist:[]};
 async function open(browser,email){ const ctx=await browser.newContext({viewport:{width:1440,height:900}}); const page=await ctx.newPage(); const errors=[];
   await page.clock.setFixedTime(new Date('2026-10-20T18:00:00Z'));
@@ -65,6 +68,7 @@ async function open(browser,email){ const ctx=await browser.newContext({viewport
   ok(E['206'][0].total===0,'Q3 sale below the 45% floor pays $0 (margin rule from Q3 on)');
   ok(E['207'].some(x=>x.kind==='rate_change'&&x.noPay),'a mid-term rate decrease pays nothing and takes nothing back');
   ok(E['208'][0].term===36,'8/17/26–8/31/29 counts as a 36-month term (stub months)');
+  ok(E['209'][1].kind==='renewal'&&E['209'][1].type==='manual'&&E['209'][1].term===12&&E['209'][1].total===706.25,'a recorded adjustment reads a consolidation as a 12-month manual renewal: 0.25 × $625 + $1,100 × 0.5 = $706.25');
   const lines=await p.evaluate(()=>hybridLines27(AGREEMENTS.find(a=>a.agreement_number==='203')).map(l=>({r:l.rstate,n:l.note,o:l.override})));
   ok(lines.length===2&&lines.every(l=>l.r==='paid'&&l.o&&/manager override, approved by Sean Bithell \(self-approved\)/.test(l.n)),'pre-Q3 payments show as Paid with the override and approver');
   let items=await p.evaluate(()=>{ const run=E27.payoutCalendar(P27.settings.payout_calendar); return {q:run.q,y:run.y,items:payoutItems(run).map(i=>({n:i.a.agreement_number,l:i.label,s:i.state,r:i.reason,amt:i.amount}))}; });

@@ -38,9 +38,15 @@ function timeline(revisions,opts){
   const byTerm=new Map();
   revs.forEach(r=>{ const k=(r.term_start||r.effective_date)+'|'+(r.term_end||r.expiration_date||''); if(!byTerm.has(k))byTerm.set(k,{start:r.term_start||r.effective_date,end:r.term_end||r.expiration_date||null,status:r.term_status||null,revisions:[]}); byTerm.get(k).revisions.push(r); });
   const terms=[...byTerm.values()].sort((a,b)=>String(a.start).localeCompare(String(b.start)));
-  terms.forEach(t=>{ let billed=0; t.revisions.sort((a,b)=>a.revNo-b.revNo).forEach(r=>{
-      const end=r.expiration_date||t.end; const mo=monthsBetween(r.effective_date,end);
-      r.rate=(mo&&mo>0&&r.term_price!=null)?cents((r.term_price-billed)/mo):null; billed+=+r.amount_billed||0; });
+  terms.forEach(t=>{ let billed=0, monthsBilled=0; t.revisions.sort((a,b)=>a.revNo-b.revNo); const first=t.revisions[0];
+    t.revisions.forEach((r,i)=>{ const end=r.expiration_date||t.end;
+      if(opts.annualised){ // SLA: the price is the annual value — monthly equivalent = price ÷ 12 (÷ the term in months when longer than a year)
+        const mo=monthsBetween(t.start,end); r.rate=(r.term_price!=null&&mo)?cents(r.term_price/Math.max(12,Math.round(mo))):null; }
+      else if(i===0){ const mo=monthsBetween(r.effective_date,end); r.rate=(mo&&mo>0&&r.term_price!=null)?cents(r.term_price/mo):null; }
+      else { // a later revision's price includes what was already billed in the term: spread the rest over the months not yet billed
+        const span=Math.round(monthsBetween(first.effective_date,end)||0), own=Math.round(monthsBetween(r.effective_date,end)||0), left=Math.min(span-monthsBilled,own);
+        r.rate=(left>0&&r.term_price!=null)?cents((r.term_price-billed)/left):null; }
+      billed+=+r.amount_billed||0; if(r.rate>0)monthsBilled+=Math.round((+r.amount_billed||0)/r.rate); });
     // the date the term really stopped: Vista keeps the printed term end even when every revision expired or was terminated earlier
     const ends=t.revisions.map(r=>iso(r.terminated_date)||iso(r.expiration_date)).filter(Boolean).sort(); const lastEnd=ends[ends.length-1]||t.end;
     t.printedEnd=t.end; if(t.end&&lastEnd&&lastEnd<t.end)t.end=lastEnd;

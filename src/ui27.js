@@ -228,7 +228,7 @@ function tlFor(a){
   const ots=a.renewal_override_term_start?String(a.renewal_override_term_start).slice(0,10):null;
   const key=a.id+'|'+(a.renewal_type_override||'')+'|'+(ots||'');
   if(!TL_CACHE.has(key)){ const revs=TERMS_BY_NO[String(a.agreement_number)];
-    const tl=revs?R27.timeline(revs,{today:E27.businessToday(),overrideType:a.renewal_type_override||null,overrideTermStart:ots}):null; TL_CACHE.set(key,tl&&tl.ok?tl:null); }
+    const tl=revs?R27.timeline(revs,{today:E27.businessToday(),overrideType:a.renewal_type_override||null,overrideTermStart:ots,annualised:a.category==='sla'}):null; TL_CACHE.set(key,tl&&tl.ok?tl:null); }
   return TL_CACHE.get(key);
 }
 function currentVersionOf27(email){
@@ -250,7 +250,15 @@ function eventsFor27(a){
   const tl=tlFor(a);
   if(tl){ // Vista's derived rate can be a few cents off on stub months; the current rate is the agreement's own monthly price when they agree within 60¢
     const mrr=Math.round(agreementMrr(a)*100)/100; const cur=tl.live?tl.current.start:null; const inCur=tl.events.filter(e=>e.termStart===cur); const last=inCur[inCur.length-1];
-    return tl.events.map(e=>e===last&&e.next!=null&&mrr>0&&Math.abs(e.next-mrr)<=0.6&&e.next!==mrr?Object.assign({},e,{next:mrr,vistaRate:e.next}):e); }
+    // recorded corrections to how a Vista event is read (consolidations, a term that pays as 12 months…), kept in rmr_settings.vista_event_overrides
+    const adj=((P27.settings.vista_event_overrides||{})[String(a.agreement_number)]||[]);
+    return tl.events.map(e=>{ let x=e===last&&e.next!=null&&mrr>0&&Math.abs(e.next-mrr)<=0.6&&e.next!==mrr?Object.assign({},e,{next:mrr,vistaRate:e.next}):e;
+      const o=adj.find(o=>o.date===e.date&&(!o.match||o.match===e.kind));
+      if(o){ x=Object.assign({},x,{adjusted:o.note||'Adjusted',adjustedBy:o.by||null,vista:{kind:e.kind,prior:e.prior,next:e.next,term:e.term}});
+        ['kind','renewalType','prior','next'].forEach(k=>{ if(o[k]!==undefined)x[k]=o[k]; });
+        if(o.term!==undefined){ x.term=o.term; x.standardTerm=[12,24,36,48,60].includes(+o.term)?+o.term:null; }
+        if(o.prior!==undefined){ x.highWater=o.prior; } }
+      return x; }); }
   const d=eventDateOf(a), t=+a.contract_term||0;
   return [{kind:'new_sale',date:d,term:t,standardTerm:[12,24,36,48,60].includes(t)?t:null,next:Math.round(agreementMrr(a)*100)/100,prior:null,fromAgreement:true}];
 }
@@ -1593,7 +1601,7 @@ function renderTerms27(){
         ${canEdit&&toApply.length?`<div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button class="btn-primary" id="tm27apply">Apply ${toApply.length} updates</button><span class="qctx">Writes original start, current term, term length and renewal type. Items to check are not changed.</span></div>`:''}</details>`:''}
       <details ${toRecord.length?'open':''} style="margin-bottom:12px"><summary style="cursor:pointer;font-weight:700">Commission events after ${ov?fmtD27(ov.through):'the plan start'} — ${evs.length} found · ${toRecord.length} ready to record</summary>
         <div style="max-height:360px;overflow:auto;margin-top:6px"><table style="font-size:12px"><thead><tr><th>Agr #</th><th>Customer</th><th>Event</th><th>Date</th><th>Monthly rate</th><th>Term</th><th class="num">Commission</th><th>Status</th></tr></thead><tbody>
-        ${evs.map(p=>{ const st=eventStatus27(p); return `<tr><td>#${esc(p.a.agreement_number)}</td><td>${esc(p.a.customer_name||'')}</td><td>${esc(kindTxt(p))}</td><td>${dfmt(p.date)}</td><td class="mono">${p.e.prior!=null?fmt2(p.e.prior)+' → ':''}${p.e.next!=null?fmt2(p.e.next):'—'}</td><td>${p.term||'—'} mo</td><td class="num mono">${amt(p)}</td><td style="white-space:normal">${chip(stCls[st.k]||'',st.k==='block'?'Blocked':st.t)}${st.k==='block'?`<div class="qctx">${esc(plainText27(st.t))}</div>`:''}${p.calc&&p.calc.gate&&p.calc.gate.mult&&p.calc.gate.mult.n===0n?'<div class="qctx">Below the margin floor — pays $0</div>':''}</td></tr>`; }).join('')||'<tr><td colspan="8" class="empty">None.</td></tr>'}</tbody></table></div>
+        ${evs.map(p=>{ const st=eventStatus27(p); return `<tr><td>#${esc(p.a.agreement_number)}</td><td>${esc(p.a.customer_name||'')}</td><td>${esc(kindTxt(p))}${p.e.adjusted?`<div class="qctx" title="Vista read it as ${esc(p.e.vista.kind)} ${p.e.vista.prior??''} → ${p.e.vista.next??''}">Adjusted: ${esc(p.e.adjusted)}</div>`:''}</td><td>${dfmt(p.date)}</td><td class="mono">${p.e.prior!=null?fmt2(p.e.prior)+' → ':''}${p.e.next!=null?fmt2(p.e.next):'—'}</td><td>${p.term||'—'} mo</td><td class="num mono">${amt(p)}</td><td style="white-space:normal">${chip(stCls[st.k]||'',st.k==='block'?'Blocked':st.t)}${st.k==='block'?`<div class="qctx">${esc(plainText27(st.t))}</div>`:''}${p.calc&&p.calc.gate&&p.calc.gate.mult&&p.calc.gate.mult.n===0n?'<div class="qctx">Below the margin floor — pays $0</div>':''}</td></tr>`; }).join('')||'<tr><td colspan="8" class="empty">None.</td></tr>'}</tbody></table></div>
         ${canRec&&toRecord.length?`<div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button class="btn-primary" id="tm27rec">Record ${toRecord.length} events</button><span class="qctx">Locks each calculation as an immutable event. Each pays in two parts once the customer pays (Payouts).</span></div>`:''}</details>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px"><input id="tm27q" class="cfg-in" placeholder="Search customer / #" style="width:180px;font-size:12px" value="${esc(TERMS27_FILTER.q)}">
         <select id="tm27show" class="cfg-in" style="font-size:12px">${[['all','All agreements'],['soon','Term ends within 120 days'],['manual','Manual renewals'],['nov','Not found in Vista']].map(([v,l])=>`<option value="${v}" ${TERMS27_FILTER.show===v?'selected':''}>${l}</option>`).join('')}</select><span class="qctx">${list.length} shown</span></div>

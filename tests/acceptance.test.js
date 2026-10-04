@@ -128,6 +128,15 @@ t('Quotes and cancelled revisions are ignored; an override switches the current 
   const a=RT.timeline(revs,{today:'2026-10-03'}); eq(a.currentType,'auto'); eq(a.events[1].renewalType,'auto');
   const b=RT.timeline(revs,{today:'2026-10-03',overrideType:'manual',overrideTermStart:'2026-01-01'}); eq(b.currentType,'manual'); eq(b.events[1].renewalType,'manual');
   const c=RT.timeline(revs,{today:'2026-10-03',overrideType:'manual',overrideTermStart:'2025-01-01'}); eq(c.currentType,'auto'); });
+t('Agreement 41: a revision after one billed month spreads the rest over 11 months ($180, the invoiced rate)',()=>{
+  const tl=RT.timeline([rv(3,'Terminated','2026-01-01','2026-12-31',1800,150,'2026-01-01','2026-12-31',{terminated_date:'2026-01-01'}),rv(4,'Active','2026-01-02','2026-12-31',2130,1800,'2026-01-01','2026-12-31')],{today:'2026-10-03'});
+  eq(tl.currentRate,180); eq(tl.events.find(e=>e.kind==='rate_change').increase,30); });
+t('Agreement 67: Alarm.com additions take $36 to $115 (the September invoice)',()=>{
+  const tl=RT.timeline([rv(2,'Terminated','2026-06-01','2027-12-31',684,108,'2026-06-01','2027-12-31'),rv(3,'Active','2026-06-02','2027-12-31',1948,345,'2026-06-01','2027-12-31')],{today:'2026-10-03'});
+  eq(tl.currentRate,115); });
+t('SLA (agreement 149): the price is the annual value — $592,664.61 ÷ 12',()=>{
+  const tl=RT.timeline([rv(1,'Terminated','2026-01-01','2026-12-31',736993,429912.56,'2026-01-01','2026-12-31'),rv(2,'Active','2026-01-02','2026-12-31',592664.61,130201.64,'2026-01-01','2026-12-31')],{today:'2026-10-03',annualised:true});
+  eq(tl.currentRate,49388.72); });
 t('Engine (v2 switch): auto-renewal pays the increase at the new-sale multiple; without it, nothing',()=>{
   const v2=JSON.parse(JSON.stringify(HYBRID)); v2.config.autoRenewalPaysIncrease=true;
   eq(E.toDollars(E.calculate({plan:v2,eventType:'auto_renewal',term:36,newMrr:'120',priorMrr:'100',margin:M50}).totalCents),'20.00');
