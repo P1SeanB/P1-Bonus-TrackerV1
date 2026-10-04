@@ -111,5 +111,28 @@ t('Real SM WO Profitability Detail (grouped): agreement from the grouping, total
   eq(p.rows[1].agreement_number,'165'); eq(p.rows[1].work_order,'11246'); eq(p.dataThrough,'2026-09-30'); eq(V.classifyCost(p.rows[1],[{match_field:'description',pattern:'(?i)applied overhead',bucket:'overhead'}]),'overhead'); });
 t('Grouped Agreement List dropped in the Invoices slot → rejected, names the right slot',()=>{ const p=V.parse('invoices',[['SM Agreement List'],['Dates','Rev.','Effective','Status'],['Customer: 1 (A)'],['Agreement: 5 - X'],[1,D('2026-01-01')]]); eq(p.ok,false); if(!/Agreement term history/.test(p.error))throw new Error(p.error); });
 
+// ----- contract terms, renewals and rate changes (real Vista patterns, P1RMR-60) -----
+const RT=require('../src/renew27.js');
+const rv=(rev,st,eff,exp,price,billed,ts,te,x)=>Object.assign({revision:String(rev),status:st,effective_date:eff,expiration_date:exp,term_price:price,amount_billed:billed,term_start:ts,term_end:te},x||{});
+t('Agreement 107: cumulative revision price → $57/mo; a $61.75 blip pays once, the return to $57 pays nothing',()=>{
+  const tl=RT.timeline([rv(1,'Terminated','2024-11-01','2026-07-31',1197,1083,'2024-11-01','2027-05-31',{terminated_date:'2026-05-31'}),rv(2,'Terminated','2026-06-01','2027-05-31',1824.04,114,'2024-11-01','2027-05-31',{terminated_date:'2026-07-31'}),rv(3,'Active','2026-08-01','2027-05-31',1767,228,'2024-11-01','2027-05-31')],{today:'2026-10-03'});
+  eq(tl.originalStart,'2024-11-01'); eq(tl.renewals,0); const rc=tl.events.filter(e=>e.kind==='rate_change'); eq(rc.length,2); eq(rc[0].next,61.75); eq(rc[0].increase,4.75); eq(rc[1].next,57); eq(rc[1].increase,0); eq(tl.currentRate,57); });
+t('Agreement 20: a term that ended early is read by its real end; renewals counted; 12-month term is manual',()=>{
+  const tl=RT.timeline([rv(1,'Expired','2013-10-21','2025-09-30',252,252,'2013-10-21','2025-09-30'),rv(2,'Expired','2025-10-01','2026-09-30',312,312,'2025-10-01','2027-09-30'),rv(3,'Cancelled','2026-10-02','2027-09-30',624,0,'2025-10-01','2027-09-30'),rv(4,'Active','2026-10-01','2027-09-30',312,312,'2026-10-01','2027-09-30')],{today:'2026-10-03'});
+  eq(tl.originalStart,'2013-10-21'); eq(tl.renewals,2); eq(tl.current.start,'2026-10-01'); eq(tl.current.months,12); eq(tl.currentType,'manual'); eq(tl.currentRate,26); });
+t('Agreement 122: a term terminated after a month and replaced is a rewrite, not a renewal',()=>{
+  const tl=RT.timeline([rv(1,'Terminated','2025-01-01','2027-12-31',8748,0,'2025-01-01','2027-12-31',{terminated_date:'2025-01-31'}),rv(2,'Active','2025-02-01','2028-01-31',8748,5346,'2025-02-01','2028-01-31')],{today:'2026-10-03'});
+  eq(tl.events[1].kind,'rewrite'); eq(tl.renewals,0); eq(tl.currentType,'auto'); });
+t('Quotes and cancelled revisions are ignored; an override switches the current term only',()=>{
+  const revs=[rv(1,'Original Quote','2025-01-01','2025-12-31',0,0,'2025-01-01','2025-12-31'),rv(2,'Expired','2025-01-01','2025-12-31',1200,1200,'2025-01-01','2025-12-31'),rv(3,'Active','2026-01-01','2028-12-31',3600,900,'2026-01-01','2028-12-31')];
+  const a=RT.timeline(revs,{today:'2026-10-03'}); eq(a.currentType,'auto'); eq(a.events[1].renewalType,'auto');
+  const b=RT.timeline(revs,{today:'2026-10-03',overrideType:'manual',overrideTermStart:'2026-01-01'}); eq(b.currentType,'manual'); eq(b.events[1].renewalType,'manual');
+  const c=RT.timeline(revs,{today:'2026-10-03',overrideType:'manual',overrideTermStart:'2025-01-01'}); eq(c.currentType,'auto'); });
+t('Engine (v2 switch): auto-renewal pays the increase at the new-sale multiple; without it, nothing',()=>{
+  const v2=JSON.parse(JSON.stringify(HYBRID)); v2.config.autoRenewalPaysIncrease=true;
+  eq(E.toDollars(E.calculate({plan:v2,eventType:'auto_renewal',term:36,newMrr:'120',priorMrr:'100',margin:M50}).totalCents),'20.00');
+  eq(E.toDollars(E.calculate({plan:v2,eventType:'rate_increase',term:24,newMrr:'90',priorMrr:'100',margin:M50}).totalCents),'0.00');
+  eq(E.toDollars(E.calculate({plan:HYBRID,eventType:'auto_renewal',term:36,newMrr:'120',priorMrr:'100',margin:M50}).totalCents),'0.00'); });
+
 results.forEach(r=>console.log(r[0]+'  '+r[1]));
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail?1:0);

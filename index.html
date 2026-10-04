@@ -1165,8 +1165,13 @@ function calculate(input){
   const renewalMult=dec(isSla?(cfg.slaRenewalMult!=null?cfg.slaRenewalMult:cfg.renewalMult):cfg.renewalMult);
   let components=[];
   const et=input.eventType;
-  if(et==='auto_renewal'||et==='escalation'){
-    components.push({label:et==='auto_renewal'?'Auto-renewal (COM-04)':'Contractual escalation (COM-04)',basis:ZERO,mult:ZERO,amount:ZERO});
+  if(et==='auto_renewal'||et==='escalation'||et==='rate_increase'){
+    // v1: auto-renewals and escalations pay nothing. From Hybrid v2 (autoRenewalPaysIncrease) only the increase pays, as new money at the
+    // term's new-sale multiple; the amount already commissioned never pays again, and a decrease pays nothing and takes nothing back.
+    if(cfg.autoRenewalPaysIncrease){ const inc=cmp(next,prior)>0?sub(next,prior):ZERO;
+      const tm=cmp(inc,ZERO)>0?termMultiple(cfg,term,isSla?'sla':'new'):{mult:ZERO,source:'no increase'};
+      components.push({label:(et==='auto_renewal'?'Increase at auto-renewal':'Rate increase')+` — new-agreement rate (${tm.source})`,basis:inc,mult:tm.mult,amount:mul(inc,tm.mult)}); }
+    else components.push({label:et==='auto_renewal'?'Auto-renewal (COM-04)':'Contractual escalation (COM-04)',basis:ZERO,mult:ZERO,amount:ZERO});
   } else if(et==='new_sale'||et==='win_back'||et==='sla_new'){
     const tm=termMultiple(cfg,term,isSla?'sla':'new');
     let base=mul(next,tm.mult);
@@ -1415,7 +1420,7 @@ function parseGrouped(feed,rows){
         const st=cellText(row[10]); if(!STAT.test(st))return fail(`Could not read the revision status on data row ${r+1} ("${st}") — the SM Agreement List layout has changed. Nothing was imported.`);
         const rec={agreement_number:ag,revision:String(row[0]),previous_revision:row[9]!=null&&String(row[9]).trim()!==''?String(row[9]):null,status:st,
           effective_date:toIsoDate(row[1]),activated_date:toIsoDate(row[2]),cancelled_date:toIsoDate(row[3]),terminated_date:toIsoDate(row[4]),expiration_date:toIsoDate(row[5]),
-          term_price:toMoney(row[6]),customer:cust,description:desc,
+          term_price:toMoney(row[6]),amount_billed:toMoney(row[8]),customer:cust,description:desc,
           term_start:term?term.start:null,term_end:term?term.end:null,term_status:term?term.status:null,term_total_price:term&&term.price!=null&&term.price!==undefined?term.price:null};
         for(const [k,v] of Object.entries(rec)){ if(v===undefined)return fail(`Could not read "${k.replace(/_/g,' ')}" on data row ${r+1}. Nothing was imported.`); }
         rec.term_key=rec.agreement_number+'|'+rec.revision; if(seen.has(rec.term_key)){dupes++;continue;} seen.add(rec.term_key); out.push(rec); }
@@ -1546,6 +1551,87 @@ function classifyCost(line,rules){
 
 const api={FEEDS,parse,detectFeed,invoiceStatus,mapInvoice,classifyCost,toIsoDate,toMoney};
 if(typeof module!=='undefined'&&module.exports)module.exports=api; else root.P1V=api;
+})(typeof window!=='undefined'?window:globalThis);
+
+</script>
+<script>
+/* ===================================================================================================
+   Contract terms, renewals and rate changes from the Vista SM Agreement List (P1RMR-60).
+   Pure functions: Vista revisions in, a per-agreement timeline out. Nothing here reads the database
+   or decides a dollar amount — the app prices each event with the published plan.
+
+   How Vista prints it: an agreement has one or more contract TERMS ("Term: 11/01/24 to 05/31/27");
+   each term holds one or more REVISIONS. A new term is a renewal; a later revision inside the same
+   term is a mid-term change (usually a rate change). A revision's "Price" is cumulative for the term,
+   so its monthly rate = (Price − amount already billed in this term) ÷ months from its effective date
+   to its expiration.
+   =================================================================================================== */
+(function(root){
+"use strict";
+const STANDARD_TERMS=[12,24,36,48,60];
+const SKIP=/quote|cancel/i;                     // quotes never ran; a cancelled revision never billed
+function iso(d){ return d?String(d).slice(0,10):null; }
+function monthsBetween(a,b){                    // inclusive calendar months, fractional for partial months
+  if(!a||!b)return null; const [y1,m1,d1]=a.split('-').map(Number),[y2,m2,d2]=b.split('-').map(Number);
+  const dim=new Date(Date.UTC(y2,m2,0)).getUTCDate(); return (y2-y1)*12+(m2-m1)+(d2-d1+1)/dim; }
+/* Term length for the commission multiple: whole months, and a term within one month of a standard term
+   counts as that term (co-terminous stub months, e.g. 8/17/26–8/31/29 is a 36-month agreement). */
+function termMonths(start,end){
+  const m=monthsBetween(start,end); if(m==null)return {months:null,standard:null,raw:null};
+  const r=Math.round(m); const std=STANDARD_TERMS.find(t=>Math.abs(m-t)<=1);
+  return {months:std||r,standard:std||null,raw:Math.round(m*100)/100};
+}
+const cents=x=>Math.round((+x||0)*100)/100;
+/* Renewal type follows the current term: a 12-month term renews manually, anything longer auto-renews.
+   An Administrator can switch it for the current term; the switch lapses when the next term starts. */
+function ruleType(months){ return months!=null&&months<=12?'manual':'auto'; }
+
+function timeline(revisions,opts){
+  opts=opts||{}; const today=opts.today||new Date().toISOString().slice(0,10);
+  const revs=(revisions||[]).filter(r=>!SKIP.test(String(r.status||''))&&r.effective_date)
+    .map(r=>({...r,revNo:+r.revision||0})).sort((a,b)=>a.revNo-b.revNo);
+  if(!revs.length)return {ok:false,reason:'No active, expired or terminated revisions in Vista.'};
+  // group by contract term (term rows printed above the revisions); a revision without one is its own term
+  const byTerm=new Map();
+  revs.forEach(r=>{ const k=(r.term_start||r.effective_date)+'|'+(r.term_end||r.expiration_date||''); if(!byTerm.has(k))byTerm.set(k,{start:r.term_start||r.effective_date,end:r.term_end||r.expiration_date||null,status:r.term_status||null,revisions:[]}); byTerm.get(k).revisions.push(r); });
+  const terms=[...byTerm.values()].sort((a,b)=>String(a.start).localeCompare(String(b.start)));
+  terms.forEach(t=>{ let billed=0; t.revisions.sort((a,b)=>a.revNo-b.revNo).forEach(r=>{
+      const end=r.expiration_date||t.end; const mo=monthsBetween(r.effective_date,end);
+      r.rate=(mo&&mo>0&&r.term_price!=null)?cents((r.term_price-billed)/mo):null; billed+=+r.amount_billed||0; });
+    // the date the term really stopped: Vista keeps the printed term end even when every revision expired or was terminated earlier
+    const ends=t.revisions.map(r=>iso(r.terminated_date)||iso(r.expiration_date)).filter(Boolean).sort(); const lastEnd=ends[ends.length-1]||t.end;
+    t.printedEnd=t.end; if(t.end&&lastEnd&&lastEnd<t.end)t.end=lastEnd;
+    t.terminatedEarly=t.revisions.some(r=>r.terminated_date)&&t.printedEnd&&t.end<t.printedEnd;
+    const tm=termMonths(t.start,t.end); t.months=tm.months; t.standardTerm=tm.standard; t.rawMonths=tm.raw;
+    const withRate=t.revisions.filter(r=>r.rate!=null); t.startRate=withRate.length?withRate[0].rate:null; t.endRate=withRate.length?withRate[withRate.length-1].rate:null; });
+  const started=terms.filter(t=>t.start<=today);
+  const current=[...started].reverse().find(t=>!t.end||today<=t.end)||started[started.length-1]||terms[0];
+  const live=revs.some(r=>/^(active|future active)\b/i.test(String(r.status||'')));
+  const last=revs[revs.length-1];
+  const endedDate=live?null:(iso(last.terminated_date)||iso(last.expiration_date)||iso(current.end));
+  const originalStart=terms[0].start;
+  // events: the original sale, every renewal (new term), every rate change inside a term
+  const events=[]; let hw=null;            // high-water mark: an increase pays once, even if the rate dips and comes back
+  terms.forEach((t,i)=>{
+    const type=(i===terms.length-1||t===current)&&opts.overrideType&&opts.overrideTermStart===t.start?opts.overrideType:ruleType(t.months);
+    if(i===0){ events.push({kind:'new_sale',date:t.start,term:t.months,standardTerm:t.standardTerm,rawMonths:t.rawMonths,prior:null,next:t.startRate,increase:null,termStart:t.start,termEnd:t.end}); hw=t.startRate; }
+    else { const prior=terms[i-1].endRate, next=t.startRate; const inc=(next!=null&&hw!=null&&next-hw>0.04)?cents(next-hw):0;
+      // a term cut short by termination and replaced is a rewrite of the agreement, not a renewal: only an increase can pay
+      const kind=terms[i-1].terminatedEarly?'rewrite':'renewal';
+      events.push({kind,renewalType:kind==='renewal'?type:'auto',date:t.start,term:t.months,standardTerm:t.standardTerm,rawMonths:t.rawMonths,prior,next,increase:inc,highWater:hw,termStart:t.start,termEnd:t.end});
+      if(next!=null&&(hw==null||next>hw))hw=next; }
+    t.revisions.slice(1).forEach((r,j)=>{ const prev=t.revisions[j]; if(r.rate==null||prev.rate==null||Math.abs(r.rate-prev.rate)<0.05)return;
+      const inc=(hw!=null&&r.rate-hw>0.04)?cents(r.rate-hw):0;
+      events.push({kind:'rate_change',date:iso(r.effective_date),term:t.months,standardTerm:t.standardTerm,rawMonths:t.rawMonths,prior:prev.rate,next:r.rate,increase:inc,highWater:hw,revision:r.revNo,termStart:t.start,termEnd:t.end});
+      if(hw==null||r.rate>hw)hw=r.rate; });
+  });
+  events.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  return {ok:true,originalStart,terms,current,renewals:events.filter(e=>e.kind==='renewal'&&e.date<=today).length,currentType:(opts.overrideType&&opts.overrideTermStart===current.start)?opts.overrideType:ruleType(current.months),
+    ruleType:ruleType(current.months),currentRate:current.endRate,live,endedDate,events,lastRevision:last.revNo};
+}
+
+const api={timeline,termMonths,monthsBetween,ruleType,STANDARD_TERMS};
+if(typeof module!=='undefined'&&module.exports)module.exports=api; else root.R27=api;
 })(typeof window!=='undefined'?window:globalThis);
 
 </script>
@@ -2350,7 +2436,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-59 · spec 2.7';
+const APP_VERSION='P1RMR-60 · spec 2.7';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // always Administrator, even if rmr_users is empty/unmigrated
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -4885,6 +4971,7 @@ function indexEvidence(){
   P27.invoices.forEach(i=>{ INV_BY_NO[i.invoice_number]=i; if(i.agreement_number)(INV_BY_AGR[i.agreement_number]=INV_BY_AGR[i.agreement_number]||[]).push(i); });
   P27.verifs.forEach(v=>{ (VERIF_BY_INV[v.invoice_number]=VERIF_BY_INV[v.invoice_number]||[]).push(v); });
   P27.receipts.forEach(r=>{ if(r.invoice_number)(RECEIPTS_BY_INV[r.invoice_number]=RECEIPTS_BY_INV[r.invoice_number]||[]).push(r); });
+  indexTerms27();
 }
 function collectionEvidence(invNo,amount){
   // Confirmed only on a Vista receipt allocation or a documented verification. A zero balance is "settled", not "collected".
@@ -4963,7 +5050,9 @@ function openVerifyForm(i){
 /* ---------------- routing: fail-closed plan resolution (CAT-05) ---------------- */
 function eventDateOf(a){ return String(a.original_sale_date||a.activation_date||'').slice(0,10)||null; }
 function isRevisedTransaction(a){
-  if(!a||a.history_only||a.historical_import)return false;
+  if(!a)return false;
+  if(retroVersion27(a.owner_email))return true;              // Hybrid v2: every agreement of a rep assigned to it, any date
+  if(a.history_only||a.historical_import)return false;
   const d=eventDateOf(a); if(!d)return true;                 // not yet signed → future transaction, versioned plans only
   return d>=REVISED_CUTOVER;
 }
@@ -4971,6 +5060,10 @@ function versionById(id){ return P27.versions.find(v=>String(v.id)===String(id))
 function resolveRevised(email,dateIso){
   email=String(email||'').toLowerCase(); const d=dateIso||E27.businessToday();
   if(!P27.ready)return {state:'not_configured',reason:'Plan not configured — the v2.7 plan tables are not available yet (run migration_v22_spec27.sql).'};
+  const rv=retroVersion27(email);
+  if(rv){ const ack=P27.acks.find(k=>String(k.email).toLowerCase()===email&&String(k.plan_version_id)===String(rv.id));
+    if(!ack)return {state:'ack_required',version:rv,reason:`Blocked — ${email} has not acknowledged the written terms of ${rv.label} (COM-07).`};
+    return {state:'ok',version:rv,retro:true}; }
   const asg=P27.assignments.filter(x=>String(x.email).toLowerCase()===email&&x.effective_from<=d&&(!x.effective_to||d<x.effective_to));
   if(!asg.length)return {state:'not_configured',reason:`Plan not configured — ${email||'this owner'} has no approved plan assignment covering ${d}.`};
   if(asg.length>1)return {state:'not_configured',reason:'Plan not configured — overlapping assignments (TEC-02); resolve in Admin.'};
@@ -5022,7 +5115,13 @@ function computeRevised(a){
     planState:res.state,planReason:res.reason||null});
   const ev=committedEventsFor(a);
   let calc=null, err=null;
-  if(ev.length){ const last=ev[ev.length-1]; calc={fromLedger:true,totalCents:BigInt(last.total_cents),tranche1Cents:BigInt(last.snapshot.tranche1Cents),tranche2Cents:BigInt(last.snapshot.tranche2Cents),label:last.snapshot.planLabel,eventType:last.event_type,snapshot:last.snapshot}; }
+  const sale=(pricedEvents27(a)||[]).find(p=>p.e.kind==='new_sale');
+  if(sale&&(sale.calc||sale.blocked)){
+    if(sale.calc){ const k=sale.evRow?sale.evRow.snapshot:null;
+      calc=k?{fromLedger:true,totalCents:BigInt(sale.evRow.total_cents),tranche1Cents:BigInt(k.tranche1Cents),tranche2Cents:BigInt(k.tranche2Cents),label:k.planLabel,eventType:sale.evRow.event_type,snapshot:k,components:sale.calc.components,gate:sale.calc.gate}
+        :Object.assign({},sale.calc,{fromLedger:false,label:res.version&&res.version.label}); R.overridePaid=sale.override; R.hybridSale=sale; }
+    else err={message:sale.blocked,field:sale.blockedField}; }
+  else if(ev.length){ const last=ev[ev.length-1]; calc={fromLedger:true,totalCents:BigInt(last.total_cents),tranche1Cents:BigInt(last.snapshot.tranche1Cents),tranche2Cents:BigInt(last.snapshot.tranche2Cents),label:last.snapshot.planLabel,eventType:last.event_type,snapshot:last.snapshot}; }
   else if(res.state==='ok'){
     try{ calc=E27.calculate({plan:planVersionPlain(res.version),eventType:inp.eventType,term:inp.term,category:a.category,newMrr:inp.mrrQ?E27.toDollars(E27.roundHalfUp(inp.mrrQ)):null,
       priorMrr:inp.prior!=null?String(inp.prior):null,slaAnnual:inp.isSla&&inp.mrrQ?E27.toDollars(E27.roundHalfUp(E27.mul(inp.mrrQ,E27.R(12n)))):null,margin:inp.qm.margin,
@@ -5035,7 +5134,7 @@ function computeRevised(a){
     return R;
   }
   const d=c=>Number(c)/100;
-  const tr=E27.evaluateTranches(calc,{activationDate:a.activation_date?String(a.activation_date).slice(0,10):null,ended:isEnded(a),cancelledDate:a.ended_date||null,invoices:agreementInvoices(a),offsetMonths:3});
+  const tr=(sale&&sale.tranches)||E27.evaluateTranches(calc,{activationDate:a.activation_date?String(a.activation_date).slice(0,10):null,ended:isEnded(a),cancelledDate:a.ended_date||null,invoices:agreementInvoices(a),offsetMonths:3});
   const qiOf=iso=>iso?qIndexFromYM(+iso.slice(0,4),+iso.slice(5,7)-1):null;
   const t1q=tr.t1.state==='Earned'?qiOf(tr.t1.earnedDate):R.initialQI, t2date=tr.t2.state==='Earned'?tr.t2.earnedDate:(tr.t2.timeDate||null);
   const renewMrr=agreementMrr(a), renewCents=(!R.noRenewal&&!a.autorenew&&(+a.contract_term>0)&&res.state==='ok')?E27.roundHalfUp(E27.mul(E27.R(E27.cents(String(Math.round(renewMrr*100)/100))),E27.dec(res.version.config.renewalMult||'0.25'))):0n;
@@ -5043,8 +5142,127 @@ function computeRevised(a){
     eligible:calc.totalCents>0n,initialCommission:d(calc.totalCents),baseCommissionNew:d(calc.totalCents),standardCommission:d(calc.totalCents),
     immediateCommission:d(calc.tranche1Cents),holdbackCommission:d(calc.tranche2Cents),immediatePct:0.5,holdbackPct:0.5,releaseMode:'offset',releaseOffsetMonths:3,
     initialQI:t1q,holdbackReleaseDate:t2date?new Date(t2date+'T00:00:00'):null,holdbackQI:qiOf(t2date),acceleratorCommission:0,acceleratorHeld:0,acceleratorPieces:[],conversionCommission:0,
-    renewalCommission:d(renewCents),baseCommissionRenewal:d(renewCents),legacyFull:false,stage:calc.fromLedger?'Qualified':'Expected commission'});
+    renewalCommission:d(renewCents),baseCommissionRenewal:d(renewCents),legacyFull:false,stage:R.overridePaid?'Paid before tracking (manager override)':(calc.fromLedger?'Qualified':'Expected commission')});
+  if(R.hybridSale){ const all=pricedEvents27(a).filter(p=>p.calc); R.hybridTotal=all.reduce((s,p)=>s+Number(p.evRow?p.evRow.total_cents:p.calc.totalCents),0)/100; R.renewalCommission=null; R.baseCommissionRenewal=null; }
   return R;
+}
+
+/* ===================================================================================================
+   Hybrid v2 (P1RMR-60): one plan for every agreement of a rep assigned to it, renewals and rate changes
+   read from the Vista Agreement List, and a recorded manager override for everything sold before the
+   plan's paid-through date. The plan version carries the switches (written terms, acknowledged):
+     appliesToAllAgreements · autoRenewalPaysIncrease · paidThrough · paidThroughApprovedBy · paidThroughNote
+   =================================================================================================== */
+let TL_CACHE=new Map(), TERMS_BY_NO={}, PRICE_CACHE=new WeakMap(), PRICE_STAMP=0;
+function indexTerms27(){ TL_CACHE=new Map(); TERMS_BY_NO={}; PRICE_STAMP++; (P27.terms||[]).forEach(t=>{ const k=String(t.agreement_number); (TERMS_BY_NO[k]=TERMS_BY_NO[k]||[]).push(t); }); }
+function termsReady27(){ return (P27.terms||[]).some(t=>t.term_start); }
+function tlFor(a){
+  if(!a||!a.agreement_number||typeof R27==='undefined'||!termsReady27())return null;
+  const ots=a.renewal_override_term_start?String(a.renewal_override_term_start).slice(0,10):null;
+  const key=a.id+'|'+(a.renewal_type_override||'')+'|'+(ots||'');
+  if(!TL_CACHE.has(key)){ const revs=TERMS_BY_NO[String(a.agreement_number)];
+    const tl=revs?R27.timeline(revs,{today:E27.businessToday(),overrideType:a.renewal_type_override||null,overrideTermStart:ots}):null; TL_CACHE.set(key,tl&&tl.ok?tl:null); }
+  return TL_CACHE.get(key);
+}
+function currentVersionOf27(email){
+  email=String(email||'').toLowerCase(); const today=E27.businessToday();
+  const mine=(P27.assignments||[]).filter(x=>String(x.email).toLowerCase()===email);
+  const asg=mine.filter(x=>x.effective_from<=today&&(!x.effective_to||today<x.effective_to));
+  if(asg.length===1)return versionById(asg[0].plan_version_id);
+  if(asg.length>1)return null;
+  // before the rep's first Hybrid date they are on the historical plans; the next assignment is the plan that will govern
+  const next=mine.filter(x=>x.effective_from>today).sort((a,b)=>String(a.effective_from).localeCompare(String(b.effective_from)))[0];
+  return next?versionById(next.plan_version_id):null;
+}
+function retroVersion27(email){ if(!P27.ready)return null; const v=currentVersionOf27(email); return v&&v.status==='published'&&v.config&&!v.config.placeholder&&v.config.appliesToAllAgreements?v:null; }
+function overrideOf27(a){ const v=retroVersion27(a&&a.owner_email); const pt=v&&v.config.paidThrough;
+  return pt?{through:pt,approver:v.config.paidThroughApprovedBy||v.approved_by||'—',note:v.config.paidThroughNote||'Paid under the prior plan — manager override'}:null; }
+const KIND_LABEL27={new_sale:'Sale',renewal:'Renewal',rewrite:'Rewrite',rate_change:'Rate change'};
+function nearestStd27(m){ return [12,24,36,48,60].reduce((b,t)=>Math.abs(t-m)<Math.abs(b-m)?t:b,12); }
+function eventsFor27(a){
+  const tl=tlFor(a);
+  if(tl){ // Vista's derived rate can be a few cents off on stub months; the current rate is the agreement's own monthly price when they agree within 60¢
+    const mrr=Math.round(agreementMrr(a)*100)/100; const cur=tl.live?tl.current.start:null; const inCur=tl.events.filter(e=>e.termStart===cur); const last=inCur[inCur.length-1];
+    return tl.events.map(e=>e===last&&e.next!=null&&mrr>0&&Math.abs(e.next-mrr)<=0.6&&e.next!==mrr?Object.assign({},e,{next:mrr,vistaRate:e.next}):e); }
+  const d=eventDateOf(a), t=+a.contract_term||0;
+  return [{kind:'new_sale',date:d,term:t,standardTerm:[12,24,36,48,60].includes(t)?t:null,next:Math.round(agreementMrr(a)*100)/100,prior:null,fromAgreement:true}];
+}
+function priceEvent27(a,e,res,ov){
+  const isSla=a.category==='sla'; const override=!!(ov&&e.date&&e.date<=ov.through);
+  const et=e.kind==='new_sale'?(isSla?'sla_new':'new_sale'):(e.kind==='renewal'&&e.renewalType==='manual')?(isSla?'sla_renewal':'manual_renewal'):e.kind==='renewal'?'auto_renewal':'rate_increase';
+  let term=e.standardTerm||e.term||0; if(override&&term&&![12,24,36,48,60].includes(term))term=term>60?60:nearestStd27(term);
+  const out={a,e,et,term,override,date:e.date,uid:`${a.id}|${et}|${e.date}|${term}`};
+  out.evRow=(P27.events||[]).find(x=>x.event_uid===out.uid)||null;
+  if(!e.date){ out.blocked='No start date.'; return out; }
+  if(!res||res.state!=='ok'){ out.blocked=res?res.reason:'Plan not configured'; return out; }
+  if(e.next==null){ out.blocked='Vista shows no monthly rate for this revision.'; return out; }
+  const incOnly=et==='auto_renewal'||et==='rate_increase';
+  const prior=incOnly?(e.highWater!=null?e.highWater:e.prior):e.prior;
+  if(incOnly&&!(prior!=null&&e.next-prior>0.04)){ out.noPay=true; out.reason='No increase — nothing pays (the amount already commissioned pays once).'; }
+  let margin=null;
+  try{ const mrrQ=E27.R(E27.cents(String(e.next)));
+    if(override) margin=E27.ONE; else { const qm=E27.qualificationMargin(mrrQ,term,E27.modelledCost(a)); margin=qm.margin; out.marginReason=qm.reason||null; out.margin=qm.margin; }
+    out.calc=E27.calculate({plan:planVersionPlain(res.version),eventType:et,term,category:a.category,
+      newMrr:isSla?null:String(e.next),priorMrr:(!isSla&&prior!=null)?String(prior):null,
+      slaAnnual:isSla?String(Math.round(e.next*1200)/100):null,priorSlaAnnual:(isSla&&prior!=null)?String(Math.round(prior*1200)/100):null,
+      margin,shares:[{email:String(a.owner_email||'').toLowerCase(),bp:10000}]}); }
+  catch(err){ out.blocked=err.message; out.blockedField=err.field||null; return out; }
+  if(!override){ const inv=agreementInvoices(a); const ctx=e.kind==='new_sale'?inv:inv.filter(i=>String(i.date)>=e.date);
+    const k=out.evRow?{totalCents:BigInt(out.evRow.total_cents),tranche1Cents:BigInt(out.evRow.snapshot.tranche1Cents),tranche2Cents:BigInt(out.evRow.snapshot.tranche2Cents)}:out.calc;
+    out.tranches=E27.evaluateTranches(k,{activationDate:e.date,ended:isEnded(a),cancelledDate:a.ended_date||null,invoices:ctx,offsetMonths:3}); }
+  return out;
+}
+function pricedEvents27(a){
+  if(!a||!isRevisedTransaction(a))return null;
+  const hit=PRICE_CACHE.get(a); if(hit&&hit.stamp===PRICE_STAMP&&hit.rev===a.updated_at)return hit.out;
+  const res=resolveRevised(a.owner_email,eventDateOf(a)||E27.businessToday()); const ov=overrideOf27(a);
+  const out=eventsFor27(a).map(e=>priceEvent27(a,e,res,ov));
+  PRICE_CACHE.set(a,{stamp:PRICE_STAMP,rev:a.updated_at,out}); return out;
+}
+/* One line per event × payment (tranche). rstate: paid · approved · earned · expected. */
+function hybridLines27(a){
+  const P=pricedEvents27(a)||[]; const lines=[]; const ov=overrideOf27(a);
+  const qiOf=iso=>iso?qIndexFromYM(+iso.slice(0,4),+iso.slice(5,7)-1):null;
+  P.forEach(p=>{ if(!p.calc||p.noPay)return;
+    const k=p.evRow?{t1:BigInt(p.evRow.snapshot.tranche1Cents),t2:BigInt(p.evRow.snapshot.tranche2Cents)}:{t1:p.calc.tranche1Cents,t2:p.calc.tranche2Cents};
+    [[1,k.t1],[2,k.t2]].forEach(([n,c])=>{ if(!(c>0n))return; const amount=Number(c)/100; const t=p.tranches?(n===1?p.tranches.t1:p.tranches.t2):null;
+      const label=(p.e.kind==='new_sale'?'':KIND_LABEL27[p.e.kind]+' · ')+`Payment ${n} of 2`;
+      let rstate,note,date;
+      if(p.override){ rstate='paid'; date=n===1?p.date:E27.addMonthsClamp(p.date,3); note=`Paid before ${qLabel(qiOf(E27.addDays(ov.through,1)))} — manager override, approved by ${ov.approver}`; }
+      else { const led=P27.ledger.filter(x=>x.event_uid===p.uid&&+x.tranche===n); const has=st=>led.some(x=>x.stage===st);
+        rstate=has('paid')?'paid':has('payable')?'approved':(t&&t.state==='Earned'?'earned':'expected');
+        date=t&&t.earnedDate||null;
+        if(rstate==='paid')note='paid'; else if(rstate==='approved')note='approved for payroll'; else if(rstate==='earned')note=p.evRow?`earned ${t.earnedDate}`:`earned ${t.earnedDate} — record the event to pay it`;
+        else { note=!p.evRow?'Not recorded yet.':friendlyCond27(((t&&t.conditions)||[])[0]||'Conditions not met yet.');
+          if(!date) date=n===1?p.date:(t&&t.timeDate)||E27.addMonthsClamp(p.date,3); } }
+      lines.push({a,p,uid:p.uid,tranche:n,piece:n,cents:c,amount,rstate,note,qi:qiOf(date),date,label,t,override:p.override,kind:p.e.kind}); }); });
+  return lines;
+}
+/* Record a priced event: locks the current costs if no version is locked yet, then writes the immutable event + qualified ledger lines. */
+async function recordHybridEvent27(a,p){
+  if(p.evRow)return {ok:true,already:true};
+  if(p.override)return {error:'Paid before tracking — nothing to record.'};
+  if(!p.calc||p.blocked)return {error:p.blocked||'Not priced'};
+  if(p.noPay)return {error:'No increase — nothing to record.'};
+  let cv=P27.costVersions.filter(x=>String(x.agreement_id)===String(a.id)).sort((x,y)=>y.version_no-x.version_no)[0];
+  if(!cv){ const keys=['loaded_labor_rate','labor_schedule','inspection_frequency','hours_per_inspection','material_cost_annual','monitoring_cost_annual','software_cost_annual','subcontractor_annual_cost','other_direct_annual','monthly_direct_cost','cost_confirmed_zero'];
+    const costs={}; keys.forEach(k=>costs[k]=a[k]!==undefined?a[k]:null); const mc=E27.modelledCost(costs); if(mc.state!=='complete')return {error:'Cost breakdown is incomplete: '+mc.notes.join(' ')};
+    const row={agreement_id:a.id,version_no:1,costs,annual_direct_cents:Number(E27.roundHalfUp(E27.mul(mc.annual,E27.R(100n)))),approver:CURRENT_EMAIL,evidence:'Locked from the agreement costs when its commission event was recorded'};
+    const r=await sb.from('rmr_cost_versions').insert(row).select(); if(r.error)return {error:r.error.message}; cv=(r.data&&r.data[0])||row; P27.costVersions.push(cv); }
+  const res=resolveRevised(a.owner_email,p.date); if(res.state!=='ok')return {error:res.reason};
+  const c=p.calc; const ser=x=>JSON.parse(JSON.stringify(x,(k,v)=>typeof v==='bigint'?v.toString():(v&&typeof v==='object'&&'n' in v&&'d' in v&&typeof v.n==='bigint')?{n:v.n.toString(),d:v.d.toString(),value:E27.ratStr(v,6)}:v));
+  const snap=ser({planLabel:res.version.label,planVersionId:res.version.id,eventType:p.et,kind:p.e.kind,renewalType:p.e.renewalType||null,term:p.term,termStart:p.e.termStart||null,termEnd:p.e.termEnd||null,
+    eligibleMrr:String(p.e.next),priorMrr:p.e.prior,highWater:p.e.highWater??null,source:p.e.fromAgreement?'agreement':'Vista Agreement List',margin:p.margin?E27.ratStr(p.margin,6):null,marginInputs:cv.costs,costVersion:cv.version_no,
+    components:c.components,gate:c.gate,totalCents:c.totalCents,tranche1Cents:c.tranche1Cents,tranche2Cents:c.tranche2Cents,shares:c.shares,
+    earningConditions:'T1: first nonzero invoice from the event date fully collected; T2: 3 calendar months after that first billing, active, all invoices due collected',calculatedAt:new Date().toISOString(),formulaVersion:E27.FORMULA_VERSION,costMode:'modelled'});
+  const ev={event_uid:p.uid,agreement_id:a.id,agreement_number:a.agreement_number,event_type:p.et,event_date:p.date,plan_version_id:res.version.id,cost_version_id:cv.id||null,
+    opportunity_number:a.opportunity_number||null,quote_ref:a.quote_ref||null,snapshot:snap,formula_version:E27.FORMULA_VERSION,cost_mode:'modelled',total_cents:Number(c.totalCents),created_by:CURRENT_EMAIL};
+  const r1=await sb.from('rmr_comm_events').insert(ev).select(); if(r1.error)return {error:/check constraint/i.test(r1.error.message)?'Run migration_v27_terms_renewals.sql first (new event types).':r1.error.message};
+  await sb.from('rmr_credit_shares').insert(c.shares.map(s=>({event_uid:p.uid,recipient_email:s.email,share_bp:s.bp,confirmed:true})));
+  const entries=[]; c.shares.forEach(s=>{ [[1,s.t1Cents],[2,s.t2Cents]].forEach(([t,amt])=>entries.push({entry_uid:`${p.uid}|T${t}|qualified|${s.email}`,event_uid:p.uid,tranche:t,stage:'qualified',recipient_email:s.email,amount_cents:Number(amt),actor:CURRENT_EMAIL})); });
+  await sb.from('rmr_ledger_entries').insert(entries);
+  audit('Commission event recorded','Ledger',a.agreement_number,null,{event_uid:p.uid,kind:p.e.kind,total:E27.toDollars(c.totalCents),plan:res.version.label},null);
+  return {ok:true,total:Number(c.totalCents)/100};
 }
 function reconBonusConfig(y){
   const v=P27.versions.find(x=>x.family==='Hybrid'&&x.status==='published');
@@ -5081,7 +5299,8 @@ function renderAgSummary27(a){
   box.innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;margin:4px 0 12px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:#fafbfc;font-size:12.5px">
     <b>#${esc(a.agreement_number||'—')}</b><span>${esc(a.customer_name||'')}${a.site_number?' · site '+esc(a.site_number):''}</span>
     <span>${isEnded(a)?'Ended':(isLiveAgreement(a)?'Active':esc(a.stage||''))}</span><span>Owner ${esc(a.owner_email||'—')}</span>
-    <span>Term ${term?term+' mo':'M2M'}${a.term_end?' → '+esc(String(a.term_end).slice(0,10)):''}</span><span>MRR <b>${fmt2(mrr)}</b> · ARR ${fmt(mrr*12)}</span>
+    ${(()=>{ const tl=tlFor(a); if(!tl)return `<span>Term ${term?term+' mo':'M2M'}${a.term_end?' → '+esc(String(a.term_end).slice(0,10)):''}</span>`;
+      const cur=tl.current; return `<span>Original start <b>${esc(tl.originalStart)}</b> · ${tl.renewals} renewal${tl.renewals===1?'':'s'}</span><span>${tl.live?`Current term <b>${esc(cur.start)} → ${esc(cur.end||'—')}</b> (${cur.months||'—'} mo · ${tl.currentType} renewal)`:`<span style="color:var(--held)">Ended in Vista ${esc(tl.endedDate||'')}</span>`}</span>`; })()}<span>MRR <b>${fmt2(mrr)}</b> · ARR ${fmt(mrr*12)}</span>
     <span>${costB} ${qualB} ${payB}</span>
     <span class="qctx">Plan: ${esc(c.planVersion||'')}${c.revised?'':' (historical)'} · event date ${esc(eventDateOf(a)||'—')}</span></div>`;
 }
@@ -5337,8 +5556,13 @@ async function commitStaged(){
     for(const c of chunks(rows,500)){ const r=await sb.from('rmr_vista_invoices').upsert(c,{onConflict:'invoice_number'}); if(r.error){error=r.error;break;} } }
   if(s.feed==='receipts'){ const rows=p.rows.map(x=>({receipt_key:x.receipt_key,receipt_id:x.receipt_id,invoice_number:x.invoice_number,customer:x.customer!=null?String(x.customer):null,amount:x.amount,receipt_date:x.receipt_date,batch_id:batch}));
     for(const c of chunks(rows,500)){ const r=await sb.from('rmr_vista_receipts').upsert(c,{onConflict:'receipt_key',ignoreDuplicates:true}); if(r.error){error=r.error;break;} } }
-  if(s.feed==='agreement_terms'){ const rows=p.rows.map(x=>({term_key:x.term_key,agreement_number:x.agreement_number,revision:x.revision,previous_revision:x.previous_revision,status:x.status!=null?String(x.status):null,effective_date:x.effective_date,activated_date:x.activated_date,cancelled_date:x.cancelled_date,terminated_date:x.terminated_date,expiration_date:x.expiration_date,term_price:x.term_price,customer:x.customer!=null?String(x.customer):null,batch_id:batch}));
-    for(const c of chunks(rows,500)){ const r=await sb.from('rmr_vista_agreement_terms').upsert(c,{onConflict:'term_key'}); if(r.error){error=r.error;break;} } }
+  if(s.feed==='agreement_terms'){ let rows=p.rows.map(x=>({term_key:x.term_key,agreement_number:x.agreement_number,revision:x.revision,previous_revision:x.previous_revision,status:x.status!=null?String(x.status):null,effective_date:x.effective_date,activated_date:x.activated_date,cancelled_date:x.cancelled_date,terminated_date:x.terminated_date,expiration_date:x.expiration_date,term_price:x.term_price,customer:x.customer!=null?String(x.customer):null,batch_id:batch,
+      description:x.description||null,term_start:x.term_start||null,term_end:x.term_end||null,term_status:x.term_status||null,term_total_price:x.term_total_price??null,amount_billed:x.amount_billed??null}));
+    for(const c of chunks(rows,500)){ let r=await sb.from('rmr_vista_agreement_terms').upsert(c,{onConflict:'term_key'});
+      // before migration v27 the term columns do not exist: save what fits and say so (renewals need them)
+      if(r.error&&/term_start|term_end|term_status|term_total_price|amount_billed|description|column|schema cache/i.test(r.error.message)){ s.needsV27=true;
+        rows=rows.map(({description,term_start,term_end,term_status,term_total_price,amount_billed,...k})=>k); r=await sb.from('rmr_vista_agreement_terms').upsert(c.map(({description,term_start,term_end,term_status,term_total_price,amount_billed,...k})=>k),{onConflict:'term_key'}); }
+      if(r.error){error=r.error;break;} } }
   if(s.feed==='posted_cost'){ const rows=p.rows.map(x=>({line_key:x.line_key,work_order:x.work_order,agreement_number:x.agreement_number,line_type:x.line_type,description:x.description!=null?String(x.description):null,post_date:x.post_date,amount:x.amount,bucket:x.bucket,batch_id:batch}));
     for(const c of chunks(rows,500)){ const r=await sb.from('rmr_vista_costs').upsert(c,{onConflict:'line_key',ignoreDuplicates:true}); if(r.error){error=r.error;break;} } }
   if(s.feed==='invoice_attribution'){ /* corroborating only: backfill candidate mappings into the Worklist; never a primary key, never writes agreement_number */ }
@@ -5354,7 +5578,7 @@ async function commitStaged(){
   for(const w of P27.worklist.filter(w=>w.status==='open'&&w.detail&&w.detail.link&&!stillOpen.has(w.item_uid)&&(w.detail.link.pairs||[]).every(q=>mapsNow.byInvoiceNo[q.inv]))){
     await sb.from('rmr_worklist').update({status:'closed',closed_by:CURRENT_EMAIL,closed_at:new Date().toISOString(),close_basis:`Invoices now on the billing rows (batch #${batch})`}).eq('id',w.id); }
   audit('Vista import committed','Import',String(batch),null,{feed:s.feed,file:s.file,rows:p.rows.length,matched:s.matched,unmatched:s.unmatched,dataThrough:p.dataThrough,flags:p.flags},null);
-  toast(`Imported ${p.rows.length} ${V27.FEEDS[s.feed].label.toLowerCase()} rows · batch #${batch}`);
+  toast(s.needsV27?`Imported ${p.rows.length} rows — run migration_v27_terms_renewals.sql, then import this file again so renewals can be read`:`Imported ${p.rows.length} ${V27.FEEDS[s.feed].label.toLowerCase()} rows · batch #${batch}`);
   STAGED27=null; await load27(); render();
 }
 window.P1Import={ scheduled:(feed,file)=>stageFile(feed,file,'scheduled'), manual:(feed,file)=>stageFile(feed,file,'manual') };
@@ -5450,11 +5674,13 @@ function legacyLineReadiness(a,type){
 function payoutItems(run){
   const qi=qIndexFromYM(run.y,(run.q-1)*3); const items=[];
   scopedAgreements().forEach(a=>{ const c=compute(a);
-    if(c.revised){ if(!c.revisedCalc||!c.tranches)return; const k=c.revisedCalc;
-      [[1,c.tranches.t1,k.tranche1Cents],[2,c.tranches.t2,k.tranche2Cents]].forEach(([n,t,amt])=>{ if(!amt)return; const paid=P27.ledger.some(x=>x.stage==='paid'&&x.tranche===n&&x.event_uid&&String(x.event_uid).startsWith(a.id+'|'));
+    if(c.revised){
+      // every event (sale, renewal, rate change) pays in two parts; anything sold before the plan's paid-through date was paid under the manager override
+      hybridLines27(a).forEach(l=>{ if(l.override)return; const t=l.t||{conditions:[]}; const paid=l.rstate==='paid';
         const earned=t.state==='Earned', inQ=earned&&t.earnedDate<=run.quarterEnd;
-        const cl=paid?{state:'Excluded from this run',reason:'Already paid.'}:(!k.fromLedger?{state:'Excluded from this run',reason:'No committed commission event — Expected commission only.'}:(!earned?{state:'Excluded from this run',reason:t.conditions.join(' ')}:(!inQ?{state:'Excluded from this run',reason:'Earned after quarter end — next run.'}:{state:'Ready to pay',reason:`Earned ${t.earnedDate} on verified evidence.`})));
-        items.push({a,label:`Payment ${n} of 2`,amount:Number(amt)/100,cents:amt,tranche:n,revised:true,...cl}); }); return; }
+        const cl=paid?{state:'Excluded from this run',reason:'Already paid.'}:(!l.p.evRow?{state:'Excluded from this run',reason:'Not recorded yet — record this commission event on the Renewals page.'}:(!earned?{state:'Excluded from this run',reason:(t.conditions||[]).join(' ')}:(!inQ?{state:'Excluded from this run',reason:'Earned after quarter end — next run.'}:{state:'Ready to pay',reason:`Earned ${t.earnedDate} on verified evidence.`})));
+        items.push({a,label:l.label,amount:l.amount,cents:l.cents,tranche:l.tranche,revised:true,evRow:l.p.evRow,earnedDate:t.earnedDate||null,kind:l.kind,...cl}); });
+      return; }
     const pieces=[]; if(c.legacyFull){ if(c.initialQI===qi)pieces.push(['initial','paid_initial',frozenAmount(a,'initial').amount]); }
     else { if(c.initialQI===qi)pieces.push(['immediate','paid_immediate',frozenAmount(a,'immediate').amount]); if(c.holdbackQI===qi)pieces.push(['holdback','paid_holdback',frozenAmount(a,'holdback').amount]); }
     pieces.forEach(([type,flag,amt])=>{ if(!(amt>0))return; if(a[flag]){ items.push({a,label:type,amount:amt,state:'Excluded from this run',reason:'Already paid.'}); return; }
@@ -5499,7 +5725,7 @@ async function approveRun(run,groups){
   const {data,error}=await sb.from('rmr_payout_runs').insert({year:run.y,quarter:run.q,approved_by:CURRENT_EMAIL,ready_cents:cents,excluded,export_file:`payout-Q${run.q}-${run.y}.csv`}).select();
   if(error){ toast(/duplicate|unique/i.test(error.message)?'This quarter was already approved.':error.message); return; }
   const runId=data[0].id; const entries=[];
-  ready.filter(i=>i.revised).forEach(i=>{ const ev=committedEventsFor(i.a).slice(-1)[0]; if(!ev)return; const t=compute(i.a).tranches; const tt=t&&(i.tranche===1?t.t1:t.t2);
+  ready.filter(i=>i.revised).forEach(i=>{ const ev=i.evRow||committedEventsFor(i.a).slice(-1)[0]; if(!ev)return; const tt={earnedDate:i.earnedDate,dateBasis:null};
     (ev.snapshot.shares||[]).forEach(s=>entries.push({entry_uid:`${ev.event_uid}|T${i.tranche}|earned|${s.email}`,event_uid:ev.event_uid,tranche:i.tranche,stage:'earned',recipient_email:s.email,amount_cents:Number(i.tranche===1?s.t1Cents:s.t2Cents),earned_date:tt?tt.earnedDate:null,verified_at:new Date().toISOString(),evidence:{conditions:'met',basis:tt&&tt.dateBasis||null},actor:CURRENT_EMAIL}));
     (ev.snapshot.shares||[]).forEach(s=>entries.push({entry_uid:`${ev.event_uid}|T${i.tranche}|payable|${s.email}`,event_uid:ev.event_uid,tranche:i.tranche,stage:'payable',recipient_email:s.email,amount_cents:Number(i.tranche===1?s.t1Cents:s.t2Cents),payout_run_id:runId,actor:CURRENT_EMAIL})); });
   if(entries.length) await sb.from('rmr_ledger_entries').upsert(entries,{onConflict:'entry_uid',ignoreDuplicates:true});
@@ -5512,10 +5738,11 @@ async function approveRun(run,groups){
 function termsText(v){
   const c=v.config||{}; const m=c.newMult||{}; const sl=c.slaNewMult||{};
   return `${v.label} — written commission terms (effective ${v.effective_date||'on publication'})\n\n`+
-  `Commission = eligible MRR × term multiple × margin gate. New sale or expansion: 12 mo ${m[12]}×, 24 mo ${m[24]}×, 36 mo ${m[36]}×, 48 mo ${m[48]}×, 60 mo ${m[60]}× (terms above 60 months are capped at ${c.newMultCapAbove60||m[60]}×). Manual renewal: ${c.renewalMult}× retained MRR; any increase at renewal pays the new-sale multiple on the increase only. Auto-renewals, contractual escalations and term conversions pay nothing.\n`+
+  `Commission = eligible MRR × term multiple × margin gate. New sale or expansion: 12 mo ${m[12]}×, 24 mo ${m[24]}×, 36 mo ${m[36]}×, 48 mo ${m[48]}×, 60 mo ${m[60]}× (terms above 60 months are capped at ${c.newMultCapAbove60||m[60]}×). Manual renewal: ${c.renewalMult}× retained MRR; any increase at renewal pays the new-sale multiple on the increase only. ${c.autoRenewalPaysIncrease?'Auto-renewals and rate increases (including built-in escalations) pay only the increase, as new money at the new-sale multiple for the term; the amount already commissioned never pays again, and a decrease pays nothing and takes nothing back. Term conversions pay nothing.':'Auto-renewals, contractual escalations and term conversions pay nothing.'}\n`+
+  `Renewal type follows the contract term recorded in Vista: a 12-month term renews manually; longer terms auto-renew. An Administrator may switch the type for a term. A term within one month of a standard term (co-terminous stub months) counts as that term.\n`+
   `SLA agreements: annual recurring value ÷ 12, then 12 mo ${sl[12]}×, 24 mo ${sl[24]}×, 36 mo ${sl[36]}×, 48 mo ${sl[48]}×, 60 mo ${sl[60]}×; SLA renewal ${c.slaRenewalMult}× retained.\n`+
   `Margin: gross margin on modelled direct cost over the committed term must be at least ${Math.round((+c.minMargin||0)*100)}% (multiplier 1.0); below it pays 0; unknown margin cannot qualify.\n`+
-  `Earning: ${Math.round((+c.tranche1Pct||0)*100)}% is earned when the signed agreement is activated and its first valid nonzero invoice is fully collected; ${Math.round((+c.tranche2Pct||0)*100)}% is earned three calendar months after first actual billing with the account active and every invoice due through that date paid. Earned amounts are paid quarterly within ${(P27.settings.payout_calendar||{}).payWithinDays||30} days of quarter end; collections must be verified within ${(P27.settings.payout_calendar||{}).verifyWithinDays||15} days of quarter end. A transaction signed before this version's effective date keeps its historical plan for both tranches.\n`+
+  `Earning: ${Math.round((+c.tranche1Pct||0)*100)}% is earned when the signed agreement is activated and its first valid nonzero invoice is fully collected; ${Math.round((+c.tranche2Pct||0)*100)}% is earned three calendar months after first actual billing with the account active and every invoice due through that date paid. Renewals and rate increases earn the same way, counted from the first invoice of the new rate. Earned amounts are paid quarterly within ${(P27.settings.payout_calendar||{}).payWithinDays||30} days of quarter end; collections must be verified within ${(P27.settings.payout_calendar||{}).verifyWithinDays||15} days of quarter end. ${c.appliesToAllAgreements?`This version applies to every agreement of the assigned rep, whatever its sale date.${c.paidThrough?` Commissions on sales, renewals and rate changes dated on or before ${c.paidThrough} were paid under the prior plan and are recorded as paid by manager override (approved by ${c.paidThroughApprovedBy||'—'}${c.paidThroughNote?': '+c.paidThroughNote:''}), whatever their margin; the margin rule and these terms govern everything after that date.`:''}`:"A transaction signed before this version's effective date keeps its historical plan for both tranches."}\n`+
   `Portfolio bonus: highest satisfied tier each of GRR (${(c.grrBonus||[]).map(t=>`${Math.round(t.min*1000)/10}%→${Math.round(t.pct*1000)/10}%`).join(', ')}) and NRR (${(c.nrrBonus||[]).map(t=>`${Math.round(t.min*1000)/10}%→${Math.round(t.pct*1000)/10}%`).join(', ')}) of base salary accrued over the calendar year, paid by February 15.\n`+
   `Cancellation before earning stops the unearned tranche. Refunds, credits, cancellation after earning and separation require a documented adjustment decision; nothing is deducted from salary or clawed back automatically. Approved by ${v.approved_by||'—'}.`;
 }
@@ -5581,6 +5808,13 @@ function renderAdmin27(){
       <div class="cfg-two"><div><label class="cfg-lbl">Tranche 1</label>${inp('p_t1',pct(c.tranche1Pct),'type="number" step="1"')} %</div><div><label class="cfg-lbl">Tranche 2</label>${inp('p_t2',pct(c.tranche2Pct),'type="number" step="1"')} %</div></div>
       <label class="cfg-lbl">Tranche 2 time condition</label>${inp('p_off',c.releaseOffsetMonths,'type="number" step="1" style="width:60px"')} calendar months after first actual billing
       <div class="qctx" style="margin-top:6px">Both tranches also require confirmed collection (PAY-01/02). The 25%-collected shortcut and the net-profit release test are off for revised events.</div></div></div>
+    <div class="panel"><div class="panel-head"><h2>Agreements &amp; renewals</h2><span class="qctx">written into the terms the rep acknowledges</span></div><div class="admin-body" style="font-size:12.5px">
+      <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px"><input type="checkbox" id="r_all" ${c.appliesToAllAgreements?'checked':''} ${ed?'':'disabled'}> <span>Applies to <b>every agreement</b> of a rep assigned to this version, whatever the sale date (old and new, every quarter)</span></label>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px"><input type="checkbox" id="r_inc" ${c.autoRenewalPaysIncrease?'checked':''} ${ed?'':'disabled'}> <span>Auto-renewals and rate increases pay <b>the increase only</b>, at the new-sale multiple for the term. A decrease pays nothing and takes nothing back.</span></label>
+      <div class="cfg-two" style="margin-top:6px"><div><label class="cfg-lbl">Sales on or before this date are marked paid (manager override)</label><input type="date" class="cfg-in" id="r_paid" value="${esc(c.paidThrough||'')}" ${ed?'':'disabled'}></div>
+        <div><label class="cfg-lbl">Override approved by</label><input class="cfg-in" id="r_by" value="${esc(c.paidThroughApprovedBy||'')}" placeholder="Name" ${ed?'':'disabled'}></div></div>
+      <label class="cfg-lbl">Override note</label><input class="cfg-in" id="r_note" style="width:100%" value="${esc(c.paidThroughNote||'')}" placeholder="Paid under the prior plan; margin rule waived" ${ed?'':'disabled'}>
+      <div class="qctx" style="margin-top:6px">Renewal type follows the contract term from Vista: a 12-month term renews manually (${val(c.renewalMult||'—')}× the retained monthly amount plus any increase); longer terms auto-renew. An Administrator can switch it on the Renewals page for the current term.</div></div></div>
    </div>
    <div class="admin-actions">
      <button class="btn-primary" id="sv27" ${ed?'':'disabled'}>Save draft</button>
@@ -5616,6 +5850,10 @@ function readDraft27(v){
   [...Object.values(nm),...Object.values(sm),c.renewalMult,c.slaRenewalMult,c.accelMultiplier].forEach(x=>{ if(x!=null&&!/^\d+(\.\d+)?$/.test(x))errs.push(`"${x}" is not a decimal multiple.`); });
   if(c.accelMultiplier!=null&&+c.accelMultiplier<1)errs.push('Accelerator must be 1.0 or higher.');
   if(!c.placeholder){ c.termConversionMult='0'; c.autoRenewalMult='0'; c.escalatorMult='0'; }
+  const ck=id=>{ const el=$(id); return !!(el&&el.checked); };
+  if($('r_all')){ c.appliesToAllAgreements=ck('r_all')||undefined; c.autoRenewalPaysIncrease=ck('r_inc')||undefined;
+    c.paidThrough=g('r_paid')||undefined; c.paidThroughApprovedBy=g('r_by')||undefined; c.paidThroughNote=g('r_note')||undefined;
+    if(c.paidThrough&&!c.paidThroughApprovedBy)errs.push('Name who approved the paid-through override.'); }
   return {c,errs};
 }
 async function saveDraft27(v){
@@ -5995,6 +6233,7 @@ function friendlyCond27(t){ t=plainText27(String(t||'')); let m;
   return t; }
 /* ---- Quarter view lines for revised deals: payment 1 / payment 2 with their real state ---- */
 function revisedQuarterLines27(a,c){
+  if(pricedEvents27(a)) return hybridLines27(a).map(l=>({a,c,type:'rev'+l.uid+'|'+l.piece,piece:l.piece,label:l.label,amount:l.amount,rstate:l.rstate,paid:l.rstate==='paid',note:l.note,qi:l.qi,frozen:false,t:l.t,override:l.override}));
   const calc=c.revisedCalc; if(!calc)return [];
   const tr=c.tranches||{t1:{conditions:[]},t2:{conditions:[]}}; const ev=committedEventsFor(a).slice(-1)[0];
   const led=ev?P27.ledger.filter(x=>x.event_uid===ev.event_uid):[];
@@ -6017,7 +6256,7 @@ const RSTATE27={expected:['c-maturing','Expected'],earned:['c-payable','Earned']
 function revisedPieceRow27(l){
   const m=RSTATE27[l.rstate]||RSTATE27.expected;
   return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;flex-wrap:wrap;border-top:1px dashed var(--line)">
-    <span style="min-width:118px"><span class="type-tag" style="background:#eef1f6;color:var(--navy)">Payment ${l.piece} of 2</span></span>
+    <span style="min-width:118px"><span class="type-tag" style="background:#eef1f6;color:var(--navy)">${esc(l.label||`Payment ${l.piece} of 2`)}</span></span>
     <b class="mono" style="min-width:72px;text-align:right">${fmt2(l.amount)}</b>
     <span style="flex:1;min-width:130px;color:var(--muted);font-size:12px">${esc(l.note)}</span>
     <span class="chip ${m[0]}" style="font-size:9px">${m[1]}</span></div>`;
@@ -6165,10 +6404,10 @@ function viewAgreement27(id){
   const d=x=>x?esc(String(x).slice(0,10)):'—'; const row=(k,v)=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px dashed var(--line)"><span style="color:var(--muted)">${k}</span><b style="text-align:right">${v}</b></div>`;
   let comm='';
   if(c.revised&&c.revisedCalc){ const ls=revisedQuarterLines27(a,c); const tr=c.tranches||{};
-    comm=`<div style="display:flex;justify-content:space-between;align-items:baseline"><span>Total commission</span><b style="font-size:20px">${fmt2(Number(c.revisedCalc.totalCents)/100)}</b></div>
+    comm=`<div style="display:flex;justify-content:space-between;align-items:baseline"><span>Total commission</span><b style="font-size:20px">${fmt2(c.hybridTotal!=null?c.hybridTotal:Number(c.revisedCalc.totalCents)/100)}</b></div>
      <table style="width:100%;font-size:12.5px;margin-top:8px"><thead><tr><th style="text-align:left">Payment</th><th class="num">Amount</th><th>Status</th><th style="text-align:left">What it's waiting on</th></tr></thead><tbody>
-     ${ls.map(l=>{ const t=l.piece===1?tr.t1:tr.t2; const m=RSTATE27[l.rstate]; const waits=l.rstate==='expected'?((t&&t.conditions)||[]).map(friendlyCond27).map(esc).join('<br>')||esc(l.note):esc(l.note);
-       return `<tr><td style="white-space:nowrap">Payment ${l.piece} of 2</td><td class="num mono">${fmt2(l.amount)}</td><td><span class="chip ${m[0]}" style="font-size:9px">${m[1]}</span></td><td style="white-space:normal">${waits}</td></tr>`; }).join('')}</tbody></table>
+     ${ls.map(l=>{ const t=l.t||(l.piece===1?tr.t1:tr.t2); const m=RSTATE27[l.rstate]; const waits=l.rstate==='expected'?((t&&t.conditions)||[]).map(friendlyCond27).map(esc).join('<br>')||esc(l.note):esc(l.note);
+       return `<tr><td style="white-space:nowrap">${esc(l.label||`Payment ${l.piece} of 2`)}</td><td class="num mono">${fmt2(l.amount)}</td><td><span class="chip ${m[0]}" style="font-size:9px">${m[1]}</span></td><td style="white-space:normal">${waits}</td></tr>`; }).join('')}</tbody></table>
      <div class="qctx" style="margin-top:6px">Payment 1 is earned when the first invoice is paid. Payment 2 is earned three months after first billing, with the account active and every invoice due by then paid.</div>`;
   } else if(c.planNotConfigured||c.blockedReason){ comm=`<div style="color:var(--orange)">${esc(plainText27(c.blockedReason||c.planReason||'Plan not configured'))}</div>`; }
   else { comm=`${row('Initial commission',fmt2(c.initialCommission||0))}${c.holdbackCommission?row('Deferred piece',fmt2(c.holdbackCommission)+(c.holdbackQI!=null?' · '+qLabel(c.holdbackQI):'')):''}${c.renewalCommission?row('Renewal commission',fmt2(c.renewalCommission)):''}<div class="qctx" style="margin-top:6px">Sold before the revised plan — paid under the plan it was sold on.</div>`; }
@@ -6227,6 +6466,93 @@ async function firstSignInChecks27(){
   const start=()=>{ fix(document.body); mo.observe(document.body,{childList:true,subtree:true,characterData:true}); };
   if(document.body)start(); else document.addEventListener('DOMContentLoaded',start);
 })();
+
+/* ---------------- Renewals page: contract terms from Vista, renewal type, update from Vista, Q3+ events (P1RMR-60) ---------------- */
+let TERMS27_FILTER={q:'',show:'all'};
+function termRows27(){
+  return scopedAgreements().filter(a=>isLiveAgreement(a)&&a.agreement_number).map(a=>{ const tl=tlFor(a); return {a,tl}; });
+}
+function proposedChanges27(a,tl){
+  if(!tl)return null; const ch={}; const d=x=>x?String(x).slice(0,10):null;
+  if(d(a.original_sale_date)!==tl.originalStart) ch.original_sale_date=[d(a.original_sale_date),tl.originalStart];
+  if(tl.live){ const cur=tl.current;
+    if(d(a.term_start)!==cur.start) ch.term_start=[d(a.term_start),cur.start];
+    if(d(a.term_end)!==cur.end) ch.term_end=[d(a.term_end),cur.end];
+    if(cur.months&&(+a.contract_term||0)!==cur.months) ch.contract_term=[+a.contract_term||0,cur.months];
+    const ty=tl.currentType; if((a.agreement_type||'')!==ty||!!a.autorenew!==(ty==='auto')) ch.agreement_type=[a.agreement_type||'—',ty]; }
+  const flags=[];
+  if(!tl.live&&!isEnded(a)) flags.push(`Ended in Vista ${tl.endedDate||''} — still live here. Check, then set the end date on the agreement.`);
+  if(tl.live&&tl.currentRate!=null&&Math.abs(tl.currentRate-(+a.monthly_rmr||0))>0.6) flags.push(`Vista rate ${fmt2(tl.currentRate)}/mo vs ${fmt2(+a.monthly_rmr||0)}/mo here — check the agreement price.`);
+  return {ch,flags};
+}
+function eventStatus27(p){
+  if(p.override)return {k:'paid',t:'Paid before tracking'};
+  if(p.evRow)return {k:'rec',t:'Recorded'};
+  if(p.blocked)return {k:'block',t:p.blocked};
+  if(p.noPay)return {k:'none',t:'No increase — nothing pays'};
+  if(p.calc&&p.calc.totalCents===0n)return {k:'none',t:p.calc.gate&&p.calc.gate.mult&&p.calc.gate.mult.n===0n?'Below the 45% margin floor — pays $0':'Pays $0'};
+  return {k:'ready',t:'Ready to record'};
+}
+function renderTerms27(){
+  const host=$('view-renewals'); if(!host||!P27.ready||!isTeam27())return;
+  let el=$('terms27'); if(!el){ el=document.createElement('div'); el.id='terms27'; host.insertBefore(el,host.firstChild); }
+  const ready=termsReady27(); const rows=ready?termRows27():[];
+  const retro=scopedAgreements().some(a=>retroVersion27(a.owner_email));
+  // the old renewal screens assume the historical plans; once Hybrid v2 covers the book they would contradict it
+  [...host.children].forEach(c=>{ if(c!==el) c.style.display=(retro&&ready)?'none':''; });
+  if(!ready){ el.innerHTML=`<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Contract terms &amp; renewals from Vista</h2></div><div class="admin-body" style="font-size:13px">Run <b>migration_v27_terms_renewals.sql</b>, then import the <b>SM Agreement List</b> on Vista imports (tick all five status boxes). The tool then reads each agreement's original start, every renewal and rate change, and the current term.</div></div>`; return; }
+  const today=E27.businessToday(); const ov=scopedAgreements().map(overrideOf27).find(Boolean);
+  const changes=rows.map(r=>({...r,pc:proposedChanges27(r.a,r.tl)})).filter(r=>r.pc&&(Object.keys(r.pc.ch).length||r.pc.flags.length));
+  const toApply=changes.filter(r=>Object.keys(r.pc.ch).length);
+  const evs=[]; scopedAgreements().forEach(a=>{ (pricedEvents27(a)||[]).forEach(p=>{ if(!p.override&&p.e.date) evs.push(p); }); });
+  evs.sort((x,y)=>String(x.date).localeCompare(String(y.date)));
+  const toRecord=evs.filter(p=>eventStatus27(p).k==='ready');
+  const canEdit=can('editAgreements'), canRec=can('verifyEvidence');
+  const q=TERMS27_FILTER.q.toLowerCase();
+  const list=rows.filter(r=>!q||String(r.a.agreement_number).includes(q)||String(r.a.customer_name||'').toLowerCase().includes(q))
+    .filter(r=>TERMS27_FILTER.show==='all'||(TERMS27_FILTER.show==='soon'&&r.tl&&r.tl.live&&r.tl.current.end&&E27.daysBetween(today,r.tl.current.end)<=120)||(TERMS27_FILTER.show==='manual'&&r.tl&&r.tl.currentType==='manual')||(TERMS27_FILTER.show==='nov'&&!r.tl))
+    .sort((x,y)=>String(x.tl&&x.tl.current.end||'9999').localeCompare(String(y.tl&&y.tl.current.end||'9999')));
+  const dfmt=x=>x?fmtD27(x):'—'; const chip=(k,t)=>`<span class="chip ${k}" style="font-size:9px">${esc(t)}</span>`;
+  const kindTxt=p=>KIND_LABEL27[p.e.kind]+(p.e.kind==='renewal'?` (${p.e.renewalType})`:'');
+  const amt=p=>p.calc&&!p.noPay?fmt2(Number(p.evRow?p.evRow.total_cents:p.calc.totalCents)/100):'—';
+  const stCls={paid:'c-paid',rec:'c-paid',ready:'c-payable',block:'c-held',none:''};
+  el.innerHTML=`<div class="panel" style="margin-bottom:16px"><div class="panel-head" style="flex-wrap:wrap;gap:8px"><h2>Contract terms &amp; renewals from Vista</h2>
+      <span class="qctx">${rows.filter(r=>r.tl).length} of ${rows.length} agreements read from Vista · ${rows.reduce((s,r)=>s+(r.tl?r.tl.renewals:0),0)} renewals to date${ov?` · everything dated on or before ${fmtD27(ov.through)} is paid (manager override, approved by ${esc(ov.approver)})`:''}</span></div>
+    <div class="admin-body" style="font-size:12.5px">
+      <div class="note27" style="margin-bottom:10px">A 12-month term renews <b>manually</b> and pays the renewal rate on the monthly amount it keeps, plus any increase. Longer terms <b>auto-renew</b> and pay only on an increase, as new money; the amount already commissioned never pays again, and a decrease takes nothing back. Switch the type for the current term with the Renewal selector.</div>
+      ${toApply.length||changes.length?`<details ${toApply.length?'open':''} style="margin-bottom:12px"><summary style="cursor:pointer;font-weight:700">Update agreements from Vista — ${toApply.length} to update${changes.length-toApply.length?` · ${changes.filter(r=>r.pc.flags.length).length} to check`:''}</summary>
+        <div style="max-height:360px;overflow:auto;margin-top:6px"><table style="font-size:12px"><thead><tr><th>Agr #</th><th>Customer</th><th>Changes (now → Vista)</th><th>Check</th></tr></thead><tbody>
+        ${changes.map(r=>`<tr><td>#${esc(r.a.agreement_number)}</td><td>${esc(r.a.customer_name||'')}</td><td style="white-space:normal">${Object.entries(r.pc.ch).map(([k,[f,t]])=>`<div><span class="qctx">${esc({original_sale_date:'Original start',term_start:'Current term start',term_end:'Current term end',contract_term:'Term (months)',agreement_type:'Renewal'}[k]||k)}</span> ${esc(String(f??'—'))} → <b>${esc(String(t??'—'))}</b></div>`).join('')||'—'}</td><td style="white-space:normal;color:var(--orange)">${r.pc.flags.map(esc).join('<br>')}</td></tr>`).join('')}</tbody></table></div>
+        ${canEdit&&toApply.length?`<div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button class="btn-primary" id="tm27apply">Apply ${toApply.length} updates</button><span class="qctx">Writes original start, current term, term length and renewal type. Items to check are not changed.</span></div>`:''}</details>`:''}
+      <details ${toRecord.length?'open':''} style="margin-bottom:12px"><summary style="cursor:pointer;font-weight:700">Commission events after ${ov?fmtD27(ov.through):'the plan start'} — ${evs.length} found · ${toRecord.length} ready to record</summary>
+        <div style="max-height:360px;overflow:auto;margin-top:6px"><table style="font-size:12px"><thead><tr><th>Agr #</th><th>Customer</th><th>Event</th><th>Date</th><th>Monthly rate</th><th>Term</th><th class="num">Commission</th><th>Status</th></tr></thead><tbody>
+        ${evs.map(p=>{ const st=eventStatus27(p); return `<tr><td>#${esc(p.a.agreement_number)}</td><td>${esc(p.a.customer_name||'')}</td><td>${esc(kindTxt(p))}</td><td>${dfmt(p.date)}</td><td class="mono">${p.e.prior!=null?fmt2(p.e.prior)+' → ':''}${p.e.next!=null?fmt2(p.e.next):'—'}</td><td>${p.term||'—'} mo</td><td class="num mono">${amt(p)}</td><td style="white-space:normal">${chip(stCls[st.k]||'',st.k==='block'?'Blocked':st.t)}${st.k==='block'?`<div class="qctx">${esc(plainText27(st.t))}</div>`:''}${p.calc&&p.calc.gate&&p.calc.gate.mult&&p.calc.gate.mult.n===0n?'<div class="qctx">Below the margin floor — pays $0</div>':''}</td></tr>`; }).join('')||'<tr><td colspan="8" class="empty">None.</td></tr>'}</tbody></table></div>
+        ${canRec&&toRecord.length?`<div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button class="btn-primary" id="tm27rec">Record ${toRecord.length} events</button><span class="qctx">Locks each calculation as an immutable event. Each pays in two parts once the customer pays (Payouts).</span></div>`:''}</details>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px"><input id="tm27q" class="cfg-in" placeholder="Search customer / #" style="width:180px;font-size:12px" value="${esc(TERMS27_FILTER.q)}">
+        <select id="tm27show" class="cfg-in" style="font-size:12px">${[['all','All agreements'],['soon','Term ends within 120 days'],['manual','Manual renewals'],['nov','Not found in Vista']].map(([v,l])=>`<option value="${v}" ${TERMS27_FILTER.show===v?'selected':''}>${l}</option>`).join('')}</select><span class="qctx">${list.length} shown</span></div>
+      <div style="max-height:520px;overflow:auto"><table style="font-size:12px"><thead><tr><th>Agr #</th><th>Customer</th><th>Original start</th><th class="num">Renewals</th><th>Current term</th><th>Renewal</th><th class="num">Monthly (Vista)</th><th>Last change</th></tr></thead><tbody>
+      ${list.map(({a,tl})=>{ if(!tl)return `<tr><td>#${esc(a.agreement_number)}</td><td>${esc(a.customer_name||'')}</td><td colspan="6" class="qctx">Not in the Vista Agreement List import.</td></tr>`;
+        const cur=tl.current; const last=[...tl.events].reverse().find(e=>e.kind!=='new_sale'&&e.date<=today); const sw=a.renewal_type_override&&String(a.renewal_override_term_start||'').slice(0,10)===cur.start;
+        const sel=canEdit&&tl.live?`<select class="cfg-in" style="font-size:11.5px" data-rtype27="${a.id}" data-ts="${esc(cur.start)}" data-rule="${tl.ruleType}"><option value="manual" ${tl.currentType==='manual'?'selected':''}>Manual</option><option value="auto" ${tl.currentType==='auto'?'selected':''}>Auto</option></select>`:esc(tl.currentType);
+        return `<tr><td>#${esc(a.agreement_number)}</td><td>${esc(a.customer_name||'')}</td><td>${dfmt(tl.originalStart)}</td><td class="num">${tl.renewals}</td><td>${tl.live?`${dfmt(cur.start)} – ${dfmt(cur.end)} <span class="qctx">${cur.months||'—'} mo</span>`:`<span style="color:var(--held)">Ended ${dfmt(tl.endedDate)}</span>`}</td><td>${sel}${sw?'<div class="qctx">switched for this term</div>':''}</td><td class="num mono">${tl.currentRate!=null?fmt2(tl.currentRate):'—'}</td><td>${last?`${esc(KIND_LABEL27[last.kind])} ${dfmt(last.date)}${last.prior!=null&&last.next!=null&&Math.abs(last.next-last.prior)>0.04?` <span class="qctx">${fmt2(last.prior)} → ${fmt2(last.next)}</span>`:''}`:'—'}</td></tr>`; }).join('')}</tbody></table></div>
+    </div></div>`;
+  $('tm27q').oninput=e=>{ TERMS27_FILTER.q=e.target.value; clearTimeout(window.__tm27t); window.__tm27t=setTimeout(()=>{ renderTerms27(); const i=$('tm27q'); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } },250); };
+  $('tm27show').onchange=e=>{ TERMS27_FILTER.show=e.target.value; renderTerms27(); };
+  el.querySelectorAll('[data-rtype27]').forEach(s=>s.onchange=async()=>{ const a=AGREEMENTS.find(x=>String(x.id)===s.dataset.rtype27); if(!a)return; const v=s.value, rule=s.dataset.rule;
+    const patch={renewal_type_override:v===rule?null:v,renewal_override_term_start:v===rule?null:s.dataset.ts,agreement_type:v,autorenew:v==='auto',updated_at:new Date().toISOString()};
+    const {error}=await sb.from('rmr_agreements').update(patch).eq('id',a.id); if(error){ toast(/renewal_type_override|column/i.test(error.message)?'Run migration_v27_terms_renewals.sql first.':error.message); renderTerms27(); return; }
+    audit('Renewal type switched','Agreement',a.agreement_number,{agreement_type:a.agreement_type,renewal_type_override:a.renewal_type_override||null},patch,`Current term from ${s.dataset.ts}`); Object.assign(a,patch); indexTerms27(); toast(`#${a.agreement_number} set to ${v} renewal for this term`); renderTerms27(); });
+  if($('tm27apply')) $('tm27apply').onclick=async()=>{ const b=$('tm27apply'); b.disabled=true; b.textContent='Updating…'; let n=0, errs=[];
+    for(const r of toApply){ const patch={}; Object.entries(r.pc.ch).forEach(([k,[,t]])=>{ if(k==='agreement_type'){ patch.agreement_type=t; patch.autorenew=t==='auto'; } else patch[k]=t; }); patch.updated_at=new Date().toISOString();
+      const before={}; Object.keys(patch).forEach(k=>before[k]=r.a[k]??null);
+      const {error}=await sb.from('rmr_agreements').update(patch).eq('id',r.a.id); if(error){ errs.push(`#${r.a.agreement_number}: ${error.message}`); continue; }
+      audit('Agreement updated from Vista terms','Agreement',r.a.agreement_number,before,patch,'Vista SM Agreement List'); Object.assign(r.a,patch); n++; }
+    indexTerms27(); toast(errs.length?`${n} updated · ${errs.length} failed: ${errs[0]}`:`${n} agreements updated from Vista`); renderTerms27(); };
+  if($('tm27rec')) $('tm27rec').onclick=async()=>{ const b=$('tm27rec'); b.disabled=true; b.textContent='Recording…'; let n=0, errs=[];
+    for(const p of toRecord){ const r=await recordHybridEvent27(p.a,p); if(r.error) errs.push(`#${p.a.agreement_number}: ${r.error}`); else n++; }
+    await load27(); render(); toast(errs.length?`${n} recorded · ${errs.length} not recorded: ${errs[0]}`:`${n} commission events recorded`); };
+}
+(function hookRenewals27(){ const orig=window.renderRenewals; if(typeof orig!=='function')return; window.renderRenewals=function(){ const r=orig.apply(this,arguments); try{ renderTerms27(); }catch(e){ console.error(e); } return r; }; })();
 
 /* ===================================================================================================
    Layout B shell (P1RMR-58): side menu, page header, Today, Payouts in five steps with the printed
@@ -6411,7 +6737,7 @@ function packetFor27(run,groups){
   const me=lc27(CURRENT_EMAIL);
   const items=ready.map(i=>{ const owner=lc27(i.owner||i.a.owner_email);
     const handVerified=owner===me&&(P27.verifs||[]).some(v=>String(v.agreement_id)===String(i.a.id)&&MANUAL_SOURCES27.includes(v.source)&&lc27(v.verified_by)===me);
-    const piece=i.adjustment?'Adjustment':i.revised?`Payment ${i.tranche} of 2`:String(i.label).replace(/\b\w/,c=>c.toUpperCase());
+    const piece=i.adjustment?'Adjustment':i.revised?(i.label||`Payment ${i.tranche} of 2`):String(i.label).replace(/\b\w/,c=>c.toUpperCase());
     const ed=(/Earned (\d{4}-\d{2}-\d{2})/.exec(i.reason||'')||[])[1];
     const why=i.adjustment?`${i.adjustment.reason||'Adjustment'} · approved by ${nameOf27(i.adjustment.approver)}`:i.revised&&ed?(i.tranche===1?`First invoice paid ${fmtD27(ed)}`:`Three months after first billing, invoices paid · ${fmtD27(ed)}`)+(handVerified?' · verified by hand':' · Vista receipt'):plainText27(i.reason||'');
     return {agreement_id:i.a.id,agreement:String(i.a.agreement_number||''),customer:i.a.customer_name||'',owner:owner,rep:nameOf27(owner),piece,label:i.label,amount:i.amount,cents:Math.round(i.amount*100),why,flag:handVerified}; });
@@ -6544,7 +6870,7 @@ async function recordApproval27(S,m){
   const {data,error}=await sb.from('rmr_payout_runs').insert(row).select();
   if(error){ try{ await sb.storage.from(FILE_BUCKET).remove([path]); }catch(_){} throw new Error(/duplicate|unique/i.test(error.message)?'This quarter was already approved.':error.message); }
   const runId=data[0].id; const entries=[];
-  ready.filter(i=>i.revised).forEach(i=>{ const ev=committedEventsFor(i.a).slice(-1)[0]; if(!ev)return; const t=compute(i.a).tranches; const tt=t&&(i.tranche===1?t.t1:t.t2);
+  ready.filter(i=>i.revised).forEach(i=>{ const ev=i.evRow||committedEventsFor(i.a).slice(-1)[0]; if(!ev)return; const tt={earnedDate:i.earnedDate};
     (ev.snapshot.shares||[]).forEach(s=>entries.push({entry_uid:`${ev.event_uid}|T${i.tranche}|earned|${s.email}`,event_uid:ev.event_uid,tranche:i.tranche,stage:'earned',recipient_email:s.email,amount_cents:Number(i.tranche===1?s.t1Cents:s.t2Cents),earned_date:tt?tt.earnedDate:null,verified_at:new Date().toISOString(),evidence:{conditions:'met',basis:tt&&tt.dateBasis||null},actor:CURRENT_EMAIL}));
     (ev.snapshot.shares||[]).forEach(s=>entries.push({entry_uid:`${ev.event_uid}|T${i.tranche}|payable|${s.email}`,event_uid:ev.event_uid,tranche:i.tranche,stage:'payable',recipient_email:s.email,amount_cents:Number(i.tranche===1?s.t1Cents:s.t2Cents),payout_run_id:runId,approver:m.by,actor:CURRENT_EMAIL})); });
   ready.filter(i=>i.adjustment).forEach(i=>{ const x=i.adjustment; entries.push({entry_uid:String(x.entry_uid).replace('|adjustment|','|payable|'),event_uid:x.event_uid,tranche:null,stage:'payable',recipient_email:x.recipient_email,amount_cents:x.amount_cents,payout_run_id:runId,reason:x.reason,approver:m.by,actor:CURRENT_EMAIL}); });
@@ -6721,7 +7047,7 @@ function renderImports27(){
 function myLines27(){
   const out=[];
   scopedAgreements().forEach(a=>{ let c; try{ c=compute(a); }catch(_){ return; }
-    if(c.revised&&c.revisedCalc){ revisedQuarterLines27(a,c).forEach(l=>out.push({a,piece:l.piece,label:`Payment ${l.piece} of 2`,amount:l.amount,qi:l.qi,state:l.rstate==='approved'?'earned':l.rstate,rstate:l.rstate,note:l.rstate==='paid'?'Paid on payroll':l.rstate==='approved'?'Approved — on the next payroll':l.rstate==='earned'?`Earned ${fmtD27(String(l.note).replace(/^earned /,''))} — in the next payout`:l.note})); return; }
+    if(c.revised&&(c.revisedCalc||pricedEvents27(a))){ revisedQuarterLines27(a,c).forEach(l=>out.push({a,piece:l.piece,label:l.label||`Payment ${l.piece} of 2`,amount:l.amount,qi:l.qi,state:l.rstate==='approved'?'earned':l.rstate,rstate:l.rstate,note:l.override?l.note:l.rstate==='paid'?'Paid on payroll':l.rstate==='approved'?'Approved — on the next payroll':l.rstate==='earned'?`Earned ${fmtD27(String(l.note).replace(/^earned /,''))} — in the next payout`:l.note})); return; }
     const push=(type,flag,qi)=>{ if(qi==null)return; const f=frozenAmount(a,type); if(!(f.amount>0))return; out.push({a,piece:type,label:type==='holdback'?'Deferred piece':'Initial piece',amount:f.amount,qi,state:a[flag]?'paid':(qi<=CUR_QI?'earned':'expected'),rstate:a[flag]?'paid':'expected',note:a[flag]?'paid':'historical plan'}); };
     if(c.legacyFull) push('initial','paid_initial',c.initialQI); else { push('immediate','paid_immediate',c.initialQI); push('holdback','paid_holdback',c.holdbackQI); }
   });

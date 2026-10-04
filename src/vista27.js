@@ -104,7 +104,7 @@ function parseGrouped(feed,rows){
         const st=cellText(row[10]); if(!STAT.test(st))return fail(`Could not read the revision status on data row ${r+1} ("${st}") — the SM Agreement List layout has changed. Nothing was imported.`);
         const rec={agreement_number:ag,revision:String(row[0]),previous_revision:row[9]!=null&&String(row[9]).trim()!==''?String(row[9]):null,status:st,
           effective_date:toIsoDate(row[1]),activated_date:toIsoDate(row[2]),cancelled_date:toIsoDate(row[3]),terminated_date:toIsoDate(row[4]),expiration_date:toIsoDate(row[5]),
-          term_price:toMoney(row[6]),customer:cust,description:desc,
+          term_price:toMoney(row[6]),amount_billed:toMoney(row[8]),customer:cust,description:desc,
           term_start:term?term.start:null,term_end:term?term.end:null,term_status:term?term.status:null,term_total_price:term&&term.price!=null&&term.price!==undefined?term.price:null};
         for(const [k,v] of Object.entries(rec)){ if(v===undefined)return fail(`Could not read "${k.replace(/_/g,' ')}" on data row ${r+1}. Nothing was imported.`); }
         rec.term_key=rec.agreement_number+'|'+rec.revision; if(seen.has(rec.term_key)){dupes++;continue;} seen.add(rec.term_key); out.push(rec); }

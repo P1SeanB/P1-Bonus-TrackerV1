@@ -181,7 +181,7 @@ function packetFor27(run,groups){
   const me=lc27(CURRENT_EMAIL);
   const items=ready.map(i=>{ const owner=lc27(i.owner||i.a.owner_email);
     const handVerified=owner===me&&(P27.verifs||[]).some(v=>String(v.agreement_id)===String(i.a.id)&&MANUAL_SOURCES27.includes(v.source)&&lc27(v.verified_by)===me);
-    const piece=i.adjustment?'Adjustment':i.revised?`Payment ${i.tranche} of 2`:String(i.label).replace(/\b\w/,c=>c.toUpperCase());
+    const piece=i.adjustment?'Adjustment':i.revised?(i.label||`Payment ${i.tranche} of 2`):String(i.label).replace(/\b\w/,c=>c.toUpperCase());
     const ed=(/Earned (\d{4}-\d{2}-\d{2})/.exec(i.reason||'')||[])[1];
     const why=i.adjustment?`${i.adjustment.reason||'Adjustment'} · approved by ${nameOf27(i.adjustment.approver)}`:i.revised&&ed?(i.tranche===1?`First invoice paid ${fmtD27(ed)}`:`Three months after first billing, invoices paid · ${fmtD27(ed)}`)+(handVerified?' · verified by hand':' · Vista receipt'):plainText27(i.reason||'');
     return {agreement_id:i.a.id,agreement:String(i.a.agreement_number||''),customer:i.a.customer_name||'',owner:owner,rep:nameOf27(owner),piece,label:i.label,amount:i.amount,cents:Math.round(i.amount*100),why,flag:handVerified}; });
@@ -314,7 +314,7 @@ async function recordApproval27(S,m){
   const {data,error}=await sb.from('rmr_payout_runs').insert(row).select();
   if(error){ try{ await sb.storage.from(FILE_BUCKET).remove([path]); }catch(_){} throw new Error(/duplicate|unique/i.test(error.message)?'This quarter was already approved.':error.message); }
   const runId=data[0].id; const entries=[];
-  ready.filter(i=>i.revised).forEach(i=>{ const ev=committedEventsFor(i.a).slice(-1)[0]; if(!ev)return; const t=compute(i.a).tranches; const tt=t&&(i.tranche===1?t.t1:t.t2);
+  ready.filter(i=>i.revised).forEach(i=>{ const ev=i.evRow||committedEventsFor(i.a).slice(-1)[0]; if(!ev)return; const tt={earnedDate:i.earnedDate};
     (ev.snapshot.shares||[]).forEach(s=>entries.push({entry_uid:`${ev.event_uid}|T${i.tranche}|earned|${s.email}`,event_uid:ev.event_uid,tranche:i.tranche,stage:'earned',recipient_email:s.email,amount_cents:Number(i.tranche===1?s.t1Cents:s.t2Cents),earned_date:tt?tt.earnedDate:null,verified_at:new Date().toISOString(),evidence:{conditions:'met',basis:tt&&tt.dateBasis||null},actor:CURRENT_EMAIL}));
     (ev.snapshot.shares||[]).forEach(s=>entries.push({entry_uid:`${ev.event_uid}|T${i.tranche}|payable|${s.email}`,event_uid:ev.event_uid,tranche:i.tranche,stage:'payable',recipient_email:s.email,amount_cents:Number(i.tranche===1?s.t1Cents:s.t2Cents),payout_run_id:runId,approver:m.by,actor:CURRENT_EMAIL})); });
   ready.filter(i=>i.adjustment).forEach(i=>{ const x=i.adjustment; entries.push({entry_uid:String(x.entry_uid).replace('|adjustment|','|payable|'),event_uid:x.event_uid,tranche:null,stage:'payable',recipient_email:x.recipient_email,amount_cents:x.amount_cents,payout_run_id:runId,reason:x.reason,approver:m.by,actor:CURRENT_EMAIL}); });
@@ -491,7 +491,7 @@ function renderImports27(){
 function myLines27(){
   const out=[];
   scopedAgreements().forEach(a=>{ let c; try{ c=compute(a); }catch(_){ return; }
-    if(c.revised&&c.revisedCalc){ revisedQuarterLines27(a,c).forEach(l=>out.push({a,piece:l.piece,label:`Payment ${l.piece} of 2`,amount:l.amount,qi:l.qi,state:l.rstate==='approved'?'earned':l.rstate,rstate:l.rstate,note:l.rstate==='paid'?'Paid on payroll':l.rstate==='approved'?'Approved — on the next payroll':l.rstate==='earned'?`Earned ${fmtD27(String(l.note).replace(/^earned /,''))} — in the next payout`:l.note})); return; }
+    if(c.revised&&(c.revisedCalc||pricedEvents27(a))){ revisedQuarterLines27(a,c).forEach(l=>out.push({a,piece:l.piece,label:l.label||`Payment ${l.piece} of 2`,amount:l.amount,qi:l.qi,state:l.rstate==='approved'?'earned':l.rstate,rstate:l.rstate,note:l.override?l.note:l.rstate==='paid'?'Paid on payroll':l.rstate==='approved'?'Approved — on the next payroll':l.rstate==='earned'?`Earned ${fmtD27(String(l.note).replace(/^earned /,''))} — in the next payout`:l.note})); return; }
     const push=(type,flag,qi)=>{ if(qi==null)return; const f=frozenAmount(a,type); if(!(f.amount>0))return; out.push({a,piece:type,label:type==='holdback'?'Deferred piece':'Initial piece',amount:f.amount,qi,state:a[flag]?'paid':(qi<=CUR_QI?'earned':'expected'),rstate:a[flag]?'paid':'expected',note:a[flag]?'paid':'historical plan'}); };
     if(c.legacyFull) push('initial','paid_initial',c.initialQI); else { push('immediate','paid_immediate',c.initialQI); push('holdback','paid_holdback',c.holdbackQI); }
   });

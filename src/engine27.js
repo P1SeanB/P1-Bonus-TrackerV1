@@ -167,8 +167,13 @@ function calculate(input){
   const renewalMult=dec(isSla?(cfg.slaRenewalMult!=null?cfg.slaRenewalMult:cfg.renewalMult):cfg.renewalMult);
   let components=[];
   const et=input.eventType;
-  if(et==='auto_renewal'||et==='escalation'){
-    components.push({label:et==='auto_renewal'?'Auto-renewal (COM-04)':'Contractual escalation (COM-04)',basis:ZERO,mult:ZERO,amount:ZERO});
+  if(et==='auto_renewal'||et==='escalation'||et==='rate_increase'){
+    // v1: auto-renewals and escalations pay nothing. From Hybrid v2 (autoRenewalPaysIncrease) only the increase pays, as new money at the
+    // term's new-sale multiple; the amount already commissioned never pays again, and a decrease pays nothing and takes nothing back.
+    if(cfg.autoRenewalPaysIncrease){ const inc=cmp(next,prior)>0?sub(next,prior):ZERO;
+      const tm=cmp(inc,ZERO)>0?termMultiple(cfg,term,isSla?'sla':'new'):{mult:ZERO,source:'no increase'};
+      components.push({label:(et==='auto_renewal'?'Increase at auto-renewal':'Rate increase')+` — new-agreement rate (${tm.source})`,basis:inc,mult:tm.mult,amount:mul(inc,tm.mult)}); }
+    else components.push({label:et==='auto_renewal'?'Auto-renewal (COM-04)':'Contractual escalation (COM-04)',basis:ZERO,mult:ZERO,amount:ZERO});
   } else if(et==='new_sale'||et==='win_back'||et==='sla_new'){
     const tm=termMultiple(cfg,term,isSla?'sla':'new');
     let base=mul(next,tm.mult);

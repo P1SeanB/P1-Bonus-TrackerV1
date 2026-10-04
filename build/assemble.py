@@ -3,7 +3,7 @@ import re
 p='/home/claude/P1-Bonus-TrackerV1/index.html'; s=open(p,encoding='utf-8').read()
 src=lambda f: open('/home/claude/P1-Bonus-TrackerV1/src/'+f,encoding='utf-8').read()
 head_block=('<!--V27-HEAD-->\n<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>\n'
-            '<script>\n'+src('engine27.js')+'\n</script>\n<script>\n'+src('vista27.js')+'\n</script>\n<!--/V27-HEAD-->\n')
+            '<script>\n'+src('engine27.js')+'\n</script>\n<script>\n'+src('vista27.js')+'\n</script>\n<script>\n'+src('renew27.js')+'\n</script>\n<!--/V27-HEAD-->\n')
 if '<!--V27-HEAD-->' in s: s=re.sub(r'<!--V27-HEAD-->.*?<!--/V27-HEAD-->\n',lambda m:head_block,s,flags=re.S)
 else:
     anchor='<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>\n'
@@ -15,7 +15,7 @@ tail_block='</script>\n<script>\n/*V27-UI*/\n'+src('ui27.js')+'\n'+shell+'\n/*/V
 if '/*V27-UI*/' in s: s=re.sub(r'</script>\n<script>\n/\*V27-UI\*/.*?</body>',lambda m:tail_block,s,flags=re.S)
 else:
     old='renderLegend();\nboot();\n</script>\n</body>'; assert s.count(old)==1; s=s.replace(old,tail_block)
-s=s.replace("const APP_VERSION='P1RMR-55';","const APP_VERSION='P1RMR-59 · spec 2.7';")
+s=s.replace("const APP_VERSION='P1RMR-55';","const APP_VERSION='P1RMR-60 · spec 2.7';")
 css='<style id="theme27">\n'+src('theme27.css')+'\n</style>\n'
 if '<style id="theme27">' in s: s=re.sub(r'<style id="theme27">.*?</style>\n',lambda m:css,s,flags=re.S)
 else: assert s.count('</head>')==1; s=s.replace('</head>',css+'</head>')
