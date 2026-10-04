@@ -78,6 +78,19 @@ const SEED={
   await page.click('#pv27'); await page.waitForTimeout(150); await page.click('#pb27'); await page.waitForTimeout(150);
   await page.fill('#pf_eff','2026-10-04'); await page.check('#pf_48'); await page.check('#pf_terms'); await page.click('#pf_go'); await page.waitForTimeout(500);
   ok(await page.evaluate(()=>P27.versions.find(v=>v.id==='v-hyb1').status==='published'),'Hybrid published through the controlled workflow (ADM-06)');
+  // Comp plan per user (Employees) → one-click audited assignment once a published version exists
+  await page.evaluate(()=>renderEmployees27()); await page.waitForTimeout(200);
+  await page.selectOption('[data-cf27="rep@point1.com"]','Hunter'); await page.waitForTimeout(400);
+  ok(await page.evaluate(()=>P27.settings.comp_family['rep@point1.com']==='Hunter'&&/numbers are entered/.test(document.getElementById('emp27').innerText)&&!document.querySelector('[data-cfgo27="rep@point1.com"]')),'comp plan Hunter recorded; no assign while Hunter is a placeholder');
+  await page.selectOption('[data-cf27="rep@point1.com"]','Hybrid'); await page.waitForTimeout(400);
+  await page.click('[data-cfgo27="rep@point1.com"]'); await page.waitForTimeout(400);
+  ok(await page.evaluate(()=>(__DB.rmr_plan_assignments||[]).some(x=>x.email==='rep@point1.com'&&x.plan_version_id==='v-hyb1'&&x.reason==='Comp plan set to Hybrid')),'comp plan Hybrid → explicit Assign creates an audited assignment');
+  await page.evaluate(()=>{ const a=AGREEMENTS.find(x=>x.agreement_number==='201'); openModal(a.id); }); await page.waitForTimeout(200);
+  ok(await page.evaluate(()=>/Comp plan|No comp plan/.test((document.getElementById('ownerPlan27')||{}).innerText||'')),"agreement Deal tab shows the owner's comp plan under Assigned to");
+  await page.evaluate(()=>{ const c=document.querySelector('#mClose,#mCancel'); if(c)c.click(); });
+  await page.evaluate(()=>openGuide()); await page.waitForTimeout(200);
+  ok(await page.evaluate(()=>{ const t=document.getElementById('guide27').innerText; return /\$100\/mo, 36-month/.test(t)&&/\$50\.00 first tranche/.test(t)&&/\$55\.00 total/.test(t)&&/\$72\.00/.test(t); }),'guide worked examples use $100/month');
+  await page.evaluate(()=>document.getElementById('guideScrim').classList.remove('show'));
   await page.evaluate(async()=>{ await sb.from('rmr_plan_assignments').insert({email:'sean.bithell@point1.com',plan_version_id:'v-hyb1',effective_from:'2026-10-04',approved_by:'sean.bithell@point1.com'}); await load27(); });
   const preAck=await page.evaluate(()=>{ const c=compute(AGREEMENTS.find(a=>a.agreement_number==='201')); return {init:c.initialCommission,pv:c.planVersion}; });
   ok(preAck.init===null&&/Acknowledgement/.test(preAck.pv),'no calculation under a published version until acknowledged (COM-07)');

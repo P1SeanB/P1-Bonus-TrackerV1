@@ -752,6 +752,19 @@ function historicalRulesHTML(){
     return `<tr><td><b>${esc(c.planVersion||p.plan_name)}</b><div class="qctx">${esc(String(p.created_at||'').slice(0,10))} · tcv_percent</div></td><td class="mono" style="font-size:11px">${pm(c.newPct)}</td><td class="mono" style="font-size:11px">${pm(c.renewalPct)}</td><td style="font-size:11px">${Math.round((c.immediatePct||0)*100)}/${Math.round((c.holdbackPct||0)*100)} · ${esc(c.releaseMode||'')}</td><td style="font-size:11px">${users.map(esc).join('<br>')||'—'}</td></tr>`; }).join('');
   return `<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>Historical rules — read-only</h2><span class="qctx">evidence for old transactions · not offered for new assignment (CAT-02)</span></div><div class="admin-body"><table class="cfg-table"><thead><tr><th>Version</th><th>New %</th><th>Renewal %</th><th>Split · release</th><th>Owners whose historical transactions read it</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
+/* Comp plan per user: a designation (Hybrid / Hunter / Farmer) kept in rmr_settings.comp_family. It never moves anyone
+   onto a plan by itself (ADM-07); it drives a one-click, audited assignment once that family has a published version. */
+function compFamilyOf(email){ return ((P27.settings.comp_family)||{})[String(email||'').toLowerCase()]||null; }
+function liveVersionOf(fam){ return P27.versions.filter(v=>v.family===fam&&v.status==='published'&&!(v.config&&v.config.placeholder)).sort((a,b)=>b.version_no-a.version_no)[0]||null; }
+function compPlanLine27(email,a){
+  const em=String(email||'').toLowerCase(); if(!em)return '';
+  if(a&&a.id&&!isRevisedTransaction(a))return `Sold before ${REVISED_CUTOVER} — this deal stays on the historical plan it was sold under.`;
+  const r=resolveRevised(em,(a&&eventDateOf(a))||E27.businessToday()); const fam=compFamilyOf(em);
+  if(r.state==='ok')return `Comp plan: <b>${esc(r.version.label)}</b> ✓`;
+  if(r.state==='ack_required')return `Comp plan: <b>${esc(r.version.label)}</b> — <span style="color:var(--held)">waiting on ${esc(em)} to acknowledge the terms</span>`;
+  if(fam){ const lv=liveVersionOf(fam); return `Comp plan: <b>${esc(fam)}</b> — ${lv?'not assigned yet (Admin ▸ Employees)':(P27.versions.some(v=>v.family===fam&&!(v.config&&v.config.placeholder))?'draft, not live yet':'numbers not set yet')}. Commission shows <i>Plan not configured</i> until it is.`; }
+  return `<span style="color:var(--orange)">No comp plan set for ${esc(em)}</span> — set it in Admin ▸ Employees.`;
+}
 async function renderEmployees27(){
   const box=$('emp27'); if(!box)return; const users=P27.users||[]; const today=E27.businessToday();
   const pubs=P27.versions.filter(v=>v.status==='published'&&!(v.config&&v.config.placeholder));
@@ -762,17 +775,38 @@ async function renderEmployees27(){
     const hist=USER_PLAN[em]?(PLANS.find(p=>String(p.id)===String(USER_PLAN[em]))||{}).plan_name:null;
     return `<tr><td>${esc(u.email)}${em===(CURRENT_EMAIL||'').toLowerCase()?' <span class="qctx">(you)</span>':''}</td>
       <td>${can('editConfig')?`<select class="cfg-in" data-prole27="${esc(u.email)}">${PERMISSION_ROLES.map(r=>`<option ${normRole(u.permission_role||u.role)===r?'selected':''}>${r}</option>`).join('')}</select>`:esc(normRole(u.permission_role||u.role))}<div class="qctx">${u.role_migrated_from?'migrated from '+esc(u.role_migrated_from):''}</div></td>
-      <td>${cv?`<b>${esc(cv.family)}</b> · ${esc(cv.label)}<div class="qctx">from ${esc(cur.effective_from)}${cur.effective_to?' to '+esc(cur.effective_to):''} · approved ${esc(cur.approved_by)}</div>`:'<span style="color:var(--orange)">Plan not configured</span>'}${hist?`<div class="qctx">historical: ${esc(hist)}</div>`:''}</td>
+      <td>${(()=>{ const fam=compFamilyOf(em); return can('editConfig')?`<select class="cfg-in" data-cf27="${esc(em)}"><option value="">— not set —</option>${['Hybrid','Hunter','Farmer'].map(f=>`<option value="${f}" ${fam===f?'selected':''}>${f} (${esc(famStatus(f).txt.split(' · ')[0])})</option>`).join('')}</select>`:(fam?esc(fam):'—'); })()}</td>
+      <td>${cv?`<b>${esc(cv.family)}</b> · ${esc(cv.label)}<div class="qctx">from ${esc(cur.effective_from)}${cur.effective_to?' to '+esc(cur.effective_to):''} · approved ${esc(cur.approved_by)}</div>`:'<span style="color:var(--orange)">Plan not configured</span>'}${hist?`<div class="qctx">historical: ${esc(hist)}</div>`:''}${(()=>{
+        const fam=compFamilyOf(em); if(!fam||(cv&&cv.family===fam))return '';
+        const up=asg.find(x=>x.effective_from>today); if(up){ const uv=versionById(up.plan_version_id); return `<div class="qctx">${esc(uv?uv.label:'Next plan')} starts ${esc(up.effective_from)}</div>`; }
+        const lv=liveVersionOf(fam);
+        if(!lv)return `<div class="qctx">${esc(fam)} chosen — ${P27.versions.some(v=>v.family===fam&&!(v.config&&v.config.placeholder))?'assignable once the draft is published':'assignable once its numbers are entered and published'}.</div>`;
+        if(!can('editConfig'))return '';
+        const from=[today,lv.effective_date||today].sort().pop();
+        return `<div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="iconbtn" data-cfgo27="${esc(em)}" data-v="${lv.id}">${cv?'Switch to':'Assign'} ${esc(lv.label)}</button> from <input type="date" class="cfg-in" data-cffrom27="${esc(em)}" value="${from}" min="${lv.effective_date||''}"></div>`; })()}</td>
       <td>${cv?(ack?`<span style="color:var(--payable)">✓ ${esc(String(ack.acknowledged_at).slice(0,10))}</span>`:'<span style="color:var(--held);font-weight:700">Missing — calculation blocked</span>'):'—'}</td>
       <td>${sal?`${fmt(+sal.annual_salary)} <span class="qctx">from ${esc(sal.effective_from)}</span>`:'<span class="qctx">none</span>'}</td></tr>`; };
-  box.innerHTML=`<table class="cfg-table"><thead><tr><th>Employee</th><th>Permission role</th><th>Plan family assignment</th><th>Acknowledgement</th><th>Salary</th></tr></thead><tbody>${users.map(row).join('')}</tbody></table>
+  box.innerHTML=`<table class="cfg-table"><thead><tr><th>Employee</th><th>Permission role</th><th>Comp plan</th><th>Plan assignment</th><th>Acknowledgement</th><th>Salary</th></tr></thead><tbody>${users.map(row).join('')}</tbody></table>
    ${can('editConfig')?`<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12.5px"><b>Assign plan:</b>
      <select class="cfg-in" id="as_em">${users.map(u=>`<option>${esc(u.email)}</option>`).join('')}</select>
      <select class="cfg-in" id="as_v">${pubs.length?pubs.map(v=>`<option value="${v.id}">${esc(v.family)} · ${esc(v.label)} (from ${esc(v.effective_date)})</option>`).join(''):'<option value="">No published version — Hunter and Farmer cannot be assigned</option>'}</select>
      from <input type="date" class="cfg-in" id="as_from"> to <input type="date" class="cfg-in" id="as_to" title="optional, end-exclusive"> <input class="cfg-in" id="as_why" placeholder="Reason (reviewed mapping, MIG-06)"> <button class="iconbtn" id="as_go" ${pubs.length?'':'disabled'}>Approve assignment</button></div>
      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12.5px"><b>Salary record:</b> <select class="cfg-in" id="sl_em">${users.map(u=>`<option>${esc(u.email)}</option>`).join('')}</select> <input type="number" class="cfg-in" id="sl_amt" placeholder="Annual base" step="1000"> from <input type="date" class="cfg-in" id="sl_from"> <button class="iconbtn" id="sl_go">Add</button></div>
      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12.5px"><b>Add employee:</b> <input class="cfg-in" id="nu_em" placeholder="name@point1.com"> <select class="cfg-in" id="nu_role">${PERMISSION_ROLES.map(r=>`<option ${r==='Representative'?'selected':''}>${r}</option>`).join('')}</select> <button class="iconbtn" id="nu_go">Add / update</button></div>
-     <div class="qctx" style="margin-top:6px">No one is moved onto a plan automatically (ADM-07, MIG-06). Hunter and Farmer are rejected for assignment by the database while they are placeholders. A countersigned copy of the plan can be attached later; the in-app acknowledgement is stored immutably with the exact text shown.</div>`:''}`;
+     <div class="qctx" style="margin-top:6px"><b>Comp plan</b> records which plan each person is on; it never moves anyone by itself (ADM-07, MIG-06) — once that plan has a published version, the Assign button appears and the person acknowledges the terms at next sign-in. Hunter and Farmer are rejected for assignment by the database while they are placeholders. A countersigned copy of the plan can be attached later; the in-app acknowledgement is stored immutably with the exact text shown.</div>`:''}`;
+  box.querySelectorAll('[data-cf27]').forEach(s=>s.onchange=async()=>{ const em=s.dataset.cf27; const before=P27.settings.comp_family||{}; const map={...before}; if(s.value)map[em]=s.value; else delete map[em];
+    const {error}=await sb.from('rmr_settings').upsert([{key:'comp_family',value:map,updated_by:CURRENT_EMAIL,updated_at:new Date().toISOString()}],{onConflict:'key'}); if(error){toast(error.message);return;}
+    audit('Comp plan set','Admin',em,{comp_family:before[em]||null},{comp_family:s.value||null},null); await load27(); renderEmployees27(); toast(s.value?`${em} set to ${s.value}`:'Comp plan cleared'); });
+  box.querySelectorAll('[data-cfgo27]').forEach(b=>b.onclick=async()=>{ const em=b.dataset.cfgo27, v=versionById(b.dataset.v); const from=(box.querySelector(`[data-cffrom27="${em}"]`)||{}).value;
+    if(!v||!from){toast('Pick a start date');return;} if(v.effective_date&&from<v.effective_date){toast('Cannot start before '+v.effective_date);return;}
+    const cur=P27.assignments.find(x=>String(x.email).toLowerCase()===em&&(!x.effective_to||x.effective_to>from)&&x.effective_from<from);
+    const clash=P27.assignments.find(x=>String(x.email).toLowerCase()===em&&x.effective_from>=from);
+    if(clash){toast('This employee already has an assignment starting on or after that date');return;}
+    if(cur){ const {error}=await sb.from('rmr_plan_assignments').update({effective_to:from}).eq('id',cur.id); if(error){toast(error.message);return;} }
+    const row={email:em,plan_version_id:v.id,effective_from:from,effective_to:null,approved_by:CURRENT_EMAIL,reason:`Comp plan set to ${v.family}`};
+    const {error}=await sb.from('rmr_plan_assignments').insert(row);
+    if(error){ if(cur) await sb.from('rmr_plan_assignments').update({effective_to:cur.effective_to||null}).eq('id',cur.id); toast(error.message); return; }
+    audit('Plan assignment approved','Admin',em,cur?{plan_version_id:cur.plan_version_id,effective_to:cur.effective_to||null}:null,row,row.reason); await load27(); renderEmployees27(); toast(`${em} assigned to ${v.label} from ${from}`); });
   box.querySelectorAll('[data-prole27]').forEach(s=>s.onchange=async()=>{ const {error}=await sb.from('rmr_users').update({permission_role:s.value}).eq('email',s.dataset.prole27); if(error){toast(error.message);return;} audit('Permission role changed','Admin',s.dataset.prole27,null,{permission_role:s.value},null); toast('Permission role updated'); await load27(); });
   if($('as_go')) $('as_go').onclick=async()=>{ const row={email:$('as_em').value.toLowerCase(),plan_version_id:$('as_v').value,effective_from:$('as_from').value,effective_to:$('as_to').value||null,approved_by:CURRENT_EMAIL,reason:$('as_why').value.trim()||null};
     if(!row.effective_from){toast('Pick the assignment start date');return;} const v=versionById(row.plan_version_id); if(v&&row.effective_from<v.effective_date){toast('Assignment cannot start before the version is effective ('+v.effective_date+')');return;}
@@ -866,13 +900,14 @@ function guide27HTML(fam){
     Farmer:`Farmer is the account-management role — renewing and growing existing customers.${c.allocation?` Role split: ${pc(c.allocation.hunter,0)} acquisition, ${pc(c.allocation.farmer,0)} account management.`:''}`}[fam];
   // ---- examples (display only; the engine computes the authoritative amounts in exact decimals)
   const m36=num(nm[36]);
-  const ex1=m36==null?`A $1,000/mo, 36-month deal at or above the margin floor earns $1,000 × ${U} = ${U}.`
-    :`A <b>$1,000/mo, 36-month</b> deal at or above the margin floor earns $1,000 × ${xm(m36)} = <b>${usd(1000*m36)}</b>${t1!=null&&t2!=null?` — <b>${usd(1000*m36*t1)}</b> first tranche and <b>${usd(1000*m36-1000*m36*t1)}</b> second tranche`:''}.`;
-  const ex2=(m36==null||ren==null)?`Renewing $1,000/mo up to $1,300/mo for 36 months pays the renewal multiple (${U}) on the retained $1,000 plus the new-sale multiple on the added $300.`
-    :`Renewing <b>$1,000/mo → $1,300/mo</b> for 36 months: ${usd(1000)} retained × ${xm(ren)} = ${usd(1000*ren)}, plus the ${usd(300)} increase × ${xm(m36)} = ${usd(300*m36)} → <b>${usd(1000*ren+300*m36)}</b> total. No conversion bonus.`;
+  const ex1=m36==null?`A $100/mo, 36-month deal at or above the margin floor earns $100 × ${U} = ${U}.`
+    :`A <b>$100/mo, 36-month</b> deal at or above the margin floor earns $100 × ${xm(m36)} = <b>${usd(100*m36)}</b>${t1!=null&&t2!=null?` — <b>${usd(100*m36*t1)}</b> first tranche and <b>${usd(100*m36-100*m36*t1)}</b> second tranche`:''}.`+
+     `<br><span class="gd27-note">Same $100/mo on other terms: ${[12,24,48,60].map(t=>`${t} mo ${num(nm[t])==null?U:usd(100*+nm[t])}`).join(' · ')}.</span>`;
+  const ex2=(m36==null||ren==null)?`Renewing $100/mo up to $130/mo for 36 months pays the renewal multiple (${U}) on the retained $100 plus the new-sale multiple on the added $30.`
+    :`Renewing <b>$100/mo → $130/mo</b> for 36 months: ${usd(100)} retained × ${xm(ren)} = ${usd(100*ren)}, plus the ${usd(30)} increase × ${xm(m36)} = ${usd(30*m36)} → <b>${usd(100*ren+30*m36)}</b> total. No conversion bonus.`;
   const s36=num(sl[36]);
-  const ex3=s36==null?`A $10,000/yr SLA on 36 months: $10,000 ÷ 12 = $833.33 MRR equivalent × ${U}.`
-    :`A <b>$10,000/yr SLA</b> on 36 months: $10,000 ÷ 12 = $833.33 MRR equivalent × ${xm(s36)} = <b>${usd(10000/12*s36)}</b>.`;
+  const ex3=s36==null?`A $1,200/yr SLA on 36 months: $1,200 ÷ 12 = $100/mo equivalent × ${U}.`
+    :`A <b>$1,200/yr SLA</b> on 36 months: $1,200 ÷ 12 = $100/mo equivalent × ${xm(s36)} = <b>${usd(100*s36)}</b>.`;
   const sal=num(c.salaryAssumption), grr=c.grrBonus||null, nrr=c.nrrBonus||null;
   const tierPct=(tiers,val)=>{ if(!tiers)return null; let p=0; tiers.forEach(t=>{ if(val>=+t.min)p=Math.max(p,+t.pct); }); return p; };
   const gP=tierPct(grr,0.98), nP=tierPct(nrr,1.05);
@@ -953,8 +988,19 @@ function guide27HTML(fam){
     try{ if(typeof legacyRender==='function')legacyRender(); }catch(_){}
     const g=document.getElementById('guide27');
     if(!P27.ready){ g.innerHTML='<div class="gd27-banner bad">The revised plan tables aren\'t available, so only the historical rules are shown.</div>'; document.getElementById('guideHist27').open=true; return; }
-    if(!GUIDE_FAMILY){ const me=String(CURRENT_EMAIL||'').toLowerCase(); const a=P27.assignments.find(x=>String(x.email).toLowerCase()===me&&(!x.effective_to||E27.businessToday()<x.effective_to)); const v=a&&versionById(a.plan_version_id); GUIDE_FAMILY=(v&&v.family)||'Hybrid'; }
+    if(!GUIDE_FAMILY){ const me=String(CURRENT_EMAIL||'').toLowerCase(); const a=P27.assignments.find(x=>String(x.email).toLowerCase()===me&&(!x.effective_to||E27.businessToday()<x.effective_to)); const v=a&&versionById(a.plan_version_id); GUIDE_FAMILY=(v&&v.family)||compFamilyOf(me)||'Hybrid'; }
     g.innerHTML=guide27HTML(GUIDE_FAMILY);
     const sub=document.querySelector('#guideScrim .guide-head .sub'); if(sub)sub.textContent='Read straight from the plan settings in Admin — no finance background needed.';
   };
+})();
+
+/* Agreement ▸ Deal: show the selected owner's comp plan under "Assigned to" (AGR-04: changing the owner never moves
+   commission that was already earned — earned entries live in the ledger against the employee who earned them). */
+(function installOwnerPlan27(){
+  const orig=window.openModal; if(typeof orig!=='function')return;
+  const paint=a=>{ const sel=$('f_owner'), fld=$('ownerFld'); if(!sel||!fld)return; let d=$('ownerPlan27');
+    if(!d){ d=document.createElement('div'); d.id='ownerPlan27'; d.className='qctx'; d.style.cssText='margin-top:4px;font-size:11.5px;line-height:1.4'; fld.appendChild(d); }
+    const upd=()=>{ d.innerHTML=compPlanLine27(sel.value,a)+(a&&a.owner_email&&String(a.owner_email).toLowerCase()!==String(sel.value).toLowerCase()?'<br>Changing the owner applies to commission not yet earned; anything already earned stays with the original owner.':''); };
+    sel.onchange=upd; upd(); };
+  window.openModal=function(id,promote){ const r=orig.apply(this,arguments); try{ if(P27.ready)paint(AGREEMENTS.find(x=>x.id===id)||null); }catch(_){} return r; };
 })();
