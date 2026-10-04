@@ -97,3 +97,12 @@ Agreement #201, 36 months, $1,000 MRR, modelled margin 73.3% → Hybrid v1 publi
   - the rep-question worklist type
   - upload permissions for contracts and signed scans
 - **Tests:** `node tests/payout.test.js` (26 checks, end to end at a fixed date), plus the existing acceptance (51) and UI (50) suites.
+
+## P1RMR-59 · Vista imports read the real exports (verified against live Vista, 2026-10-03)
+Pulled SM Invoice List, SM Agreement List and SM Work Order Profitability Detail from Vista (Company 2) and ran them through the importers. All three were rejected by P1RMR-58. Fixed:
+- **SM Invoice List**: "Customer # / Name" exports as two cells, so every column from Customer onward sits one to the right (Invoice and Status do not). Detected and handled; customer stored as "647 Santo Office". Post Month stored as YYYY-MM. Footer (`…SMInvoiceList.rpt`) and Grand Totals skipped. Service Site and Work Order are report *filters*, not output columns — the misleading echo flag was removed.
+- **SM Agreement List** is a grouped report (Customer / Agreement / Term group rows, then positional revision rows). Now read as printed. Blank dates print as 12/30/1899 and are stored as empty. Future revisions print as "Active ( as of 11/15/26 )".
+- **SM Work Order Profitability Detail** is grouped (Agreement / Work Order / Line Type). With Group by left blank Vista groups by Agreement; that grouping now ties each cost line to its agreement directly. Totals for Agreement, Grand Total, footnotes and footer skipped.
+- **Worklist noise**: an unmatched invoice goes to the Worklist only when it looks like a tracked agreement's billing row with no invoice number (same Vista customer, same amount, within 31 days). T&M/project invoices are stored for reference. Agreement List: one item per agreement that is Active in Vista but missing from the tracker. Posted cost: only agreement lines with an unresolved classification.
+- Import slots now ordered Agreement term history → Invoices → Receipts → Posted cost (the Agreement List supplies the Vista customer number used for invoice matching). How-to text rewritten from the live run.
+- Tests: acceptance 55 (four new, built from the real layouts), ui 52, payout 36.

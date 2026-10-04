@@ -82,5 +82,34 @@ t('Posted cost: Totals rows discarded; overhead classified by rule table; unreso
 t('Agreement text in a description is corroborating, never the primary key',()=>{ const m=V.mapInvoice({invoice_number:'34285',description:'10/01/26 Agmt 37 Service'},{byWorkOrder:{}}); eq(m.agreement,null); eq(m.candidate,'37'); });
 t('Work order maps invoice to agreement',()=>eq(V.mapInvoice({invoice_number:'1',work_order:'WO9'},{byWorkOrder:{WO9:'37'}}).agreement,'37'));
 
+// ----- real Vista export layouts (pulled 2026-10-03) -----
+const D=s=>new Date(s+'T08:00:00Z'), Z=new Date('1899-12-30T08:00:00Z');
+t('Real SM Invoice List: customer # and name in two cells, footer and Grand Totals skipped',()=>{
+  const rows=[['SM Invoice List','Sorted by:','Invoice','Show Only Open Balances:','N','Invoice Dates:','01/01/25 - 09/30/26','Status:','All','Service Site:',' ','Work Order:',0],
+    ['\nInvoice','\nStatus','\nCustomer # / Name','\nBill To Customer','Invoice\nDate',' Post Month','\nDue Date','\nAmount','\nTax','\nTotal','\nBalance'],[''],
+    ['     25494','Invoiced',647,'Santo Office','',D('2025-01-01'),D('2025-01-01'),D('2025-01-31'),65,0,65,0],[''],
+    ['     34208','Pending',807,'Mountain Cascade, Inc','',D('2026-09-25'),null,D('2026-11-24'),3548.8,0,3548.8,3548.8],
+    ['Grand Totals:',null,5457577.41,896.65,5458474.06,439925.47],['2   Point One Electrical Systems','Page 1','10/03/26  09:35:19 PM','Date Format - MM/DD/YY','SMInvoiceList.rpt']];
+  const p=V.parse('invoices',rows); if(!p.ok)throw new Error(p.error); eq(p.rows.length,2); eq(p.rows[0].customer,'647 Santo Office'); eq(p.rows[0].invoice_date,'2025-01-01'); eq(p.rows[0].post_month,'2025-01'); eq(p.rows[0].balance,0); eq(p.rows[1].balance,3548.8); eq(p.rows[1].post_month,null); });
+t('Real SM Agreement List (grouped): revisions read under their agreement; blank 1899 dates are empty',()=>{
+  const rows=[['SM Agreement List'],['Sorting by Customer NumberThen by Revision Number','Showing All Agreements','Revision Status Filter Legend ','Displaying: All Statuses'],
+    ['Dates','Amount\nBilled ','Previous\nRevision','Rev.','Effective',null,'Activated','Cancelled','Terminated','Expiration','Price','Status'],
+    ['Customer: 101 (Airbnb, Inc.)','',''],['Agreement: 107 - Airbnb 44 Kate Street - Intrusion Monitoring','Status: Active',''],['Term: 11/01/24 to 05/31/27 (Active)','Total Term Price: 1,767.00','Total Term Billed: 1,425.00',''],
+    [1,D('2024-11-01'),D('2024-11-14'),Z,D('2026-05-31'),D('2026-07-31'),1197,'',1083,null,'Terminated'],
+    [3,D('2026-08-01'),D('2026-07-31'),Z,Z,D('2027-05-31'),1767,'',228,2,'Active'],
+    ['Agreement: T-C 888 Brannan - T-C 888 Brannan','Status: Inactive',''],[1,D('2017-02-01'),D('2017-01-31'),Z,D('2017-02-13'),D('2018-01-31'),5388,'',449,null,'Active ( as of 11/15/26 )'],
+    ['Page 1','2   Point One Electrical Systems','10/03/26','Date Format - MM/DD/YY','SMAgreementList.rpt']];
+  const p=V.parse('agreement_terms',rows); if(!p.ok)throw new Error(p.error); eq(p.rows.length,3); eq(p.rows[1].agreement_number,'107'); eq(p.rows[1].revision,'3'); eq(p.rows[1].previous_revision,'2');
+  eq(p.rows[1].terminated_date,null); eq(p.rows[1].expiration_date,'2027-05-31'); eq(p.rows[1].term_price,1767); eq(p.rows[1].customer,'101 (Airbnb, Inc.)'); eq(p.rows[2].agreement_number,'T-C 888 Brannan'); });
+t('Real SM WO Profitability Detail (grouped): agreement from the grouping, totals and footnotes skipped',()=>{
+  const rows=[['SM Work Order Profitability Detail','Work Orders: All  Date Entered: 07/01/26 - 09/30/26  Grouped by: Agreement',null,'\nTechnician','\nDescription','\nDate','Cost\nRate','Price\nRate','Budget\nHours','Units/\nAct Hrs','\nUM','Budget\nCost','\nCost','\nPrice','\nBilled'],
+    ['Agreement: ',''],['Work Order 11196  Description: Troubleshoot   Customer: 1140 Harrison   Division: 62',''],['Line Type: 2 - Labor ',''],
+    ['Gomez, Randolph','',D('2026-07-07'),0,177.44,4,'hrs',460.41,'',709.76,709.76,'',249.35,'35.13'],['Totals for Line Type: Labor  ',460.41,'',709.76],
+    ['Agreement: 165',''],['Work Order 11246  Description: Monitoring   Customer: X',''],['Line Type: 3 - Miscellaneous ',''],['None','Applied Overhead',D('2026-08-19'),0,0,0,'',198.73,'',0,0,'',-198.73,'N/A'],
+    ['Totals for Work Order 11246  ',0],['Totals for Agreement: 165',0],['Grand Total',44,820],['* Actual Cost is not yet available, calculated using Projected Cost '],['Page 1','2   Point One Electrical Systems','10/03/26','Date Format - MM/DD/YY','SMWorkOrderProfitabilityDetail.rpt']];
+  const p=V.parse('posted_cost',rows); if(!p.ok)throw new Error(p.error); eq(p.rows.length,2); eq(p.rows[0].agreement_number,null); eq(p.rows[0].line_type,'Labor'); eq(p.rows[0].amount,460.41); eq(p.rows[0].description,'Gomez, Randolph');
+  eq(p.rows[1].agreement_number,'165'); eq(p.rows[1].work_order,'11246'); eq(V.classifyCost(p.rows[1],[{match_field:'description',pattern:'(?i)applied overhead',bucket:'overhead'}]),'overhead'); });
+t('Grouped Agreement List dropped in the Invoices slot → rejected, names the right slot',()=>{ const p=V.parse('invoices',[['SM Agreement List'],['Dates','Rev.','Effective','Status'],['Customer: 1 (A)'],['Agreement: 5 - X'],[1,D('2026-01-01')]]); eq(p.ok,false); if(!/Agreement term history/.test(p.error))throw new Error(p.error); });
+
 results.forEach(r=>console.log(r[0]+'  '+r[1]));
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail?1:0);

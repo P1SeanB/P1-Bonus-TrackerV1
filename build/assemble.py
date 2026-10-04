@@ -15,7 +15,7 @@ tail_block='</script>\n<script>\n/*V27-UI*/\n'+src('ui27.js')+'\n'+shell+'\n/*/V
 if '/*V27-UI*/' in s: s=re.sub(r'</script>\n<script>\n/\*V27-UI\*/.*?</body>',lambda m:tail_block,s,flags=re.S)
 else:
     old='renderLegend();\nboot();\n</script>\n</body>'; assert s.count(old)==1; s=s.replace(old,tail_block)
-s=s.replace("const APP_VERSION='P1RMR-55';","const APP_VERSION='P1RMR-58 · spec 2.7';")
+s=s.replace("const APP_VERSION='P1RMR-55';","const APP_VERSION='P1RMR-59 · spec 2.7';")
 css='<style id="theme27">\n'+src('theme27.css')+'\n</style>\n'
 if '<style id="theme27">' in s: s=re.sub(r'<style id="theme27">.*?</style>\n',lambda m:css,s,flags=re.S)
 else: assert s.count('</head>')==1; s=s.replace('</head>',css+'</head>')

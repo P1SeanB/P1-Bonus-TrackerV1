@@ -65,7 +65,7 @@ const SEED={
   ok(await page.evaluate(()=>document.querySelectorAll('#view-imports [data-feed27]').length===5&&document.getElementById('view-imports').querySelectorAll('details').length>=5),'Vista imports page shows five slots, each with its how-to dropdown');
   await page.evaluate(()=>switchView('recon')); await page.waitForTimeout(200);
   ok(await page.evaluate(()=>!/Add draw/.test(document.getElementById('rcBody').innerText)),'no draw controls on Recon (NAV-07)');
-  ok(await page.evaluate(()=>/twelfth field/.test(document.getElementById('vistaPanel27').innerHTML)),'Appendix F help text present verbatim');
+  ok(await page.evaluate(()=>/in two cells/.test(document.getElementById('vistaPanel27').innerHTML)),'How-to text describes the real export (customer in two cells)');
   // Admin: draft preview, publish, assign, acknowledge
   await page.evaluate(()=>switchView('admin')); await page.waitForTimeout(300);
   ok(await page.evaluate(()=>[...document.querySelectorAll('[data-fam27]')].map(b=>b.dataset.fam27).join()==='Hybrid,Hunter,Farmer'),'Admin offers exactly Hybrid, Hunter, Farmer (ADM-01)');
@@ -125,11 +125,12 @@ const SEED={
   // Vista import: invoices file with offset trap, idempotent re-import, wrong-slot rejection
   const mk=(rows)=>{ const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'S'); return XLSX.write(wb,{type:'base64',bookType:'xlsx'}); };
   const inv=mk([['SM Invoice List'],['Status: all  Service Site, Work Order'],['Invoice','Status','Customer','Invoice Date','Post Month','Due Date','Amount','Tax','Total','Service Site','Work Order','Balance'],
-    [null,'34001','Invoiced','Cust 150','3/1/2026','2026-03','3/31/2026',1000,0,1000,'S1','WO1',0],[null,'35000','Voided','X','4/1/2026','2026-04','4/30/2026',500,0,500,'S9','WO9',0],[null,'35001','Invoiced','Y','9/30/2026','2026-09','10/30/2026',200,0,200,'S8','WO8',200]]);
+    [null,'34001','Invoiced','Cust 150','3/1/2026','2026-03','3/31/2026',1000,0,1000,'S1','WO1',0],[null,'35000','Voided','X','4/1/2026','2026-04','4/30/2026',500,0,500,'S9','WO9',0],[null,'35001','Invoiced','Y','9/30/2026','2026-09','10/30/2026',200,0,200,'S8','WO8',200],[null,'35002','Invoiced','Cust 150','4/2/2026','2026-04','5/2/2026',1000,0,1000,'S7','WO7',0]]);
   const doImport=async(feed,b64,name)=>page.evaluate(async([feed,b64,name])=>{ const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0)); const f=new File([bin],name); await stageFile(feed,f,'manual'); const s=STAGED27; if(s&&s.parsed){ await commitStaged(); } return s&&(s.error||{matched:s.matched,unmatched:s.unmatched,rows:s.parsed.rows.length,offset:s.parsed.offset}); },[feed,b64,name]);
   await page.evaluate(()=>switchView('recon')); await page.waitForTimeout(200);
   const i1=await doImport('invoices',inv,'SM Invoice List.xlsx');
-  ok(i1&&i1.rows===3&&i1.offset===1&&i1.matched===1&&i1.unmatched===2,'invoice import: offset handled, 1 matched via billing-row invoice #, 2 to Worklist');
+  ok(i1&&i1.rows===4&&i1.offset===1&&i1.matched===1&&i1.unmatched===3,'invoice import: offset handled, 1 matched via billing-row invoice #, 3 unmatched');
+  ok(await page.evaluate(()=>{ const w=__DB.rmr_worklist.filter(x=>x.type==='unmatched_vista'); return w.length===1&&/35002/.test(w[0].title)&&/#150/.test(w[0].title); }),'only the invoice that looks like an agreement billing row goes to the Worklist (T&M invoices do not)');
   const cnt1=await page.evaluate(()=>({inv:__DB.rmr_vista_invoices.length,wl:__DB.rmr_worklist.length}));
   await doImport('invoices',inv,'SM Invoice List.xlsx');
   const cnt2=await page.evaluate(()=>({inv:__DB.rmr_vista_invoices.length,wl:__DB.rmr_worklist.length}));
