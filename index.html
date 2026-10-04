@@ -6213,7 +6213,8 @@ let HOMED27='';
   const ea=window.enterApp; if(typeof ea==='function') window.enterApp=function(){ HOMED27=''; return ea.apply(this,arguments); };
   const rd=window.render;
   window.render=function(){ rd.apply(this,arguments);
-    try{ if(view==='today')renderToday27(); if(view==='imports')renderImports27(); if(view==='myplan')renderMyPlan27(); if(view==='quarter'&&!isTeam27())renderMyPay27(); }
+    try{ if(view==='quarter'&&!can('editConfig')) setTimeout(()=>document.querySelectorAll('#qTableWrap .paidbtn.is-paid').forEach(b=>{ b.disabled=true; b.title='Only an Administrator can undo a paid mark.'; b.style.cursor='not-allowed'; }),0);
+      if(view==='today')renderToday27(); if(view==='imports')renderImports27(); if(view==='myplan')renderMyPlan27(); if(view==='quarter'&&!isTeam27())renderMyPay27(); }
     catch(e){ console.warn('render27',e); } };
 })();
 
@@ -6304,15 +6305,17 @@ function renderSteps27(){
   const S=payoutState27(), run=S.run, d=S.done;
   const stale=S.printed&&!d&&S.printed!==S.pkt.no;
   const st=(i,title,desc,action)=>`<div class="step27 ${S.steps[i]?'done':(i===S.now?'now':'')}"><span class="n">${S.steps[i]?'✓':i+1}</span><span class="t">${title}</span><span class="d">${desc}</span><span class="a">${action||''}</span></div>`;
-  el.innerHTML=`<div class="hd"><h2>Q${run.q} ${run.y} payout · ${d&&d.locked_at?'paid and locked':(d?'approved':'in progress')}</h2><span class="qctx">quarter ended ${fmtD27(run.quarterEnd)} · verify by ${fmtD27(run.cutoff)} · pay by ${fmtD27(run.payBy)} · <button class="lnk27" id="st27adj">Add an adjustment</button></span></div>
+  el.innerHTML=`<div class="hd"><h2>Q${run.q} ${run.y} payout · ${d&&d.locked_at?'paid and locked':(d?'approved':'in progress')}</h2><span class="qctx">quarter ended ${fmtD27(run.quarterEnd)} · verify by ${fmtD27(run.cutoff)} · pay by ${fmtD27(run.payBy)} · <button class="lnk27" id="st27adj">Add an adjustment</button>${d&&can('editConfig')?` · <button class="lnk27" id="st27rev">Revert a step…</button>`:''}</span></div>
    <div class="steps27">
     ${st(0,'Import Vista files',`Invoices: ${esc(S.fi.due.label)}<br>Receipts: ${esc(S.fr.due.label)}`,`<button class="lnk27" data-go27="imports">Open imports</button>`)}
     ${st(1,'Verify payments',S.groups['Pending verification'].length?`${S.groups['Pending verification'].length} waiting · ${money27(S.tot('Pending verification'))}${S.pastCut?'<br>Past the cutoff: these move to the next payout.':''}`:'Every payment in this run is verified.',`<button class="lnk27" id="st27wait">See what's waiting</button>`)}
     ${st(2,'Print approval packet',d?`Packet ${esc((d.packet&&d.packet.no)||d.packet_no||'—')} signed.`:!S.pkt.items.length?'Nothing is ready to approve yet. Payments appear here once they are earned and verified.':`${money27(S.pkt.total)} · ${S.pkt.items.length} payment(s)<br>Packet ${esc(S.pkt.no)}${stale?'<br><b style="color:#8a1f1f">The printed packet is out of date — print again.</b>':''}`,d?`<button class="lnk27" id="st27pdf">Reprint signed packet</button>`:`<button class="btn-primary" id="st27print" ${S.pkt.items.length?'':'disabled'} style="padding:8px 12px;font-size:13px">Print packet</button>`)}
     ${st(3,'Record Executive approval',d?`Approved by ${esc(d.approved_by)}${d.signed_on?' on '+fmtD27(d.signed_on):''}.${d.signed_scan_path?' Signed scan on file.':''}`:'An Executive signs the printed packet. Upload the signed scan to unlock the payroll file.',d?(d.signed_scan_path?`<button class="lnk27" id="st27scan">View signed scan</button>`:''):`<button class="btn-primary" id="st27rec" ${S.steps[2]&&S.pkt.items.length?'':'disabled'} style="padding:8px 12px;font-size:13px">Record approval</button>`)}
     ${st(4,'Pay & lock',d&&d.locked_at?`Paid on payroll ${fmtD27(d.paid_date)} · locked.`:(d?'Send the payroll file, then enter the payroll date. Statements become final.':'Unlocks after the approval is recorded.'),d?`<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start"><button class="lnk27" id="st27csv">Download payroll file</button>${d.locked_at?'':`<button class="btn-primary" id="st27paid" style="padding:8px 12px;font-size:13px">Mark paid &amp; lock</button>`}</div>`:'')}
-   </div>`;
+   </div>${(()=>{ const rv=(P27.reversals||[]).filter(x=>x.year===run.y&&x.quarter===run.q).sort((a,b)=>String(b.reverted_at).localeCompare(String(a.reverted_at)));
+     return rv.length?`<div style="padding:10px 20px 14px;border-top:1px solid #edf0f5;font-size:12.5px;color:var(--muted);line-height:1.6">${rv.slice(0,3).map(x=>`<div><b style="color:#8a1f1f">Reverted</b> · ${x.step==='unlock_paid'?'paid &amp; lock undone (back to Approved)':'approval undone (back to Print packet)'} · ${esc(fmtD27(x.reverted_at))} by ${esc(nameOf27(x.reverted_by))} — ${esc(x.reason)}</div>`).join('')}</div>`:''; })()}`;
   el.querySelectorAll('[data-go27]').forEach(b=>b.onclick=()=>switchView(b.dataset.go27));
+  if($('st27rev')) $('st27rev').onclick=()=>openRevert27(d);
   const w=$('st27wait'); if(w) w.onclick=()=>{ const det=[...document.querySelectorAll('#payoutRun27 details')][1]; if(det){ det.open=true; det.scrollIntoView({behavior:'smooth',block:'start'}); } };
   if($('st27print')) $('st27print').onclick=()=>{ printPacket27(S); LS.set('pkt27:'+run.y+'Q'+run.q,S.pkt.no); audit('Approval packet printed','Payout',S.pkt.no,null,{total:S.pkt.total,items:S.pkt.items.length},null); renderSteps27(); };
   if($('st27pdf')) $('st27pdf').onclick=()=>printPacket27(S,d);
@@ -6448,6 +6451,34 @@ function openMarkPaid27(d){
     audit('Payout marked paid and locked','Payout',d.packet_no||`Q${d.quarter} ${d.year}`,null,{paid_date:pd,entries:paid.length},null);
     closeDrawer27(); await load27(); render(); toast('Marked paid — the quarter is locked'); };
 }
+
+/* ---------------- Administrator: revert one payout step ---------------- */
+function openRevert27(d){
+  if(!can('editConfig')){ toast('Only an Administrator can revert a payout step.'); return; }
+  const unlock=!!d.locked_at; const items=(d.packet&&d.packet.items)||[];
+  const what=unlock
+    ?`<b>Paid &amp; lock → back to Approved.</b> The ${items.length} payment(s) go back to Approved for payroll, the payroll date ${esc(fmtD27(d.paid_date))} is cleared, and the quarter unlocks so you can mark it paid again. Reps' My pay changes from Paid back to Earned.`
+    :`<b>Approved → back to Print packet.</b> The Executive approval by ${esc(d.approved_by)} is removed, the payroll file locks again, and you print a new packet and record the approval again. The signed scan stays on file.`;
+  drawer27('rev27','Revert a step',`Q${d.quarter} ${d.year} · packet ${esc(d.packet_no||'')}`,
+    `<div class="warn27">${what}</div>
+     <div class="note27">Only an Administrator can do this. The reason, your name, the time and a copy of everything removed are kept permanently and show on the Payouts card. If payroll already ran, tell payroll before you change anything.</div>
+     <label class="fld27">Reason<textarea id="rv_why" rows="3" placeholder="e.g. Payroll date entered as Jan 30; payroll actually ran Feb 6"></textarea></label>
+     <label style="display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.5"><input type="checkbox" id="rv_ok" style="margin-top:3px"> I understand this undoes the ${unlock?'paid &amp; lock':'approval'} step for the whole quarter.</label>
+     <div id="rv_err" style="color:#8a1f1f;font-size:13px;font-weight:700"></div>`,
+    `<button class="btn-primary" id="rv_go" style="padding:12px 16px;font-size:15px;background:#8a1f1f">${unlock?'Unlock and revert to Approved':'Undo the approval'}</button>`);
+  $('rv_go').onclick=async()=>{ const why=($('rv_why').value||'').trim(); const err=t=>$('rv_err').textContent=t;
+    if(why.length<10)return err('Give the reason (at least 10 characters).'); if(!$('rv_ok').checked)return err('Tick the box to confirm.');
+    $('rv_go').disabled=true; $('rv_go').textContent='Reverting…';
+    const {data,error}=await sb.rpc('rmr_revert_payout_step',{p_run:d.id,p_reason:why});
+    if(error){ err(/function|schema cache|does not exist/i.test(error.message||'')?'The database needs the v25 update (migration_v25_payout_revert.sql) first.':error.message); $('rv_go').disabled=false; $('rv_go').textContent=unlock?'Unlock and revert to Approved':'Undo the approval'; return; }
+    audit(data==='unlock_paid'?'Payout unlocked (paid & lock reverted)':'Payout approval reverted','Payout',d.packet_no||`Q${d.quarter} ${d.year}`,{approved_by:d.approved_by,paid_date:d.paid_date||null},{step:data},why);
+    if(data==='undo_approval') LS.del('pkt27:'+d.year+'Q'+d.quarter);
+    closeDrawer27(); await load(); await load27(); render(); toast(data==='unlock_paid'?'Unlocked — the quarter is back to Approved':'Approval undone — print and record a new approval'); };
+}
+(function hookReversals27(){
+  const orig=window.load27; if(typeof orig!=='function')return;
+  window.load27=async function(){ const r=await orig.apply(this,arguments); try{ const {data,error}=await sb.from('rmr_payout_reversals').select('*'); P27.reversals=error?[]:(data||[]); }catch(_){ P27.reversals=[]; } return r; };
+})();
 
 /* ---------------- Adjusting a recorded commission ---------------- */
 function openAdjust27(agreementId){

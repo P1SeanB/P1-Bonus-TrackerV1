@@ -100,6 +100,20 @@ const tmp=f=>{ const p=path.join(require('os').tmpdir(),f); fs.writeFileSync(p,'
   const lock=await p.evaluate(()=>({r:__DB.rmr_payout_runs[0],paid:__DB.rmr_ledger_entries.filter(x=>x.stage==='paid').length,txt:document.getElementById('steps27').innerText}));
   ok(lock.r.locked_at&&lock.r.paid_date==='2027-01-30'&&lock.paid>=3&&/paid and locked/.test(lock.txt),'Mark paid & lock: payroll date stored, paid entries written, quarter locked');
   await shot(p,'admin_payouts_locked');
+  // Administrator reverts one step at a time, then redoes them
+  await p.click('#st27rev'); await p.waitForTimeout(200); await p.click('#rv_go'); await p.waitForTimeout(200);
+  ok(/reason/i.test(await p.evaluate(()=>document.getElementById('rv_err').textContent)),'revert needs a reason');
+  await p.fill('#rv_why','Payroll actually ran Feb 6, not Jan 30'); await p.check('#rv_ok'); await shot(p,'admin_revert_panel'); await p.click('#rv_go'); await p.waitForTimeout(900);
+  const un=await p.evaluate(()=>({r:__DB.rmr_payout_runs[0],paid:__DB.rmr_ledger_entries.filter(x=>x.stage==='paid').length,payable:__DB.rmr_ledger_entries.filter(x=>x.stage==='payable').length,rv:(__DB.rmr_payout_reversals||[]).length,txt:document.getElementById('steps27').innerText,canPay:!!document.getElementById('st27paid')}));
+  ok(un.r&&!un.r.locked_at&&un.paid===0&&un.payable>=3&&un.rv===1&&/Reverted/.test(un.txt)&&un.canPay,'unlock: back to Approved, paid lines removed, reversal recorded and shown');
+  await p.click('#st27rev'); await p.waitForTimeout(200); await p.fill('#rv_why','Wrong packet was signed; re-sign the new one'); await p.check('#rv_ok'); await p.click('#rv_go'); await p.waitForTimeout(900);
+  const ua=await p.evaluate(()=>({runs:(__DB.rmr_payout_runs||[]).length,payable:__DB.rmr_ledger_entries.filter(x=>x.stage==='payable').length,rv:(__DB.rmr_payout_reversals||[]).length,rec:!!document.getElementById('st27print')}));
+  ok(ua.runs===0&&ua.payable===0&&ua.rv===2&&ua.rec,'undo approval: run and payable lines removed, back to Print packet');
+  const [dl2]=await Promise.all([p.waitForEvent('download'),p.click('#st27print')]); await p.waitForTimeout(200);
+  await p.click('#st27rec'); await p.waitForTimeout(200); await p.fill('#ra_no',await p.evaluate(()=>payoutState27().pkt.no)); await p.setInputFiles('#ra_file',tmp('signed-packet-2.pdf')); await p.click('#ra_go'); await p.waitForTimeout(900);
+  await p.click('#st27paid'); await p.waitForTimeout(200); await p.fill('#mp_d','2027-02-06'); await p.click('#mp_go'); await p.waitForTimeout(900);
+  const re=await p.evaluate(()=>({r:__DB.rmr_payout_runs[0],paid:__DB.rmr_ledger_entries.filter(x=>x.stage==='paid').length}));
+  ok(re.r&&re.r.locked_at&&re.r.paid_date==='2027-02-06'&&re.paid>=3,'after reverting, the quarter can be approved and paid again');
   await p.evaluate(()=>switchView('imports')); await p.waitForTimeout(400); await p.evaluate(()=>{ const d=document.querySelector('#view-imports details'); if(d)d.open=true; });
   ok(await p.evaluate(()=>document.querySelectorAll('#view-imports [data-feed27]').length===5),'Vista imports page: five slots with dropdowns');
   await shot(p,'admin_imports');

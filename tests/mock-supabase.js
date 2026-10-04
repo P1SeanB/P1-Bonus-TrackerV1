@@ -37,7 +37,16 @@
   window.supabase={createClient:()=>({
     from:t=>new Q(t),
     auth:{getSession:async()=>({data:{session:{user:{email:window.__EMAIL||'sean.bithell@point1.com'}}}}),onAuthStateChange:()=>{},signOut:async()=>({}),signInWithPassword:async()=>({error:null}),signUp:async({email})=>{ (window.__SIGNUPS=window.__SIGNUPS||[]).push(email); return {data:{user:{email,identities:[{id:1}]}},error:null}; },updateUser:async()=>({data:{},error:null})},
-    rpc:async(fn)=>{ if(fn==='rmr_password_set'){ (window.__DB.rmr_users||[]).forEach(u=>{ if(u.email===(window.__EMAIL||'sean.bithell@point1.com'))u.must_set_password=false; }); } return {data:null,error:null}; },
+    rpc:async(fn,args)=>{ const DBx=window.__DB;
+      if(fn==='rmr_revert_payout_step'){ const me=(window.__EMAIL||'sean.bithell@point1.com'); const u=(DBx.rmr_users||[]).find(x=>x.email===me); if(!u||(u.permission_role||u.role)!=='Administrator')return {data:null,error:{message:'Only an Administrator can revert a payout step.'}};
+        if(!args||String(args.p_reason||'').trim().length<10)return {data:null,error:{message:'Give the reason (at least 10 characters).'}};
+        const runs=DBx.rmr_payout_runs||[]; const r=runs.find(x=>String(x.id)===String(args.p_run)); if(!r)return {data:null,error:{message:'not found'}};
+        const L=DBx.rmr_ledger_entries||[]; let step, removed;
+        if(r.locked_at){ removed=L.filter(l=>String(l.payout_run_id)===String(r.id)&&l.stage==='paid'); DBx.rmr_ledger_entries=L.filter(l=>!removed.includes(l)); r.paid_date=null; r.paid_by=null; r.locked_at=null; step='unlock_paid'; }
+        else { removed=L.filter(l=>String(l.payout_run_id)===String(r.id)); DBx.rmr_ledger_entries=L.filter(l=>!removed.includes(l)); DBx.rmr_payout_runs=runs.filter(x=>x!==r); step='undo_approval'; }
+        (DBx.rmr_payout_reversals=DBx.rmr_payout_reversals||[]).push({id:Date.now(),run_id:r.id,year:r.year,quarter:r.quarter,step,reason:args.p_reason,reverted_by:me,reverted_at:new Date().toISOString(),removed_entries:removed});
+        return {data:step,error:null}; }
+      if(fn==='rmr_password_set'){ (window.__DB.rmr_users||[]).forEach(u=>{ if(u.email===(window.__EMAIL||'sean.bithell@point1.com'))u.must_set_password=false; }); } return {data:null,error:null}; },
     storage:{from:()=>({list:async()=>({data:[],error:null}),upload:async()=>({error:null}),createSignedUrl:async()=>({data:{signedUrl:'#'}})})}
   })};
 })();
