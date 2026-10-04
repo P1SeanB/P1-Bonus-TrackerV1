@@ -55,5 +55,5 @@ Agreement #201, 36 months, $1,000 MRR, modelled margin 73.3% → Hybrid v1 publi
 - Attaching a **countersigned plan copy** to the employee record.
 - **Confirm disbursement** (*Paid* stage) after payroll runs; a weekly CST-13 escalation report; the FIN-01 employer-cost dashboard (inputs are stored in `rmr_settings`).
 - **Scheduled file delivery** has its code path (`P1Import.scheduled`) but needs a delivery mechanism (e.g. a scheduled task dropping files).
-- Accounting export owner: Administrator role (sean.bithell@point1.com), recorded in Admin ▸ Payout calendar & feed owners for all five feeds. Backup not yet named (only one Administrator).
-- Business items still open per the spec: export backup, VIS-07 join-key choice, Vista report #94 access.
+- Accounting export owner: Administrator role (sean.bithell@point1.com), recorded in Admin ▸ Payout calendar & feed owners for all five feeds. Backup: any Executive (Don Jones, Shane Stoltenberg).
+- Business items still open per the spec: VIS-07 join-key choice, Vista report #94 access.
