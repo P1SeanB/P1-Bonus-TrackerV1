@@ -126,3 +126,13 @@ Requested by Sean, 2026-10-03. Needs **migration_v27_terms_renewals.sql**, then 
 - Rep views (My pay KPIs, How you're paid), the agreement drawer and the recorded-event snapshot describe the rules of the rep's own version.
 - Tests: acceptance 66, ui 54, payout 36, renewals 41.
 - **Live, 2026-10-04:** Hybrid v3 published, effective 2026-10-06 and approved by Sean Bithell. It is v2 plus the two triggers. sean.bithell@point1.com runs on v2 from 10/05 to 10/06, then v3 from 10/06. v3 needs Sean's acknowledgment before it calculates.
+
+## P1RMR-62 · Deals, Customers and the hunt list
+- **Deals** replaces Pipeline + Agreements in the menu: one list through Opportunity → Quoted → Signed → Sold, with purple stage chips (payment colors unchanged), a search box, stage pills and an "All agreements ▸" link to the flat list. A deal leaves Deals once every payment is paid; a Vista renewal or rate change brings the agreement back as its own labeled row. Reps see the same page scoped to their own deals.
+- **Customers**: every customer with its agreements beneath it (ended collapsed), consolidation and transfer notes, per-customer flags for past-net-60 invoices, renewals due within 60 days and open commissions. Customer numbers fall back to the Vista Agreement List grouping when the tracker has none.
+- **Agreement window** reordered around the commission chain: Overview (dormant fields hidden) · History (Vista timeline) · Commissions (every payment with who marked it sold) · Commission ledger · Invoices (net-60 dates; the invoice Payment 2 depends on is highlighted) · Costs & margin · Files.
+- **Lost and cancelled**: the lost flow asks for a coded reason and an optional revisit date (the deal returns to Deals that day with a Revisit tag); the Lost pill doubles as the hunt list of lost quotes and cancelled accounts. Opportunities gain a Source field.
+- **Sales reports** on the Reports page: win/loss and win rate, new + increase RMR booked, churn by quarter, and the live pipeline by stage, with the stage-tracking data limit stated. A shared period filter (quarters, YTD, last year, custom) applies to the hunt list and commission history.
+- **migration_v28_deals.sql** adds source, lost_reason_code, revisit_date, cancel_reason and stage_dates; until it runs the app saves without those fields and says so.
+- Tests: new deals suite (30); acceptance 66, ui 54, payout 36, renewals 41 — 227 in all.
+- Admin & Executive user guide republished (Deals and Customers section; Hybrid v3 earning rules).
