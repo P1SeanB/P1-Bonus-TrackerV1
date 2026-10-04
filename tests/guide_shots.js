@@ -59,12 +59,13 @@ const close=async(p,name,o)=>{ await p.evaluate(n=>winOpp(AGREEMENTS.find(a=>a.c
   await p.fill('#nu_em','jordan.lee@point1.com'); await p.selectOption('#nu_role','Representative'); await p.selectOption('#nu_cf','Hybrid'); await p.fill('#nu_from','2026-10-05'); await p.fill('#nu_sal','110000'); await p.fill('#nu_pw','Welcome-2026');
   await mark(p,[['up:#nu_em',1],['up:#nu_role',2],['up:#nu_cf',3],['up:#nu_from',4],['up:#nu_sal',5],['up:#nu_pw',6],['#nu_go',7]],'#emp27'); await shot(p,'admin_add_employee');
   await p.click('#nu_go'); await p.waitForTimeout(900);
+  await p.evaluate(()=>{ const o=document.getElementById('nu_out'); o.innerHTML=o.innerHTML.replace(/file:\/\/[^\s<]*index\.html/g,'https://p1seanb.github.io/P1-Bonus-TrackerV1/'); });
   await mark(p,[['#nu_out',1],['text=jordan.lee@point1.com',2]],'#emp27'); await shot(p,'admin_employee_added');
   await p.evaluate(()=>{ const e=document.getElementById('cal27'); if(e) e.scrollIntoView(); window.scrollBy(0,-90); }); await shot(p,'admin_calendar_owners');
   await save(p);
   // ========== 2. Rep first sign-in (Oct 5)
   p=await open(browser,'jordan.lee@point1.com','2026-10-05'); await p.waitForTimeout(500);
-  if(await p.$('#pwScrim27')){ await p.fill('#pw1_27','My-own-pass-1'); await p.fill('#pw2_27','My-own-pass-1'); await shot(p,'rep_choose_password','#pwScrim27 .modal',16); await p.click('#pwGo27'); await p.waitForTimeout(500); }
+  if(await p.$('#pwScrim27')){ await p.fill('#pw1_27','My-own-pass-1'); await p.fill('#pw2_27','My-own-pass-1'); await shot(p,'rep_choose_password'); await p.click('#pwGo27'); await p.waitForTimeout(500); }
   if(!await p.$('#ackScrim27')){ await p.evaluate(()=>checkAcknowledgement()); await p.waitForTimeout(400); }
   await mark(p,[['#ack27ok',1]]); await shot(p,'rep_acknowledge'); await p.click('#ack27ok'); await p.waitForTimeout(600);
   // rep adds two opportunities and marks one won (Oct 20)

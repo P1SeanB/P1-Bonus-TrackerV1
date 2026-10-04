@@ -141,7 +141,7 @@ function renderToday27(){
   if(!S.steps[1]) add(run.cutoff,`Verify customer payments for the Q${run.q} ${run.y} payout`,`${S.groups['Pending verification'].length} payment(s), ${money27(S.tot('Pending verification'))}, waiting on verification. Anything not verified by ${fmtD27(run.cutoff)} moves to the next payout.`,'quarter','Open payouts');
   if(!S.done){ if(S.pkt.items.length) add(run.payBy,`Get the Q${run.q} ${run.y} approval packet signed`,`${money27(S.tot('Ready to pay'))} ready for ${new Set(S.groups['Ready to pay'].map(i=>lc27(i.a.owner_email))).size} rep(s). Print the packet, have an Executive sign it, then record the approval.`,'quarter','Open payouts');
   } else if(!S.done.locked_at) add(run.payBy,`Mark the Q${run.q} ${run.y} payout paid`,`Approved ${fmtD27(S.done.approved_at)}. Send the payroll file, then enter the payroll date to lock the quarter.`,'quarter','Open payouts');
-  openWl.filter(w=>w.type!=='rep_question').forEach(w=>{ const T=(typeof WL_TYPES!=='undefined'&&WL_TYPES[w.type])||[w.type]; add(w.due_date||null,T[0],w.title,'worklist','Open worklist',{wl:w}); });
+  openWl.filter(w=>w.type!=='rep_question').forEach(w=>{ const T=(typeof WL_TYPES!=='undefined'&&WL_TYPES[w.type])||[w.type]; if(w.type==='deal_won'&&can('editAgreements')) add(w.due_date||null,T[0],w.title,'setup:'+w.record_ref,'Set up deal',{wl:w}); else add(w.due_date||null,T[0],w.title,'worklist','Open worklist',{wl:w}); });
   qs.forEach(w=>add(w.due_date||null,`Answer ${nameOf27((w.detail||{}).requested_by)}'s question`,(w.detail&&w.detail.question)||w.title,'worklist','Answer'));
   ren.forEach(r=>add(r.iso,`Renewal due · #${r.a.agreement_number||''} ${r.a.customer_name||''}`,'Manual renewal — confirm it on the Renewals page to record the renewal commission.','renewals','Open renewals'));
   rows.sort((x,y)=>String(x.date||'9999').localeCompare(String(y.date||'9999')));
@@ -163,7 +163,7 @@ function renderToday27(){
        <div class="bd" style="display:flex;flex-direction:column;gap:10px">${stepNames.map((n,i)=>`<div style="display:flex;align-items:center;gap:10px;font-size:14px"><span class="step27 ${S.steps[i]?'done':(i===S.now?'now':'')}" style="padding:0;border:0;background:none"><span class="n">${S.steps[i]?'✓':i+1}</span></span><span style="font-weight:${i===S.now?800:600};color:${S.steps[i]?'var(--muted)':'var(--ink)'}">${n}</span></div>`).join('')}
        <div class="note27" style="margin-top:4px">Quarter ended ${fmtD27(run.quarterEnd)} · verify by ${fmtD27(run.cutoff)} · pay by ${fmtD27(run.payBy)}</div></div></div>
    </div>`;
-  host.querySelectorAll('[data-go27]').forEach(b=>b.onclick=()=>switchView(b.dataset.go27));
+  host.querySelectorAll('[data-go27]').forEach(b=>b.onclick=()=>{ const g=b.dataset.go27; if(g.startsWith('setup:')){ switchView('opportunities'); openCloseDeal27(g.slice(6)); return; } switchView(g); });
 }
 
 /* ---------------- Payouts: five steps + approval packet ---------------- */
@@ -178,7 +178,7 @@ function packetFor27(run,groups){
     const handVerified=owner===me&&(P27.verifs||[]).some(v=>String(v.agreement_id)===String(i.a.id)&&MANUAL_SOURCES27.includes(v.source)&&lc27(v.verified_by)===me);
     const piece=i.adjustment?'Adjustment':i.revised?`Payment ${i.tranche} of 2`:String(i.label).replace(/\b\w/,c=>c.toUpperCase());
     const ed=(/Earned (\d{4}-\d{2}-\d{2})/.exec(i.reason||'')||[])[1];
-    const why=i.adjustment?plainText27(i.reason||''):i.revised&&ed?(i.tranche===1?`First invoice paid ${fmtD27(ed)}`:`Three months after first billing, invoices paid · ${fmtD27(ed)}`)+(handVerified?' · verified by hand':' · Vista receipt'):plainText27(i.reason||'');
+    const why=i.adjustment?`${i.adjustment.reason||'Adjustment'} · approved by ${nameOf27(i.adjustment.approver)}`:i.revised&&ed?(i.tranche===1?`First invoice paid ${fmtD27(ed)}`:`Three months after first billing, invoices paid · ${fmtD27(ed)}`)+(handVerified?' · verified by hand':' · Vista receipt'):plainText27(i.reason||'');
     return {agreement_id:i.a.id,agreement:String(i.a.agreement_number||''),customer:i.a.customer_name||'',owner:owner,rep:nameOf27(owner),piece,label:i.label,amount:i.amount,cents:Math.round(i.amount*100),why,flag:handVerified}; });
   return {no,items,total:items.reduce((s,i)=>s+i.cents,0)/100};
 }
