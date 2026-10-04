@@ -530,8 +530,8 @@ function renderMyPay27(){
   const pill=s=>s==='paid'?'<span class="pill27 paid">Paid</span>':s==='earned'?'<span class="pill27 ear">Earned</span>':'<span class="pill27 exp">Expected</span>';
   el.innerHTML=`<div class="kpis27">
      <div class="kpi27 hero"><span class="k">Next commission payment</span><span class="v">${money27(next)}</span><span class="s">${next>0?`Q${nextRun.q} ${nextRun.y} payout · paid by ${fmtD27(nextRun.payBy)} · final once approved`:'Nothing earned yet — see Waiting on payment'}</span></div>
-     <div class="kpi27"><span class="k">Waiting on payment</span><span class="v">${money27(waiting)}</span><span class="s">payment 1s, earned when the first invoice is paid</span></div>
-     <div class="kpi27"><span class="k">Expected later</span><span class="v">${money27(expected)}</span><span class="s">payment 2s, earned three months after first billing</span></div>
+     <div class="kpi27"><span class="k">Waiting on payment</span><span class="v">${money27(waiting)}</span><span class="s">${esc(myEarnWords27().k1)}</span></div>
+     <div class="kpi27"><span class="k">Expected later</span><span class="v">${money27(expected)}</span><span class="s">${esc(myEarnWords27().k2)}</span></div>
      <div class="kpi27"><span class="k">Paid to date</span><span class="v">${money27(paidAll)}</span><span class="s">on payroll</span></div></div>
    <div class="row27">
     <div class="card27" style="flex:999 1 520px"><div class="hd"><h2>Commission by quarter</h2><div class="legend27"><span><i style="background:${RAMP27.expected}"></i>Expected</span><span><i style="background:${RAMP27.earned}"></i>Earned</span><span><i style="background:${RAMP27.paid}"></i>Paid</span></div></div>
@@ -570,6 +570,10 @@ function openQuestion27(l){
     audit('Rep question sent','Worklist',it.record_ref,null,{piece:l.label,question:t},null); closeDrawer27(); P27.worklist=await fetchAll('rmr_worklist','id'); render(); toast('Question sent'); };
 }
 
+function myEarnWords27(){ const me=lc27(CURRENT_EMAIL), today=E27.businessToday();
+  const asg=P27.assignments.filter(x=>lc27(x.email)===me).sort((x,y)=>String(y.effective_from).localeCompare(String(x.effective_from)));
+  const cur=asg.find(x=>x.effective_from<=today&&(!x.effective_to||today<x.effective_to))||asg[0]||null; const v=cur?versionById(cur.plan_version_id):null;
+  return earningWords27((v&&v.config)||{}); }
 /* ---------------- Rep: My plan ---------------- */
 function renderMyPlan27(){
   const host=$('myplanHost27'); if(!host)return; if(!P27.ready){ host.innerHTML='<div class="card27"><div class="bd">Loading…</div></div>'; return; }
@@ -587,7 +591,7 @@ function renderMyPlan27(){
     <div class="card27" style="flex:1 1 360px"><div class="hd"><h2>How you're paid</h2></div><div class="bd" style="font-size:14px;line-height:1.6;display:flex;flex-direction:column;gap:10px">
       <div><b>Commission = monthly RMR × term multiple</b>, on deals at a ${Math.round((+c.minMargin||0.45)*100)}% margin or better.</div>
       <table class="tbl27" style="font-size:13.5px"><thead><tr><th>Term</th><th class="num">Multiple</th><th class="num">On $100/mo</th></tr></thead><tbody>${[12,24,36,48,60].map(t=>`<tr><td>${t} months</td><td class="num">${m[t]!=null?m[t]+'×':'—'}</td><td class="num">${m[t]!=null?money27(100*m[t]):'—'}</td></tr>`).join('')}</tbody></table>
-      <div><b>Payment 1</b> (half) is earned when the customer pays the first invoice. <b>Payment 2</b> (half) is earned three months after first billing, with every invoice due by then paid.</div>
+      <div><b>Payment 1</b> (half) is earned ${esc(earningWords27(c).p1)}. <b>Payment 2</b> (half) is earned ${esc(earningWords27(c).p2)}.</div>
       <div>Earned payments are verified by the 15th after quarter end and paid by the 30th. A payment not verified in time moves to the next quarter.</div>
       <div>Manual renewals pay ${c.renewalMult!=null?c.renewalMult+'×':'—'} the retained monthly RMR.</div>
       <button class="btn-ghost" id="mp27guide" style="align-self:flex-start">Open the full guide</button></div></div>

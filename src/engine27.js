@@ -251,6 +251,36 @@ function evaluateTranches(ev,ctx){
     if(sched.length)out.t2.conditions.push(`${sched.length} scheduled billing row(s) through ${timeDate} have no matched Vista invoice — they contribute nothing.`);
     if(!out.t2.conditions.length){ const dates=[timeDate,...due.filter(cashOk).map(evDate)].filter(Boolean).sort(); out.t2.state='Earned'; out.t2.earnedDate=dates.pop(); }
   }
+  if(ctx.rules&&(ctx.rules.t1==='invoice_issued'||ctx.rules.t1==='marked_sold'||ctx.rules.t2==='first_invoice_collected')) return earningByInvoice(out,firstBill,ctx,today,cashOk,evDate);
+  return out;
+}
+/* Hybrid v3 earning (Sean, 2026-10-04): Payment 1 is earned when the first nonzero invoice is ISSUED (agreement active);
+   Payment 2 is earned when that first invoice is PAID — expected within ctx.rules.expectDays (60) of its invoice date;
+   paid later, it is earned on the date it is paid. Nothing is forfeited for lateness. */
+function earningByInvoice(prev,firstBill,ctx,today,cashOk,evDate){
+  const r=ctx.rules, out={t1:prev.t1,t2:prev.t2};
+  if(r.t1==='marked_sold'){ const t1={state:'Conditional',conditions:[]}; const ms=ctx.markedSold;   // a Manager, Executive or Administrator recorded the commission event
+    if(!ctx.activationDate)t1.conditions.push('Agreement has no sale date.');
+    if(!ms)t1.conditions.push('Not marked sold yet — a Manager, Executive or Administrator records the commission event.');
+    if(ctx.cancelledDate&&ctx.activationDate&&ctx.cancelledDate<ctx.activationDate)t1.conditions.push('Cancelled before the sale date — Payment 1 is not earned (PAY-04).');
+    if(!t1.conditions.length){ t1.state='Earned'; t1.earnedDate=ctx.activationDate; t1.markedSoldBy=ms.by||null; t1.markedSoldOn=ms.on||null;
+      t1.dateBasis=`sale date — marked sold${ms.by?' by '+ms.by:''}${ms.on?' on '+ms.on:''}`; }
+    out.t1=t1; }
+  if(r.t1==='invoice_issued'){ const t1={state:'Conditional',conditions:[]};
+    if(!ctx.activationDate)t1.conditions.push('Agreement is not activated.');
+    if(!firstBill)t1.conditions.push('Awaiting Vista record — no issued first invoice yet (BIL-07).');
+    if(ctx.cancelledDate&&(!firstBill||firstBill.date>ctx.cancelledDate))t1.conditions.push('Cancelled before the first invoice — Payment 1 is not earned (PAY-04).');
+    if(!t1.conditions.length){ t1.state='Earned'; t1.earnedDate=[ctx.activationDate,firstBill.date].sort().pop(); t1.dateBasis='first invoice issued'; }
+    out.t1=t1; }
+  if(r.t2==='first_invoice_collected'){ const t2={state:'Conditional holdback',conditions:[]}; const days=+r.expectDays||60;
+    if(!firstBill){ t2.conditions.push('Waiting for the first invoice.'); }
+    else{ const expectBy=addDays(firstBill.date,days); t2.timeDate=expectBy; t2.expectBy=expectBy;
+      if(firstBill.status==='Settled by credit')t2.conditions.push('First invoice settled by credit — a credit is not cash collected (BIL-03).');
+      else if(!cashOk(firstBill))t2.conditions.push(today>expectBy?`First invoice ${firstBill.number} is past net ${days} (${expectBy}) and not paid yet — Payment 2 is earned when it is paid.`:`Waiting for payment of first invoice ${firstBill.number} — expected by ${expectBy} (net ${days}).`);
+      if(ctx.cancelledDate&&!(cashOk(firstBill)&&evDate(firstBill)<=ctx.cancelledDate))t2.conditions.push('Cancelled before the first invoice was paid — Payment 2 is not earned (PAY-04).'); }
+    if(!t2.conditions.length){ t2.state='Earned'; t2.earnedDate=[ctx.activationDate,evDate(firstBill)].filter(Boolean).sort().pop(); t2.dateBasis=firstBill.collected.date?'receipt date':'date of verified confirmation (VIS-10)';
+      if(t2.earnedDate>t2.expectBy)t2.late=true; }
+    out.t2=t2; }
   return out;
 }
 

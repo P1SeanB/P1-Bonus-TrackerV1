@@ -147,5 +147,15 @@ t('Engine (v2 switch): auto-renewal pays the increase at the new-sale multiple; 
   eq(E.toDollars(E.calculate({plan:v2,eventType:'rate_increase',term:24,newMrr:'90',priorMrr:'100',margin:M50}).totalCents),'0.00');
   eq(E.toDollars(E.calculate({plan:HYBRID,eventType:'auto_renewal',term:36,newMrr:'120',priorMrr:'100',margin:M50}).totalCents),'0.00'); });
 
+const R3={t1:'marked_sold',t2:'first_invoice_collected',expectDays:60};
+t('v3 rule: Payment 1 earns on the sale date once a manager marks it sold — no invoice needed',()=>{
+  const r=E.evaluateTranches({},{activationDate:'2026-08-15',today:'2026-10-04',invoices:[],rules:R3,markedSold:{by:'mgr@point1.com',on:'2026-10-04'}}); eq(r.t1.state,'Earned'); eq(r.t1.earnedDate,'2026-08-15'); eq(r.t2.state,'Conditional holdback');
+  const n=E.evaluateTranches({},{activationDate:'2026-08-15',today:'2026-10-04',invoices:[],rules:R3,markedSold:null}); eq(n.t1.state,'Conditional'); });
+t('v3 rule: Payment 2 earns when the first invoice is paid; past net 60 it waits, then pays when collected',()=>{
+  const ms={by:'m',on:'2026-08-20'};
+  const a=E.evaluateTranches({},{activationDate:'2026-08-01',today:'2026-10-04',invoices:[inv('1','2026-08-01','Paid','2026-09-10')],rules:R3,markedSold:ms}); eq(a.t2.state,'Earned'); eq(a.t2.earnedDate,'2026-09-10'); eq(!!a.t2.late,false);
+  const b=E.evaluateTranches({},{activationDate:'2026-07-01',today:'2026-10-04',invoices:[inv('1','2026-07-01','Invoiced',null)],rules:R3,markedSold:ms}); eq(b.t2.state,'Conditional holdback'); eq(/past net 60/.test(b.t2.conditions[0]),true);
+  const c=E.evaluateTranches({},{activationDate:'2026-07-01',today:'2026-10-04',invoices:[inv('1','2026-07-01','Paid','2026-09-20')],rules:R3,markedSold:ms}); eq(c.t2.state,'Earned'); eq(c.t2.earnedDate,'2026-09-20'); eq(c.t2.late,true); });
+
 results.forEach(r=>console.log(r[0]+'  '+r[1]));
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail?1:0);

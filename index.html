@@ -1249,6 +1249,36 @@ function evaluateTranches(ev,ctx){
     if(sched.length)out.t2.conditions.push(`${sched.length} scheduled billing row(s) through ${timeDate} have no matched Vista invoice — they contribute nothing.`);
     if(!out.t2.conditions.length){ const dates=[timeDate,...due.filter(cashOk).map(evDate)].filter(Boolean).sort(); out.t2.state='Earned'; out.t2.earnedDate=dates.pop(); }
   }
+  if(ctx.rules&&(ctx.rules.t1==='invoice_issued'||ctx.rules.t1==='marked_sold'||ctx.rules.t2==='first_invoice_collected')) return earningByInvoice(out,firstBill,ctx,today,cashOk,evDate);
+  return out;
+}
+/* Hybrid v3 earning (Sean, 2026-10-04): Payment 1 is earned when the first nonzero invoice is ISSUED (agreement active);
+   Payment 2 is earned when that first invoice is PAID — expected within ctx.rules.expectDays (60) of its invoice date;
+   paid later, it is earned on the date it is paid. Nothing is forfeited for lateness. */
+function earningByInvoice(prev,firstBill,ctx,today,cashOk,evDate){
+  const r=ctx.rules, out={t1:prev.t1,t2:prev.t2};
+  if(r.t1==='marked_sold'){ const t1={state:'Conditional',conditions:[]}; const ms=ctx.markedSold;   // a Manager, Executive or Administrator recorded the commission event
+    if(!ctx.activationDate)t1.conditions.push('Agreement has no sale date.');
+    if(!ms)t1.conditions.push('Not marked sold yet — a Manager, Executive or Administrator records the commission event.');
+    if(ctx.cancelledDate&&ctx.activationDate&&ctx.cancelledDate<ctx.activationDate)t1.conditions.push('Cancelled before the sale date — Payment 1 is not earned (PAY-04).');
+    if(!t1.conditions.length){ t1.state='Earned'; t1.earnedDate=ctx.activationDate; t1.markedSoldBy=ms.by||null; t1.markedSoldOn=ms.on||null;
+      t1.dateBasis=`sale date — marked sold${ms.by?' by '+ms.by:''}${ms.on?' on '+ms.on:''}`; }
+    out.t1=t1; }
+  if(r.t1==='invoice_issued'){ const t1={state:'Conditional',conditions:[]};
+    if(!ctx.activationDate)t1.conditions.push('Agreement is not activated.');
+    if(!firstBill)t1.conditions.push('Awaiting Vista record — no issued first invoice yet (BIL-07).');
+    if(ctx.cancelledDate&&(!firstBill||firstBill.date>ctx.cancelledDate))t1.conditions.push('Cancelled before the first invoice — Payment 1 is not earned (PAY-04).');
+    if(!t1.conditions.length){ t1.state='Earned'; t1.earnedDate=[ctx.activationDate,firstBill.date].sort().pop(); t1.dateBasis='first invoice issued'; }
+    out.t1=t1; }
+  if(r.t2==='first_invoice_collected'){ const t2={state:'Conditional holdback',conditions:[]}; const days=+r.expectDays||60;
+    if(!firstBill){ t2.conditions.push('Waiting for the first invoice.'); }
+    else{ const expectBy=addDays(firstBill.date,days); t2.timeDate=expectBy; t2.expectBy=expectBy;
+      if(firstBill.status==='Settled by credit')t2.conditions.push('First invoice settled by credit — a credit is not cash collected (BIL-03).');
+      else if(!cashOk(firstBill))t2.conditions.push(today>expectBy?`First invoice ${firstBill.number} is past net ${days} (${expectBy}) and not paid yet — Payment 2 is earned when it is paid.`:`Waiting for payment of first invoice ${firstBill.number} — expected by ${expectBy} (net ${days}).`);
+      if(ctx.cancelledDate&&!(cashOk(firstBill)&&evDate(firstBill)<=ctx.cancelledDate))t2.conditions.push('Cancelled before the first invoice was paid — Payment 2 is not earned (PAY-04).'); }
+    if(!t2.conditions.length){ t2.state='Earned'; t2.earnedDate=[ctx.activationDate,evDate(firstBill)].filter(Boolean).sort().pop(); t2.dateBasis=firstBill.collected.date?'receipt date':'date of verified confirmation (VIS-10)';
+      if(t2.earnedDate>t2.expectBy)t2.late=true; }
+    out.t2=t2; }
   return out;
 }
 
@@ -5231,9 +5261,16 @@ function priceEvent27(a,e,res,ov){
   catch(err){ out.blocked=err.message; out.blockedField=err.field||null; return out; }
   if(!override){ const inv=agreementInvoices(a); const ctx=e.kind==='new_sale'?inv:inv.filter(i=>String(i.date)>=e.date);
     const k=out.evRow?{totalCents:BigInt(out.evRow.total_cents),tranche1Cents:BigInt(out.evRow.snapshot.tranche1Cents),tranche2Cents:BigInt(out.evRow.snapshot.tranche2Cents)}:out.calc;
-    out.tranches=E27.evaluateTranches(k,{activationDate:e.date,ended:isEnded(a),cancelledDate:a.ended_date||null,invoices:ctx,offsetMonths:3}); }
+    out.tranches=E27.evaluateTranches(k,{activationDate:e.date,ended:isEnded(a),cancelledDate:a.ended_date||null,invoices:ctx,offsetMonths:+(res.version.config.releaseOffsetMonths||3),rules:earningRules27(res.version),markedSold:out.evRow?{by:out.evRow.created_by||null,on:String(out.evRow.created_at||'').slice(0,10)||null}:null}); }
   return out;
 }
+/* Plain-words earning rules for the version the rep is on (plan editor terms, rep views, agreement drawer). */
+function earningWords27(c){ c=c||{}; const d=+c.tranche2ExpectDays||60;
+  const p1=c.tranche1Trigger==='marked_sold'?'when a manager marks the sale sold in the tracker and it meets the margin rule':c.tranche1Trigger==='invoice_issued'?'when the first invoice is issued':'when the customer pays the first invoice';
+  const p2=c.tranche2Trigger==='first_invoice_collected'?`when the customer pays the first invoice — expected within ${d} days of the invoice date; if it is paid later, on the day it is paid`:`${c.releaseOffsetMonths||3} months after first billing, with every invoice due by then paid`;
+  return {p1,p2,k1:c.tranche1Trigger==='marked_sold'?'payment 1s, earned once marked sold':c.tranche1Trigger==='invoice_issued'?'payment 1s, earned when the first invoice is issued':'payment 1s, earned when the first invoice is paid',
+    k2:c.tranche2Trigger==='first_invoice_collected'?`payment 2s, earned when the first invoice is paid (net ${d})`:'payment 2s, earned three months after first billing'}; }
+function earningRules27(v){ const c=(v&&v.config)||{}; return (c.tranche1Trigger||c.tranche2Trigger)?{t1:c.tranche1Trigger||null,t2:c.tranche2Trigger||null,expectDays:+c.tranche2ExpectDays||60}:null; }
 function pricedEvents27(a){
   if(!a||!isRevisedTransaction(a))return null;
   const hit=PRICE_CACHE.get(a); if(hit&&hit.stamp===PRICE_STAMP&&hit.rev===a.updated_at)return hit.out;
@@ -5255,7 +5292,7 @@ function hybridLines27(a){
         rstate=has('paid')?'paid':has('payable')?'approved':(t&&t.state==='Earned'?'earned':'expected');
         date=t&&t.earnedDate||null;
         if(rstate==='paid')note='paid'; else if(rstate==='approved')note='approved for payroll'; else if(rstate==='earned')note=p.evRow?`earned ${t.earnedDate}`:`earned ${t.earnedDate} — record the event to pay it`;
-        else { note=!p.evRow?'Not recorded yet.':friendlyCond27(((t&&t.conditions)||[])[0]||'Conditions not met yet.');
+        else { note=!p.evRow?'Not marked sold yet.':friendlyCond27(((t&&t.conditions)||[])[0]||'Conditions not met yet.');
           if(!date) date=n===1?p.date:(t&&t.timeDate)||E27.addMonthsClamp(p.date,3); } }
       lines.push({a,p,uid:p.uid,tranche:n,piece:n,cents:c,amount,rstate,note,qi:qiOf(date),date,label,t,override:p.override,kind:p.e.kind}); }); });
   return lines;
@@ -5276,7 +5313,7 @@ async function recordHybridEvent27(a,p){
   const snap=ser({planLabel:res.version.label,planVersionId:res.version.id,eventType:p.et,kind:p.e.kind,renewalType:p.e.renewalType||null,term:p.term,termStart:p.e.termStart||null,termEnd:p.e.termEnd||null,
     eligibleMrr:String(p.e.next),priorMrr:p.e.prior,highWater:p.e.highWater??null,source:p.e.fromAgreement?'agreement':'Vista Agreement List',margin:p.margin?E27.ratStr(p.margin,6):null,marginInputs:cv.costs,costVersion:cv.version_no,
     components:c.components,gate:c.gate,totalCents:c.totalCents,tranche1Cents:c.tranche1Cents,tranche2Cents:c.tranche2Cents,shares:c.shares,
-    earningConditions:'T1: first nonzero invoice from the event date fully collected; T2: 3 calendar months after that first billing, active, all invoices due collected',calculatedAt:new Date().toISOString(),formulaVersion:E27.FORMULA_VERSION,costMode:'modelled'});
+    earningConditions:(()=>{ const w=earningWords27(res.version.config); return `Payment 1: earned ${w.p1}; Payment 2: earned ${w.p2}`; })(),calculatedAt:new Date().toISOString(),formulaVersion:E27.FORMULA_VERSION,costMode:'modelled'});
   const ev={event_uid:p.uid,agreement_id:a.id,agreement_number:a.agreement_number,event_type:p.et,event_date:p.date,plan_version_id:res.version.id,cost_version_id:cv.id||null,
     opportunity_number:a.opportunity_number||null,quote_ref:a.quote_ref||null,snapshot:snap,formula_version:E27.FORMULA_VERSION,cost_mode:'modelled',total_cents:Number(c.totalCents),created_by:CURRENT_EMAIL};
   const r1=await sb.from('rmr_comm_events').insert(ev).select(); if(r1.error)return {error:/check constraint/i.test(r1.error.message)?'Run migration_v27_terms_renewals.sql first (new event types).':r1.error.message};
@@ -5700,7 +5737,7 @@ function payoutItems(run){
       // every event (sale, renewal, rate change) pays in two parts; anything sold before the plan's paid-through date was paid under the manager override
       hybridLines27(a).forEach(l=>{ if(l.override)return; const t=l.t||{conditions:[]}; const paid=l.rstate==='paid';
         const earned=t.state==='Earned', inQ=earned&&t.earnedDate<=run.quarterEnd;
-        const cl=paid?{state:'Excluded from this run',reason:'Already paid.'}:(!l.p.evRow?{state:'Excluded from this run',reason:'Not recorded yet — record this commission event on the Renewals page.'}:(!earned?{state:'Excluded from this run',reason:(t.conditions||[]).join(' ')}:(!inQ?{state:'Excluded from this run',reason:'Earned after quarter end — next run.'}:{state:'Ready to pay',reason:`Earned ${t.earnedDate} on verified evidence.`})));
+        const cl=paid?{state:'Excluded from this run',reason:'Already paid.'}:(!l.p.evRow?{state:'Excluded from this run',reason:'Not marked sold yet — a manager records this commission event on the Renewals page.'}:(!earned?{state:'Excluded from this run',reason:(t.conditions||[]).join(' ')}:(!inQ?{state:'Excluded from this run',reason:'Earned after quarter end — next run.'}:{state:'Ready to pay',reason:`Earned ${t.earnedDate} on verified evidence.`})));
         items.push({a,label:l.label,amount:l.amount,cents:l.cents,tranche:l.tranche,revised:true,evRow:l.p.evRow,earnedDate:t.earnedDate||null,kind:l.kind,...cl}); });
       return; }
     const pieces=[]; if(c.legacyFull){ if(c.initialQI===qi)pieces.push(['initial','paid_initial',frozenAmount(a,'initial').amount]); }
@@ -5764,7 +5801,7 @@ function termsText(v){
   `Renewal type follows the contract term recorded in Vista: a 12-month term renews manually; longer terms auto-renew. An Administrator may switch the type for a term. A term within one month of a standard term (co-terminous stub months) counts as that term.\n`+
   `SLA agreements: annual recurring value ÷ 12, then 12 mo ${sl[12]}×, 24 mo ${sl[24]}×, 36 mo ${sl[36]}×, 48 mo ${sl[48]}×, 60 mo ${sl[60]}×; SLA renewal ${c.slaRenewalMult}× retained.\n`+
   `Margin: gross margin on modelled direct cost over the committed term must be at least ${Math.round((+c.minMargin||0)*100)}% (multiplier 1.0); below it pays 0; unknown margin cannot qualify.\n`+
-  `Earning: ${Math.round((+c.tranche1Pct||0)*100)}% is earned when the signed agreement is activated and its first valid nonzero invoice is fully collected; ${Math.round((+c.tranche2Pct||0)*100)}% is earned three calendar months after first actual billing with the account active and every invoice due through that date paid. Renewals and rate increases earn the same way, counted from the first invoice of the new rate. Earned amounts are paid quarterly within ${(P27.settings.payout_calendar||{}).payWithinDays||30} days of quarter end; collections must be verified within ${(P27.settings.payout_calendar||{}).verifyWithinDays||15} days of quarter end. ${c.appliesToAllAgreements?`This version applies to every agreement of the assigned rep, whatever its sale date.${c.paidThrough?` Commissions on sales, renewals and rate changes dated on or before ${c.paidThrough} were paid under the prior plan and are recorded as paid by manager override (approved by ${c.paidThroughApprovedBy||'—'}${c.paidThroughNote?': '+c.paidThroughNote:''}), whatever their margin; the margin rule and these terms govern everything after that date.`:''}`:"A transaction signed before this version's effective date keeps its historical plan for both tranches."}\n`+
+  `Earning: ${c.tranche1Trigger==='marked_sold'?`${Math.round((+c.tranche1Pct||0)*100)}% (Payment 1) is earned once a Manager, Executive or Administrator marks the sale sold in the tracker (records its commission event) and it meets the margin rule; it counts in the quarter of the sale date, or the next payout after it is marked sold`:c.tranche1Trigger==='invoice_issued'?`${Math.round((+c.tranche1Pct||0)*100)}% (Payment 1) is earned when the signed agreement is active and its first nonzero invoice is issued`:`${Math.round((+c.tranche1Pct||0)*100)}% is earned when the signed agreement is activated and its first valid nonzero invoice is fully collected`}; ${c.tranche2Trigger==='first_invoice_collected'?`${Math.round((+c.tranche2Pct||0)*100)}% (Payment 2) is earned when the first invoice is paid — expected within ${c.tranche2ExpectDays||60} days of its invoice date (net ${c.tranche2ExpectDays||60}); if it is paid later, Payment 2 is earned on the date it is paid`:`${Math.round((+c.tranche2Pct||0)*100)}% is earned three calendar months after first actual billing with the account active and every invoice due through that date paid`}. Renewals and rate increases earn the same way, counted from the first invoice of the new rate. Earned amounts are paid quarterly within ${(P27.settings.payout_calendar||{}).payWithinDays||30} days of quarter end; collections must be verified within ${(P27.settings.payout_calendar||{}).verifyWithinDays||15} days of quarter end. ${c.appliesToAllAgreements?`This version applies to every agreement of the assigned rep, whatever its sale date.${c.paidThrough?` Commissions on sales, renewals and rate changes dated on or before ${c.paidThrough} were paid under the prior plan and are recorded as paid by manager override (approved by ${c.paidThroughApprovedBy||'—'}${c.paidThroughNote?': '+c.paidThroughNote:''}), whatever their margin; the margin rule and these terms govern everything after that date.`:''}`:"A transaction signed before this version's effective date keeps its historical plan for both tranches."}\n`+
   `Portfolio bonus: highest satisfied tier each of GRR (${(c.grrBonus||[]).map(t=>`${Math.round(t.min*1000)/10}%→${Math.round(t.pct*1000)/10}%`).join(', ')}) and NRR (${(c.nrrBonus||[]).map(t=>`${Math.round(t.min*1000)/10}%→${Math.round(t.pct*1000)/10}%`).join(', ')}) of base salary accrued over the calendar year, paid by February 15.\n`+
   `Cancellation before earning stops the unearned tranche. Refunds, credits, cancellation after earning and separation require a documented adjustment decision; nothing is deducted from salary or clawed back automatically. Approved by ${v.approved_by||'—'}.`;
 }
@@ -5828,7 +5865,10 @@ function renderAdmin27(){
       <div class="qctx" style="margin-top:6px">Highest satisfied tier within each measure; GRR and NRR awards add. Unavailable metric = Unknown, never a $0 final bonus.</div></div></div>
     <div class="panel"><div class="panel-head"><h2>Payment rules</h2></div><div class="admin-body">
       <div class="cfg-two"><div><label class="cfg-lbl">Tranche 1</label>${inp('p_t1',pct(c.tranche1Pct),'type="number" step="1"')} %</div><div><label class="cfg-lbl">Tranche 2</label>${inp('p_t2',pct(c.tranche2Pct),'type="number" step="1"')} %</div></div>
-      <label class="cfg-lbl">Tranche 2 time condition</label>${inp('p_off',c.releaseOffsetMonths,'type="number" step="1" style="width:60px"')} calendar months after first actual billing
+      <label class="cfg-lbl">Payment 1 is earned when</label><select class="cfg-in" id="p_t1trig" ${ed?'':'disabled'}><option value="" ${!c.tranche1Trigger?'selected':''}>the first invoice is paid</option><option value="marked_sold" ${c.tranche1Trigger==='marked_sold'?'selected':''}>a manager marks the sale sold (and it meets the margin rule)</option><option value="invoice_issued" ${c.tranche1Trigger==='invoice_issued'?'selected':''}>the first invoice is issued</option></select>
+      <label class="cfg-lbl">Payment 2 is earned when</label><select class="cfg-in" id="p_t2trig" ${ed?'':'disabled'}><option value="" ${!c.tranche2Trigger?'selected':''}>N months after first billing, all invoices due paid</option><option value="first_invoice_collected" ${c.tranche2Trigger==='first_invoice_collected'?'selected':''}>the first invoice is paid (expected within the days below)</option></select>
+      <div class="cfg-two"><div><label class="cfg-lbl">First invoice expected paid within</label>${inp('p_t2days',c.tranche2ExpectDays||60,'type="number" step="1" style="width:60px"')} days (net)</div><div><label class="cfg-lbl">Time condition (months)</label>${inp('p_off',c.releaseOffsetMonths,'type="number" step="1" style="width:60px"')}</div></div>
+      <div class="qctx">A first invoice paid after the net days still earns Payment 2, on the day it is paid.</div>
       <div class="qctx" style="margin-top:6px">Both tranches also require confirmed collection (PAY-01/02). The 25%-collected shortcut and the net-profit release test are off for revised events.</div></div></div>
     <div class="panel"><div class="panel-head"><h2>Agreements &amp; renewals</h2><span class="qctx">written into the terms the rep acknowledges</span></div><div class="admin-body" style="font-size:12.5px">
       <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px"><input type="checkbox" id="r_all" ${c.appliesToAllAgreements?'checked':''} ${ed?'':'disabled'}> <span>Applies to <b>every agreement</b> of a rep assigned to this version, whatever the sale date (old and new, every quarter)</span></label>
@@ -5869,6 +5909,7 @@ function readDraft27(v){
   c.marginGate=c.minMargin!=null?[{min:c.minMargin,mult:'1.0'},{min:'0',mult:'0'}]:null;
   const tiers=(p)=>[0,1,2,3].map(i=>({min:frac(g(`b_${p}min${i}`)),pct:frac(g(`b_${p}pct${i}`))})).filter(t=>t.min!=null&&t.pct!=null);
   c.grrBonus=tiers('g'); c.nrrBonus=tiers('n'); c.tranche1Pct=frac(g('p_t1')); c.tranche2Pct=frac(g('p_t2')); c.releaseOffsetMonths=num(g('p_off'));
+  if($('p_t1trig')){ c.tranche1Trigger=g('p_t1trig')||undefined; c.tranche2Trigger=g('p_t2trig')||undefined; c.tranche2ExpectDays=c.tranche2Trigger?(num(g('p_t2days'))||60):undefined; }
   [...Object.values(nm),...Object.values(sm),c.renewalMult,c.slaRenewalMult,c.accelMultiplier].forEach(x=>{ if(x!=null&&!/^\d+(\.\d+)?$/.test(x))errs.push(`"${x}" is not a decimal multiple.`); });
   if(c.accelMultiplier!=null&&+c.accelMultiplier<1)errs.push('Accelerator must be 1.0 or higher.');
   if(!c.placeholder){ c.termConversionMult='0'; c.autoRenewalMult='0'; c.escalatorMult='0'; }
@@ -6431,7 +6472,7 @@ function viewAgreement27(id){
      <table style="width:100%;font-size:12.5px;margin-top:8px"><thead><tr><th style="text-align:left">Payment</th><th class="num">Amount</th><th>Status</th><th style="text-align:left">What it's waiting on</th></tr></thead><tbody>
      ${ls.map(l=>{ const t=l.t||(l.piece===1?tr.t1:tr.t2); const m=RSTATE27[l.rstate]; const waits=l.rstate==='expected'?((t&&t.conditions)||[]).map(friendlyCond27).map(esc).join('<br>')||esc(l.note):esc(l.note);
        return `<tr><td style="white-space:nowrap">${esc(l.label||`Payment ${l.piece} of 2`)}</td><td class="num mono">${fmt2(l.amount)}</td><td><span class="chip ${m[0]}" style="font-size:9px">${m[1]}</span></td><td style="white-space:normal">${waits}</td></tr>`; }).join('')}</tbody></table>
-     <div class="qctx" style="margin-top:6px">Payment 1 is earned when the first invoice is paid. Payment 2 is earned three months after first billing, with the account active and every invoice due by then paid.</div>`;
+     <div class="qctx" style="margin-top:6px">${(()=>{ const r=resolveRevised(a.owner_email,eventDateOf(a)||E27.businessToday()); const w=earningWords27(r&&r.version&&r.version.config); return `Payment 1 is earned ${esc(w.p1)}. Payment 2 is earned ${esc(w.p2)}.`; })()}</div>`;
   } else if(c.planNotConfigured||c.blockedReason){ comm=`<div style="color:var(--orange)">${esc(plainText27(c.blockedReason||c.planReason||'Plan not configured'))}</div>`; }
   else { comm=`${row('Initial commission',fmt2(c.initialCommission||0))}${c.holdbackCommission?row('Deferred piece',fmt2(c.holdbackCommission)+(c.holdbackQI!=null?' · '+qLabel(c.holdbackQI):'')):''}${c.renewalCommission?row('Renewal commission',fmt2(c.renewalCommission)):''}<div class="qctx" style="margin-top:6px">Sold before the revised plan — paid under the plan it was sold on.</div>`; }
   const evs=committedEventsFor(a);
@@ -7110,8 +7151,8 @@ function renderMyPay27(){
   const pill=s=>s==='paid'?'<span class="pill27 paid">Paid</span>':s==='earned'?'<span class="pill27 ear">Earned</span>':'<span class="pill27 exp">Expected</span>';
   el.innerHTML=`<div class="kpis27">
      <div class="kpi27 hero"><span class="k">Next commission payment</span><span class="v">${money27(next)}</span><span class="s">${next>0?`Q${nextRun.q} ${nextRun.y} payout · paid by ${fmtD27(nextRun.payBy)} · final once approved`:'Nothing earned yet — see Waiting on payment'}</span></div>
-     <div class="kpi27"><span class="k">Waiting on payment</span><span class="v">${money27(waiting)}</span><span class="s">payment 1s, earned when the first invoice is paid</span></div>
-     <div class="kpi27"><span class="k">Expected later</span><span class="v">${money27(expected)}</span><span class="s">payment 2s, earned three months after first billing</span></div>
+     <div class="kpi27"><span class="k">Waiting on payment</span><span class="v">${money27(waiting)}</span><span class="s">${esc(myEarnWords27().k1)}</span></div>
+     <div class="kpi27"><span class="k">Expected later</span><span class="v">${money27(expected)}</span><span class="s">${esc(myEarnWords27().k2)}</span></div>
      <div class="kpi27"><span class="k">Paid to date</span><span class="v">${money27(paidAll)}</span><span class="s">on payroll</span></div></div>
    <div class="row27">
     <div class="card27" style="flex:999 1 520px"><div class="hd"><h2>Commission by quarter</h2><div class="legend27"><span><i style="background:${RAMP27.expected}"></i>Expected</span><span><i style="background:${RAMP27.earned}"></i>Earned</span><span><i style="background:${RAMP27.paid}"></i>Paid</span></div></div>
@@ -7150,6 +7191,10 @@ function openQuestion27(l){
     audit('Rep question sent','Worklist',it.record_ref,null,{piece:l.label,question:t},null); closeDrawer27(); P27.worklist=await fetchAll('rmr_worklist','id'); render(); toast('Question sent'); };
 }
 
+function myEarnWords27(){ const me=lc27(CURRENT_EMAIL), today=E27.businessToday();
+  const asg=P27.assignments.filter(x=>lc27(x.email)===me).sort((x,y)=>String(y.effective_from).localeCompare(String(x.effective_from)));
+  const cur=asg.find(x=>x.effective_from<=today&&(!x.effective_to||today<x.effective_to))||asg[0]||null; const v=cur?versionById(cur.plan_version_id):null;
+  return earningWords27((v&&v.config)||{}); }
 /* ---------------- Rep: My plan ---------------- */
 function renderMyPlan27(){
   const host=$('myplanHost27'); if(!host)return; if(!P27.ready){ host.innerHTML='<div class="card27"><div class="bd">Loading…</div></div>'; return; }
@@ -7167,7 +7212,7 @@ function renderMyPlan27(){
     <div class="card27" style="flex:1 1 360px"><div class="hd"><h2>How you're paid</h2></div><div class="bd" style="font-size:14px;line-height:1.6;display:flex;flex-direction:column;gap:10px">
       <div><b>Commission = monthly RMR × term multiple</b>, on deals at a ${Math.round((+c.minMargin||0.45)*100)}% margin or better.</div>
       <table class="tbl27" style="font-size:13.5px"><thead><tr><th>Term</th><th class="num">Multiple</th><th class="num">On $100/mo</th></tr></thead><tbody>${[12,24,36,48,60].map(t=>`<tr><td>${t} months</td><td class="num">${m[t]!=null?m[t]+'×':'—'}</td><td class="num">${m[t]!=null?money27(100*m[t]):'—'}</td></tr>`).join('')}</tbody></table>
-      <div><b>Payment 1</b> (half) is earned when the customer pays the first invoice. <b>Payment 2</b> (half) is earned three months after first billing, with every invoice due by then paid.</div>
+      <div><b>Payment 1</b> (half) is earned ${esc(earningWords27(c).p1)}. <b>Payment 2</b> (half) is earned ${esc(earningWords27(c).p2)}.</div>
       <div>Earned payments are verified by the 15th after quarter end and paid by the 30th. A payment not verified in time moves to the next quarter.</div>
       <div>Manual renewals pay ${c.renewalMult!=null?c.renewalMult+'×':'—'} the retained monthly RMR.</div>
       <button class="btn-ghost" id="mp27guide" style="align-self:flex-start">Open the full guide</button></div></div>

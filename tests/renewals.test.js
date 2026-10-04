@@ -74,7 +74,7 @@ async function open(browser,email){ const ctx=await browser.newContext({viewport
   let items=await p.evaluate(()=>{ const run=E27.payoutCalendar(P27.settings.payout_calendar); return {q:run.q,y:run.y,items:payoutItems(run).map(i=>({n:i.a.agreement_number,l:i.label,s:i.state,r:i.reason,amt:i.amount}))}; });
   ok(items.q===3&&items.y===2026,'payout run is Q3 2026');
   ok(!items.items.some(i=>['203','204'].includes(i.n)),'override-paid history never appears in the payout run');
-  ok(items.items.filter(i=>i.n==='201').every(i=>/Not recorded yet/.test(i.r)),'unrecorded renewal is excluded with "record it" reason');
+  ok(items.items.filter(i=>i.n==='201').every(i=>/Not marked sold yet/.test(i.r)),'unrecorded renewal is excluded with "record it" reason');
   // switch 201 to manual for this term → manual renewal pays 0.25 × $100 + $20 × 1.0 = $45; back to the rule → $20
   await p.evaluate(()=>switchView('renewals')); await p.waitForTimeout(500);
   ok(await p.evaluate(()=>!!document.getElementById('terms27')&&/Contract terms &amp; renewals from Vista|Contract terms & renewals from Vista/.test(document.getElementById('terms27').innerHTML)),'Renewals page shows contract terms from Vista');
@@ -107,6 +107,17 @@ async function open(browser,email){ const ctx=await browser.newContext({viewport
   ok(r201.some(i=>i.l==='Renewal · Payment 2 of 2'&&/after quarter end|next run/.test(i.r)),'renewal Payment 2 waits for the next run (three months after 7/1 billing)');
   ok(await p.evaluate(()=>{ const v=P27.versions.find(x=>x.id==='v-hyb2'); const t=termsText(v); return /pay only the increase/.test(t)&&/manager override \(approved by Sean Bithell \(self-approved\)/.test(t)&&/applies to every agreement/.test(t)&&/12-month term renews manually/.test(t); }),'written terms state the v2 rules and the override');
   ok(await p.evaluate(()=>{ const L=myLines27(); return L.some(l=>l.a.agreement_number==='203'&&l.state==='paid'&&/manager override/.test(l.note)); }),'My pay lists pre-Q3 commissions as paid by override');
+  // Hybrid v3 earning rules: Payment 1 once a manager marks the sale sold (records the event); Payment 2 when the first invoice is paid (net 60)
+  items=await p.evaluate(()=>{ const v=P27.versions.find(x=>x.id==='v-hyb2'); Object.assign(v.config,{tranche1Trigger:'marked_sold',tranche2Trigger:'first_invoice_collected',tranche2ExpectDays:60}); PRICE_STAMP++;
+    const run=E27.payoutCalendar(P27.settings.payout_calendar); return payoutItems(run).map(i=>({n:i.a.agreement_number,l:i.label,s:i.state,r:i.reason||'',amt:i.amount})); });
+  const s205=items.filter(i=>i.n==='205');
+  ok(s205.some(i=>i.l==='Payment 1 of 2'&&i.s==='Ready to pay'&&i.amt===100),'v3: the $200 sale has Payment 1 ($100) ready once marked sold, with no invoice yet: '+JSON.stringify(s205));
+  ok(!s205.some(i=>i.l==='Payment 2 of 2'&&i.s==='Ready to pay'),'v3: its Payment 2 waits for the first invoice to be paid');
+  ok(items.some(i=>i.n==='202'&&/Payment 2/.test(i.l)&&i.s==='Ready to pay'),'v3: manual renewal Payment 2 is ready — first invoice 8/1 paid 8/12, inside net 60');
+  ok(await p.evaluate(()=>{ const t=termsText(P27.versions.find(x=>x.id==='v-hyb2')); return /marks the sale sold/.test(t)&&/net 60/.test(t); }),'v3 written terms state both earning rules');
+  ok(await p.evaluate(()=>{ const a=AGREEMENTS.find(x=>x.agreement_number==='205'); const P=pricedEvents27(a); const t=P[0].tranches; return t.t1.state==='Earned'&&/marked sold by/.test(t.t1.dateBasis)&&/Waiting for the first invoice/.test(t.t2.conditions[0]); }),'v3: Payment 1 shows who marked it sold; Payment 2 says it waits for the first invoice');
+  ok(await p.evaluate(()=>{ const v=P27.versions.find(x=>x.id==='v-hyb2'); Object.assign(v.config,{tranche1Trigger:'marked_sold'}); PRICE_STAMP++;
+    const a=AGREEMENTS.find(x=>x.agreement_number==='206'); const P=pricedEvents27(a)||[]; return !P.some(e=>e.tranches&&e.tranches.t1&&e.tranches.t1.state==='Earned'); }),'v3: a sale below the margin floor is never earned');
   await p.evaluate(()=>{ openModal('a-201'); }); await p.waitForTimeout(500);
   ok(await p.evaluate(()=>/Original start 2023-07-01 · 1 renewal/.test(document.getElementById('agSummary27').innerText)),'agreement header shows original start and renewal count');
   await p.evaluate(()=>closeModal());
