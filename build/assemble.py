@@ -12,5 +12,5 @@ tail_block='</script>\n<script>\n/*V27-UI*/\n'+src('ui27.js')+'\n/*/V27-UI*/\nre
 if '/*V27-UI*/' in s: s=re.sub(r'</script>\n<script>\n/\*V27-UI\*/.*?</body>',lambda m:tail_block,s,flags=re.S)
 else:
     old='renderLegend();\nboot();\n</script>\n</body>'; assert s.count(old)==1; s=s.replace(old,tail_block)
-s=s.replace("const APP_VERSION='P1RMR-55';","const APP_VERSION='P1RMR-56 · spec 2.7';")
+s=s.replace("const APP_VERSION='P1RMR-55';","const APP_VERSION='P1RMR-57 · spec 2.7';")
 open(p,'w',encoding='utf-8').write(s); print('assembled', len(s))

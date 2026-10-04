@@ -267,8 +267,8 @@ function revisedPreviewHTML(row,c){
 function bindRevisedPreview(row,c){
   document.querySelectorAll('[data-commit27]').forEach(b=>b.onclick=()=>commitEvent27(b.dataset.commit27));
 }
-async function commitEvent27(type){
-  const a=editingId?AGREEMENTS.find(x=>x.id===editingId):null; if(!a){toast('Save the agreement first');return;}
+async function commitEvent27(type,aid){
+  const _id=aid||editingId; const a=_id?AGREEMENTS.find(x=>x.id===_id):null; if(!a){toast('Save the agreement first');return false;}
   if(!P27.ready){toast('Run migration_v22_spec27.sql first');return;}
   const res=resolveRevised(a.owner_email,eventDateOf(a)); if(res.state!=='ok'){toast(res.reason);return;}
   const inp=revisedInputs(a);
@@ -296,7 +296,7 @@ async function commitEvent27(type){
   const entries=[]; calc.shares.forEach(s=>{ [[1,s.t1Cents],[2,s.t2Cents]].forEach(([t,amt])=>entries.push({entry_uid:`${uid}|T${t}|qualified|${s.email}`,event_uid:uid,tranche:t,stage:'qualified',recipient_email:s.email,amount_cents:Number(amt),actor:CURRENT_EMAIL})); });
   await sb.from('rmr_ledger_entries').insert(entries);
   audit('Commission event created','Ledger',a.agreement_number,null,{event_uid:uid,total:E27.toDollars(calc.totalCents),plan:res.version.label},null);
-  await load27(); toast('Commission event recorded — '+E27.fmtCents(calc.totalCents)); updatePreview(); renderCommHist27(a); render();
+  await load27(); toast('Sale recorded — '+E27.fmtCents(calc.totalCents)+' commission'); if(!aid){ updatePreview(); renderCommHist27(a); } render(); return true;
 }
 function renderCosts27(a){
   const box=$('costs27'); if(!box)return;
@@ -479,7 +479,8 @@ window.P1Import={ scheduled:(feed,file)=>stageFile(feed,file,'scheduled'), manua
 let WL_FILTER={owner:'__me',type:'all',age:'all',status:'open'};
 const WL_TYPES={unmatched_vista:['Unmatched Vista record','VIS-06','recon'],import_exception:['Import exception / parse failure','VIS-15','recon'],cost_classification:['Unresolved cost classification','CST-05','recon'],
   cost_variance:['Posted vs Modelled variance','CST-07','agreements'],cost_unverified:['Cost basis unverified','CST-13','agreements'],recipient_unresolved:['Historical recipient unresolved','TEC-07','agreements'],
-  migration_exception:['Migration reconciliation exception','MIG-09','agreements'],overdue_feed:['Overdue payout-critical feed','VIS-12','recon'],plan_ack_missing:['Plan acknowledgement missing','COM-07','admin']};
+  migration_exception:['Migration reconciliation exception','MIG-09','agreements'],overdue_feed:['Overdue payout-critical feed','VIS-12','recon'],plan_ack_missing:['Plan acknowledgement missing','COM-07','admin'],
+  deal_won:['Deal won — set up the agreement','','opportunities'],sale_unrecorded:['Sale not recorded yet','','agreements']};
 async function openWorkItem(it){ try{ await sb.from('rmr_worklist').upsert(it,{onConflict:'item_uid',ignoreDuplicates:true}); }catch(_){} }
 async function syncDerivedItems(){
   if(!P27.ready||!can('verifyEvidence'))return;
@@ -487,13 +488,16 @@ async function syncDerivedItems(){
   ['invoices','receipts'].forEach(f=>{ const h=feedHealth(f); if(h.due.state==='overdue') want.push({item_uid:`overdue:${f}:${run.y}Q${run.q}`,type:'overdue_feed',record_ref:f,title:`${V27.FEEDS[f].label} feed is overdue for the Q${run.q} ${run.y} payout run`,detail:{feed:f,cutoff:run.cutoff},owner_email:((P27.settings.feed_owners||{})[f]||{}).owner||'sean.bithell@point1.com',due_date:run.cutoff}); });
   AGREEMENTS.filter(a=>isLiveAgreement(a)&&!isEnded(a)).forEach(a=>{ const mc=E27.modelledCost(a); if(mc.state==='legacy_only') want.push({item_uid:`costunv:${a.id}`,type:'cost_unverified',record_ref:a.agreement_number,title:`#${a.agreement_number} ${a.customer_name||''}: Cost basis unverified — enter an itemised breakdown`,detail:{agreement_id:a.id},owner_email:a.cost_owner_email||a.owner_email,due_date:a.cost_deadline||E27.addDays(E27.businessToday(),30)}); });
   P27.assignments.forEach(x=>{ const v=versionById(x.plan_version_id); if(v&&v.status==='published'&&!P27.acks.some(k=>String(k.email).toLowerCase()===String(x.email).toLowerCase()&&String(k.plan_version_id)===String(v.id))) want.push({item_uid:`ack:${x.email}:${v.id}`,type:'plan_ack_missing',record_ref:x.email,title:`${x.email} has not acknowledged ${v.label} — no transaction calculates under it until they do`,detail:{plan_version_id:v.id},owner_email:x.email,due_date:v.effective_date}); });
+  const setupOwner=(((P27.settings.feed_owners||{}).agreement_terms||{}).owner)||ADMIN_EMAILS[0];
+  AGREEMENTS.filter(a=>isLiveAgreement(a)&&!isEnded(a)&&!a.history_only&&isRevisedTransaction(a)&&a.activation_date&&+a.monthly_rmr>0&&!committedEventsFor(a).length).forEach(a=>want.push({item_uid:`sale:${a.id}`,type:'sale_unrecorded',record_ref:a.agreement_number,title:`#${a.agreement_number} ${a.customer_name||''}: agreement saved but the sale isn't recorded — no commission until it is`,detail:{owner:a.owner_email},owner_email:setupOwner,due_date:E27.addDays(E27.businessToday(),7)}));
   const have=new Set(P27.worklist.map(w=>w.item_uid)); const add=want.filter(w=>!have.has(w.item_uid));
   if(add.length){ await sb.from('rmr_worklist').upsert(add,{onConflict:'item_uid',ignoreDuplicates:true}); }
   // derived conditions that no longer hold are closed with that as the recorded basis (never silently)
   const wantSet=new Set(want.map(w=>w.item_uid));
-  for(const w of P27.worklist.filter(w=>w.status==='open'&&/^(overdue|costunv|ack):/.test(w.item_uid)&&!wantSet.has(w.item_uid))){
-    await sb.from('rmr_worklist').update({status:'closed',closed_by:'system',closed_at:new Date().toISOString(),close_basis:'Underlying condition resolved (feed current / breakdown entered / acknowledgement stored)'}).eq('id',w.id); }
-  if(add.length||P27.worklist.some(w=>w.status==='open'&&/^(overdue|costunv|ack):/.test(w.item_uid)&&!wantSet.has(w.item_uid))){ P27.worklist=await fetchAll('rmr_worklist','id'); }
+  for(const w of P27.worklist.filter(w=>w.status==='open'&&/^won:/.test(w.item_uid))){ const o=AGREEMENTS.find(x=>String(x.id)===String(w.record_ref)); if(o&&(isLiveAgreement(o)||o.stage==='lost')){ await sb.from('rmr_worklist').update({status:'closed',closed_by:'system',closed_at:new Date().toISOString(),close_basis:o.stage==='lost'?'Opportunity marked lost':'Agreement set up from the opportunity'}).eq('id',w.id); } }
+  for(const w of P27.worklist.filter(w=>w.status==='open'&&/^(overdue|costunv|ack|sale):/.test(w.item_uid)&&!wantSet.has(w.item_uid))){
+    await sb.from('rmr_worklist').update({status:'closed',closed_by:'system',closed_at:new Date().toISOString(),close_basis:'Underlying condition resolved (feed current / breakdown entered / acknowledgement stored / sale recorded)'}).eq('id',w.id); }
+  if(add.length||P27.worklist.some(w=>w.status==='open'&&(/^won:/.test(w.item_uid)||/^(overdue|costunv|ack|sale):/.test(w.item_uid)&&!wantSet.has(w.item_uid)))){ P27.worklist=await fetchAll('rmr_worklist','id'); }
 }
 async function renderWorklist(){
   const box=$('wlBody'); if(!box)return;
@@ -505,12 +509,13 @@ async function renderWorklist(){
   let L=visible.filter(w=>WL_FILTER.status==='all'||w.status===WL_FILTER.status);
   if(WL_FILTER.owner==='__me')L=L.filter(w=>String(w.owner_email||'').toLowerCase()===me); else if(WL_FILTER.owner!=='__all')L=L.filter(w=>String(w.owner_email||'(none)').toLowerCase()===WL_FILTER.owner);
   if(WL_FILTER.type!=='all')L=L.filter(w=>w.type===WL_FILTER.type);
-  const age=w=>E27.daysBetween(String(w.created_at).slice(0,10),today);
+  const age=w=>Math.max(0,E27.daysBetween(String(w.created_at).slice(0,10),today));
   if(WL_FILTER.age!=='all'){ const n=+WL_FILTER.age; L=L.filter(w=>age(w)>=n); }
   L.sort((x,y)=>String(x.due_date||'9999').localeCompare(String(y.due_date||'9999'))||age(y)-age(x));
   const sel=(id,opts,val)=>`<select id="${id}" class="cfg-in" style="font-size:12px">${opts.map(([v,l])=>`<option value="${esc(v)}" ${v===val?'selected':''}>${esc(l)}</option>`).join('')}</select>`;
   const byType={}; visible.filter(w=>w.status==='open').forEach(w=>byType[w.type]=(byType[w.type]||0)+1);
-  box.innerHTML=`<div class="cards" style="margin-bottom:12px">${Object.entries(WL_TYPES).map(([k,[l,req]])=>`<div class="stat ${byType[k]?'orange':''}" style="cursor:pointer" data-wltype="${k}"><div class="lbl">${esc(l)} <span class="qctx">${req}</span></div><div class="val">${byType[k]||0}</div></div>`).join('')}</div>
+  const _cards=Object.entries(WL_TYPES).filter(([k])=>byType[k]);
+  box.innerHTML=`<div class="cards" style="margin-bottom:12px">${_cards.length?'':'<div class="stat green"><div class="lbl">Open items</div><div class="val">0</div><div class="qctx">Nothing needs anyone right now.</div></div>'}${_cards.map(([k,[l,req]])=>`<div class="stat ${byType[k]?'orange':''}" style="cursor:pointer" data-wltype="${k}"><div class="lbl">${esc(l)} <span class="qctx">${req}</span></div><div class="val">${byType[k]||0}</div></div>`).join('')}</div>
    <div class="panel"><div class="panel-head" style="gap:8px;flex-wrap:wrap"><h2>Worklist</h2>
      ${sel('wlOwner',[['__me','Mine'],['__all','All owners'],...owners.map(o=>[o,o])],WL_FILTER.owner)}
      ${sel('wlType',[['all','All types'],...Object.entries(WL_TYPES).map(([k,v])=>[k,v[0]])],WL_FILTER.type)}
@@ -519,10 +524,10 @@ async function renderWorklist(){
    ${L.length?`<table><thead><tr><th>Type</th><th>Item</th><th>Owner</th><th class="num">Age</th><th>Due</th><th>Resolve in</th><th></th></tr></thead><tbody>${L.slice(0,500).map(w=>{ const T=WL_TYPES[w.type]||[w.type,'',''];
       const overdue=w.status==='open'&&w.due_date&&w.due_date<today;
       return `<tr><td><span class="chip" style="font-size:9px">${esc(T[0])}</span><div class="qctx">${esc(T[1])}</div></td><td style="white-space:normal;font-size:12.5px">${esc(w.title)}${w.status==='closed'?`<div class="qctx">Closed by ${esc(w.closed_by||'')} ${esc(String(w.closed_at||'').slice(0,10))} — ${esc(w.close_basis||'')}</div>`:''}</td><td>${esc(w.owner_email||'—')}</td><td class="num">${age(w)}d</td><td style="color:${overdue?'var(--held)':'inherit'}">${esc(w.due_date||'—')}</td>
-       <td><button class="iconbtn" data-wlgo="${esc(T[2])}" data-wlref="${esc(w.record_ref||'')}">Open ${esc(T[2])}</button></td><td>${w.status==='open'?`<button class="iconbtn" data-wlclose="${w.id}">Close…</button>`:''}</td></tr>`; }).join('')}</tbody></table>`:'<div class="empty">Nothing in this view.</div>'}</div>`;
+       <td><button class="iconbtn" data-wlgo="${esc(T[2])}" data-wltype2="${esc(w.type)}" data-wlref="${esc(w.record_ref||'')}">${w.type==='deal_won'?'Set up deal':w.type==='sale_unrecorded'?'Record sale':'Open '+esc(T[2])}</button></td><td>${w.status==='open'?`<button class="iconbtn" data-wlclose="${w.id}">Close…</button>`:''}</td></tr>`; }).join('')}</tbody></table>`:'<div class="empty">Nothing in this view.</div>'}</div>`;
   [['wlOwner','owner'],['wlType','type'],['wlAge','age'],['wlStatus','status']].forEach(([id,k])=>$(id).onchange=function(){ WL_FILTER[k]=this.value; renderWorklist(); });
   box.querySelectorAll('[data-wltype]').forEach(c=>c.onclick=()=>{ WL_FILTER.type=c.dataset.wltype; WL_FILTER.owner='__all'; renderWorklist(); });
-  box.querySelectorAll('[data-wlgo]').forEach(b=>b.onclick=()=>{ const v=b.dataset.wlgo; switchView(v); if(v==='agreements'){ const a=AGREEMENTS.find(x=>String(x.agreement_number)===b.dataset.wlref); if(a&&can('editAgreements'))openModal(a.id); } });
+  box.querySelectorAll('[data-wlgo]').forEach(b=>b.onclick=()=>{ const v=b.dataset.wlgo; switchView(v); if(b.dataset.wltype2==='deal_won'&&can('editAgreements')){ openCloseDeal27(b.dataset.wlref); return; } if(v==='agreements'){ const a=AGREEMENTS.find(x=>String(x.agreement_number)===b.dataset.wlref); if(a&&can('editAgreements'))openModal(a.id); } });
   box.querySelectorAll('[data-wlclose]').forEach(b=>b.onclick=()=>{ const tr=b.closest('td'); tr.innerHTML=`<input class="cfg-in" placeholder="Basis for closing (required)" style="width:200px" id="wlb${b.dataset.wlclose}"> <button class="iconbtn" id="wlc${b.dataset.wlclose}">Close</button>`;
     $('wlc'+b.dataset.wlclose).onclick=async()=>{ const basis=($('wlb'+b.dataset.wlclose).value||'').trim(); if(!basis){toast('State the basis for closing');return;}
       const {error}=await sb.from('rmr_worklist').update({status:'closed',closed_by:CURRENT_EMAIL,closed_at:new Date().toISOString(),close_basis:basis}).eq('id',b.dataset.wlclose); if(error){toast(error.message);return;}
@@ -556,7 +561,8 @@ function payoutItems(run){
 }
 function renderPayoutRun(){
   const host=$('view-quarter'); if(!host||!P27.ready)return;
-  let el=$('payoutRun27'); if(!el){ el=document.createElement('div'); el.id='payoutRun27'; el.className='panel'; el.style.marginBottom='16px'; host.insertBefore(el,host.children[1]||null); }
+  let el=$('payoutRun27'); if(!el){ el=document.createElement('div'); el.id='payoutRun27'; el.className='panel'; el.style.marginBottom='8px'; host.insertBefore(el,host.firstChild);
+    const lab=document.createElement('div'); lab.id='qByQuarter27'; lab.style.cssText='font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:18px 0 8px'; lab.textContent='Commission by quarter'; el.after(lab); }
   const run=E27.payoutCalendar(P27.settings.payout_calendar); const items=payoutItems(run);
   const groups={'Ready to pay':[],'Pending verification':[],'Excluded from this run':[]}; items.forEach(i=>groups[i.state].push(i));
   const tot=g=>groups[g].reduce((s,i)=>s+i.amount,0);
@@ -564,7 +570,10 @@ function renderPayoutRun(){
   const openItems=P27.worklist.filter(w=>w.status==='open'&&['overdue_feed','unmatched_vista','migration_exception'].includes(w.type)).length;
   const done=P27.payoutRuns.find(r=>r.year===run.y&&r.quarter===run.q);
   const tbl=g=>groups[g].length?`<table style="font-size:12.5px"><thead><tr><th>Agr #</th><th>Customer</th><th>Piece</th><th class="num">Amount</th><th>Reason</th></tr></thead><tbody>${groups[g].map(i=>`<tr><td>#${esc(i.a.agreement_number||'')}</td><td>${esc(i.a.customer_name||'')}</td><td>${esc(i.label)}</td><td class="num mono">${fmt2(i.amount)}</td><td style="white-space:normal;font-size:11.5px">${esc(i.reason)}</td></tr>`).join('')}</tbody></table>`:'<div class="empty" style="padding:10px">None.</div>';
-  el.innerHTML=`<div class="panel-head"><h2>Payout run — Q${run.q} ${run.y}</h2><span class="qctx">quarter end ${run.quarterEnd} · verification cutoff ${run.cutoff} · pay by ${run.payBy}${done?` · <b style="color:var(--payable)">approved ${esc(String(done.approved_at).slice(0,10))} by ${esc(done.approved_by)}</b>`:''}</span></div>
+  if(!can('approvePayout')){ const mine=g=>groups[g].reduce((s,i)=>s+i.amount,0);
+    el.innerHTML=`<div class="panel-head"><h2>Next commission payment — Q${run.q} ${run.y}</h2><span class="qctx">paid by ${run.payBy}</span></div><div class="admin-body" style="font-size:13px;line-height:1.6">
+      <b style="color:var(--payable)">${fmt2(mine('Ready to pay'))}</b> ready to pay · <b style="color:var(--orange)">${fmt2(mine('Pending verification'))}</b> waiting on a customer payment to be verified by ${run.cutoff}. Anything not verified by then moves to the next quarter's payment.</div>`; return; }
+  el.innerHTML=`<div class="panel-head"><h2>Payout run for Q${run.q} ${run.y} commissions</h2><span class="qctx">quarter end ${run.quarterEnd} · verification cutoff ${run.cutoff} · pay by ${run.payBy}${done?` · <b style="color:var(--payable)">approved ${esc(String(done.approved_at).slice(0,10))} by ${esc(done.approved_by)}</b>`:''}</span></div>
    <div class="admin-body" style="font-size:12.5px"><div>${fh} · open Worklist items bearing on this run: <b>${openItems}</b> <span class="qctx">(blocking is per amount, never per run)</span></div>
    <div class="cards" style="margin:10px 0"><div class="stat green"><div class="lbl">Ready to pay</div><div class="val">${fmt2(tot('Ready to pay'))}</div><div class="qctx">${groups['Ready to pay'].length} amounts</div></div><div class="stat orange"><div class="lbl">Pending verification</div><div class="val">${fmt2(tot('Pending verification'))}</div><div class="qctx">${groups['Pending verification'].length} amounts</div></div><div class="stat"><div class="lbl">Excluded from this run</div><div class="val">${groups['Excluded from this run'].length}</div><div class="qctx">with reasons</div></div></div>
    <details open><summary style="cursor:pointer;font-weight:700">Ready to pay (${groups['Ready to pay'].length})</summary>${tbl('Ready to pay')}</details>
@@ -762,6 +771,8 @@ function compPlanLine27(email,a){
   const r=resolveRevised(em,(a&&eventDateOf(a))||E27.businessToday()); const fam=compFamilyOf(em);
   if(r.state==='ok')return `Comp plan: <b>${esc(r.version.label)}</b> ✓`;
   if(r.state==='ack_required')return `Comp plan: <b>${esc(r.version.label)}</b> — <span style="color:var(--held)">waiting on ${esc(em)} to acknowledge the terms</span>`;
+  { const d0=(a&&eventDateOf(a))||E27.businessToday(); const up=P27.assignments.filter(x=>String(x.email).toLowerCase()===em&&x.effective_from>d0).sort((x,y)=>String(x.effective_from).localeCompare(String(y.effective_from)))[0];
+    if(up){ const uv=versionById(up.plan_version_id); return `Comp plan: <b>${esc(uv?uv.label:'assigned plan')}</b> — starts ${esc(up.effective_from)}. Deals signed from that date are covered.`; } }
   if(fam){ const lv=liveVersionOf(fam); return `Comp plan: <b>${esc(fam)}</b> — ${lv?'not assigned yet (Admin ▸ Employees)':(P27.versions.some(v=>v.family===fam&&!(v.config&&v.config.placeholder))?'draft, not live yet':'numbers not set yet')}. Commission shows <i>Plan not configured</i> until it is.`; }
   return `<span style="color:var(--orange)">No comp plan set for ${esc(em)}</span> — set it in Admin ▸ Employees.`;
 }
@@ -784,16 +795,27 @@ async function renderEmployees27(){
         if(!can('editConfig'))return '';
         const from=[today,lv.effective_date||today].sort().pop();
         return `<div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="iconbtn" data-cfgo27="${esc(em)}" data-v="${lv.id}">${cv?'Switch to':'Assign'} ${esc(lv.label)}</button> from <input type="date" class="cfg-in" data-cffrom27="${esc(em)}" value="${from}" min="${lv.effective_date||''}"></div>`; })()}</td>
-      <td>${cv?(ack?`<span style="color:var(--payable)">✓ ${esc(String(ack.acknowledged_at).slice(0,10))}</span>`:'<span style="color:var(--held);font-weight:700">Missing — calculation blocked</span>'):'—'}</td>
+      <td>${u.must_set_password?'<div class="qctx">Login created — waiting for first sign-in</div>':''}${cv?(ack?`<span style="color:var(--payable)">✓ ${esc(String(ack.acknowledged_at).slice(0,10))}</span>`:'<span style="color:var(--held);font-weight:700">Missing — calculation blocked</span>'):'—'}</td>
       <td>${sal?`${fmt(+sal.annual_salary)} <span class="qctx">from ${esc(sal.effective_from)}</span>`:'<span class="qctx">none</span>'}</td></tr>`; };
   box.innerHTML=`<table class="cfg-table"><thead><tr><th>Employee</th><th>Permission role</th><th>Comp plan</th><th>Plan assignment</th><th>Acknowledgement</th><th>Salary</th></tr></thead><tbody>${users.map(row).join('')}</tbody></table>
-   ${can('editConfig')?`<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12.5px"><b>Assign plan:</b>
+   ${can('editConfig')?`<div class="panel" style="margin-top:14px;padding:14px 16px;background:#fafafa"><div style="font-weight:700;margin-bottom:8px">Add an employee</div>
+     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px 12px;font-size:12.5px;align-items:end">
+      <label>Work email<input class="cfg-in" id="nu_em" placeholder="name@point1.com" style="width:100%"></label>
+      <label>What they can do<select class="cfg-in" id="nu_role" style="width:100%">${PERMISSION_ROLES.map(r=>`<option ${r==='Representative'?'selected':''}>${r}</option>`).join('')}</select></label>
+      <label>Comp plan<select class="cfg-in" id="nu_cf" style="width:100%"><option value="">— none (not paid commission) —</option>${['Hybrid','Hunter','Farmer'].map(f=>`<option value="${f}">${f} (${esc(famStatus(f).txt.split(' · ')[0])})</option>`).join('')}</select></label>
+      <label>Start date<input type="date" class="cfg-in" id="nu_from" value="${today}" style="width:100%"></label>
+      <label>Annual base salary <span class="qctx">optional</span><input type="number" class="cfg-in" id="nu_sal" step="1000" placeholder="e.g. 110000" style="width:100%"></label>
+      <label>Temporary password <span class="qctx">creates their login</span><input type="text" class="cfg-in" id="nu_pw" placeholder="leave blank if they already have one" autocomplete="off" style="width:100%"></label>
+     </div>
+     <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn-primary" id="nu_go">Add employee</button><span class="qctx">Adds them, sets their comp plan and salary, assigns the plan if it's published, and creates their login. They choose their own password and accept the plan terms at first sign-in.</span></div>
+     <div id="nu_out" style="margin-top:8px;font-size:12.5px;line-height:1.6"></div></div>
+     <details style="margin-top:10px;font-size:12.5px"><summary style="cursor:pointer;font-weight:600">More: assign a specific plan version or dates · record a salary change</summary>
+     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><b>Assign plan:</b>
      <select class="cfg-in" id="as_em">${users.map(u=>`<option>${esc(u.email)}</option>`).join('')}</select>
-     <select class="cfg-in" id="as_v">${pubs.length?pubs.map(v=>`<option value="${v.id}">${esc(v.family)} · ${esc(v.label)} (from ${esc(v.effective_date)})</option>`).join(''):'<option value="">No published version — Hunter and Farmer cannot be assigned</option>'}</select>
-     from <input type="date" class="cfg-in" id="as_from"> to <input type="date" class="cfg-in" id="as_to" title="optional, end-exclusive"> <input class="cfg-in" id="as_why" placeholder="Reason (reviewed mapping, MIG-06)"> <button class="iconbtn" id="as_go" ${pubs.length?'':'disabled'}>Approve assignment</button></div>
-     <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12.5px"><b>Salary record:</b> <select class="cfg-in" id="sl_em">${users.map(u=>`<option>${esc(u.email)}</option>`).join('')}</select> <input type="number" class="cfg-in" id="sl_amt" placeholder="Annual base" step="1000"> from <input type="date" class="cfg-in" id="sl_from"> <button class="iconbtn" id="sl_go">Add</button></div>
-     <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12.5px"><b>Add employee:</b> <input class="cfg-in" id="nu_em" placeholder="name@point1.com"> <select class="cfg-in" id="nu_role">${PERMISSION_ROLES.map(r=>`<option ${r==='Representative'?'selected':''}>${r}</option>`).join('')}</select> <button class="iconbtn" id="nu_go">Add / update</button></div>
-     <div class="qctx" style="margin-top:6px"><b>Comp plan</b> records which plan each person is on; it never moves anyone by itself (ADM-07, MIG-06) — once that plan has a published version, the Assign button appears and the person acknowledges the terms at next sign-in. Hunter and Farmer are rejected for assignment by the database while they are placeholders. A countersigned copy of the plan can be attached later; the in-app acknowledgement is stored immutably with the exact text shown.</div>`:''}`;
+     <select class="cfg-in" id="as_v">${pubs.length?pubs.map(v=>`<option value="${v.id}">${esc(v.family)} · ${esc(v.label)} (from ${esc(v.effective_date)})</option>`).join(''):'<option value="">No published version yet</option>'}</select>
+     from <input type="date" class="cfg-in" id="as_from"> to <input type="date" class="cfg-in" id="as_to" title="optional"> <input class="cfg-in" id="as_why" placeholder="Reason"> <button class="iconbtn" id="as_go" ${pubs.length?'':'disabled'}>Approve assignment</button></div>
+     <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><b>Salary record:</b> <select class="cfg-in" id="sl_em">${users.map(u=>`<option>${esc(u.email)}</option>`).join('')}</select> <input type="number" class="cfg-in" id="sl_amt" placeholder="Annual base" step="1000"> from <input type="date" class="cfg-in" id="sl_from"> <button class="iconbtn" id="sl_go">Add</button></div></details>
+     <div class="qctx" style="margin-top:8px">Changing someone's comp plan never moves them by itself — the Assign button appears once that plan has a published version, and they accept the terms at their next sign-in. Hunter and Farmer can't be assigned until their numbers are entered and published.</div>`:''}`;
   box.querySelectorAll('[data-cf27]').forEach(s=>s.onchange=async()=>{ const em=s.dataset.cf27; const before=P27.settings.comp_family||{}; const map={...before}; if(s.value)map[em]=s.value; else delete map[em];
     const {error}=await sb.from('rmr_settings').upsert([{key:'comp_family',value:map,updated_by:CURRENT_EMAIL,updated_at:new Date().toISOString()}],{onConflict:'key'}); if(error){toast(error.message);return;}
     audit('Comp plan set','Admin',em,{comp_family:before[em]||null},{comp_family:s.value||null},null); await load27(); renderEmployees27(); toast(s.value?`${em} set to ${s.value}`:'Comp plan cleared'); });
@@ -813,8 +835,33 @@ async function renderEmployees27(){
     const {error}=await sb.from('rmr_plan_assignments').insert(row); if(error){toast(error.message);return;} audit('Plan assignment approved','Admin',row.email,null,row,row.reason); await load27(); renderEmployees27(); toast('Assignment approved'); };
   if($('sl_go')) $('sl_go').onclick=async()=>{ const row={email:$('sl_em').value.toLowerCase(),annual_salary:+$('sl_amt').value,effective_from:$('sl_from').value,created_by:CURRENT_EMAIL}; if(!(row.annual_salary>0)||!row.effective_from){toast('Enter salary and start date');return;}
     const {error}=await sb.from('rmr_salary_records').insert(row); if(error){toast(error.message);return;} audit('Salary record added','Admin',row.email,null,{effective_from:row.effective_from},null); await load27(); renderEmployees27(); };
-  if($('nu_go')) $('nu_go').onclick=async()=>{ const em=($('nu_em').value||'').trim().toLowerCase(); if(!/^.+@.+\..+$/.test(em)){toast('Enter a valid email');return;}
-    const r=$('nu_role').value; const {error}=await sb.from('rmr_users').upsert({email:em,permission_role:r,role:r==='Representative'?'Hybrid':r},{onConflict:'email'}); if(error){toast(error.message);return;} audit('Employee added','Admin',em,null,{permission_role:r},null); await load27(); await loadUsers(); renderEmployees27(); };
+  if($('nu_go')) $('nu_go').onclick=async()=>{ const em=($('nu_em').value||'').trim().toLowerCase(); const out=$('nu_out'); const done=[], warn=[];
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){toast('Enter a valid email');return;}
+    const r=$('nu_role').value, fam=($('nu_cf')||{}).value||'', from=($('nu_from')||{}).value||today, sal=+(($('nu_sal')||{}).value||0), pw=(($('nu_pw')||{}).value||'');
+    if(pw&&pw.length<8){toast('Temporary password: at least 8 characters');return;}
+    $('nu_go').disabled=true;
+    try{
+      let row={email:em,permission_role:r,role:r==='Representative'?'Hybrid':r}; if(pw)row.must_set_password=true;
+      let q=await sb.from('rmr_users').upsert(row,{onConflict:'email'}); if(q.error&&/must_set_password/.test(q.error.message||'')){ delete row.must_set_password; q=await sb.from('rmr_users').upsert(row,{onConflict:'email'}); if(!q.error&&pw)warn.push('Run migration_v23_access.sql so new employees are asked to change the temporary password.'); }
+      if(q.error)throw q.error; done.push(`added as <b>${esc(r)}</b>`); audit('Employee added','Admin',em,null,{permission_role:r},null);
+      if(fam){ const map={...(P27.settings.comp_family||{})}; map[em]=fam; const q2=await sb.from('rmr_settings').upsert([{key:'comp_family',value:map,updated_by:CURRENT_EMAIL,updated_at:new Date().toISOString()}],{onConflict:'key'}); if(q2.error)throw q2.error; done.push(`comp plan <b>${fam}</b>`); audit('Comp plan set','Admin',em,null,{comp_family:fam},null); }
+      if(sal>0){ const q3=await sb.from('rmr_salary_records').insert({email:em,annual_salary:sal,effective_from:from,created_by:CURRENT_EMAIL}); if(q3.error)warn.push('Salary not saved: '+q3.error.message); else { done.push(`salary ${fmt(sal)} from ${from}`); audit('Salary record added','Admin',em,null,{effective_from:from},null); } }
+      if(fam){ const lv=liveVersionOf(fam); await load27();
+        const has=P27.assignments.some(x=>String(x.email).toLowerCase()===em&&(!x.effective_to||x.effective_to>from));
+        if(lv&&!has){ const f2=[from,lv.effective_date||from].sort().pop(); const q4=await sb.from('rmr_plan_assignments').insert({email:em,plan_version_id:lv.id,effective_from:f2,effective_to:null,approved_by:CURRENT_EMAIL,reason:`Comp plan set to ${fam} when added`});
+          if(q4.error)warn.push('Plan not assigned: '+q4.error.message); else { done.push(`assigned <b>${esc(lv.label)}</b> from ${f2}`); audit('Plan assignment approved','Admin',em,null,{plan_version_id:lv.id,effective_from:f2},'Comp plan set when added'); } }
+        else if(!lv) warn.push(`${fam} isn't published yet — use the Assign button on their row once it is.`); }
+      if(pw){ const url=(LS.get('rmr_url')||'').trim(), key=(LS.get('rmr_key')||'').trim();
+        const c2=supabase.createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false,storageKey:'p1-invite-'+Date.now()}});
+        const su=await c2.auth.signUp({email:em,password:pw,options:{emailRedirectTo:location.origin+location.pathname}});
+        if(su.error) warn.push(`Login not created (${esc(su.error.message)}). Create it in Supabase ▸ Authentication ▸ Users ▸ Add user, with "Auto Confirm User" ticked.`);
+        else if(su.data&&su.data.user&&Array.isArray(su.data.user.identities)&&!su.data.user.identities.length) warn.push('A login already exists for this email — they can use their existing password (or "Forgot password").');
+        else { done.push('login created'); audit('Login created','Admin',em,null,null,null); warn.push(`Next: they get a "Confirm your email" message from Supabase. After confirming, they sign in at <b>${esc(location.origin+location.pathname)}</b> with the temporary password and choose their own.`); } }
+      await load27(); await loadUsers(); renderEmployees27();
+      const o2=$('nu_out'); if(o2) o2.innerHTML=`<b style="color:var(--payable)">✓ ${esc(em)}</b>: ${done.join(' · ')}${warn.length?'<br>'+warn.join('<br>'):''}`;
+      toast(`${em} added`);
+    }catch(e){ toast(e.message||'Could not add'); if(out) out.textContent=e.message||''; }
+    finally{ if($('nu_go'))$('nu_go').disabled=false; } };
 }
 function renderCalendar27(){
   const box=$('cal27'); if(!box)return; const pc=P27.settings.payout_calendar||{}; const fo=P27.settings.feed_owners||{}; const ed=can('editConfig'); const run=E27.payoutCalendar(pc);
@@ -1003,4 +1050,264 @@ function guide27HTML(fam){
     const upd=()=>{ d.innerHTML=compPlanLine27(sel.value,a)+(a&&a.owner_email&&String(a.owner_email).toLowerCase()!==String(sel.value).toLowerCase()?'<br>Changing the owner applies to commission not yet earned; anything already earned stays with the original owner.':''); };
     sel.onchange=upd; upd(); };
   window.openModal=function(id,promote){ const r=orig.apply(this,arguments); try{ if(P27.ready)paint(AGREEMENTS.find(x=>x.id===id)||null); }catch(_){} return r; };
+})();
+
+/* =====================================================================================================
+   Usability pass (P1RMR-57): close-the-deal screen, rep "Mark won", rep read-only agreements, payment-state
+   Quarter view, one-step onboarding, rep tab set, plain-language screens.
+   ===================================================================================================== */
+window.todayISO=function(){ return E27.businessToday(); };
+(function css27(){ const st=document.createElement('style'); st.id='cd27css'; st.textContent='.cd27grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}.cd27grid .fld.full{grid-column:1/-1}.cd27grid .fld{margin:0}#emp27 select.cfg-in{min-width:128px}@media(max-width:720px){.cd27grid{grid-template-columns:1fr}#cdScrim27 .modal-body{grid-template-columns:1fr!important}}'; document.head.appendChild(st); })();              // dates default to the Pacific business day, not UTC
+const BUILTIN_CONNECTION=false;                                          // flipped on once migration_v23_access.sql is applied
+const BUILTIN_URL='https://kjzugbyudhswdmhgnstp.supabase.co', BUILTIN_KEY='';
+if(BUILTIN_CONNECTION&&BUILTIN_KEY&&!(LS.get('rmr_url')||'').trim()){ LS.set('rmr_url',BUILTIN_URL); LS.set('rmr_key',BUILTIN_KEY); }
+
+const REQ_CODE='\\b(?:ADM|AGR|BIL|BON|CAT|COM|CST|LED|MIG|NAV|PAY|REL|TEC|UX|VIS|F)-\\d{2}';
+function plainText27(s){ if(!s)return s; return String(s)
+  .replace(new RegExp(`\\s*\\((?:${REQ_CODE})(?:\\s*[,/;·&]\\s*(?:${REQ_CODE}|and\\s+${REQ_CODE}))*\\)`,'g'),'')
+  .replace(new RegExp(`^\\s*${REQ_CODE}(?:\\s*[·,/]\\s*${REQ_CODE})*\\s*$`),''); }
+
+function friendlyCond27(t){ t=plainText27(String(t||'')); let m;
+  if(/no issued first invoice yet/.test(t))return "The first invoice hasn't been issued yet.";
+  if(/no first actual billing/.test(t))return 'Starts counting from the first invoice.';
+  if((m=t.match(/Missing receipt evidence for first invoice (\S+?)\.?$/)))return `Waiting for invoice ${m[1]} to be paid and verified.`;
+  if((m=t.match(/Time condition not met — (\d{4}-\d{2}-\d{2})/)))return `Earliest date: ${m[1]} (three months after the first invoice).`;
+  if((m=t.match(/^(\d+) invoice\(s\) due through (\S+) without confirmed collection: (.*)$/)))return `${m[1]} invoice${m[1]==='1'?'':'s'} due by ${m[2]} not yet paid: ${m[3]}`;
+  if(/Agreement is not activated/.test(t))return "The agreement isn't activated yet.";
+  if(/settled by credit/.test(t))return 'The first invoice was settled by a credit, which is not a payment.';
+  if(/Cancelled before earning/.test(t))return 'Cancelled before it was earned — this payment stops.';
+  return t; }
+/* ---- Quarter view lines for revised deals: payment 1 / payment 2 with their real state ---- */
+function revisedQuarterLines27(a,c){
+  const calc=c.revisedCalc; if(!calc)return [];
+  const tr=c.tranches||{t1:{conditions:[]},t2:{conditions:[]}}; const ev=committedEventsFor(a).slice(-1)[0];
+  const led=ev?P27.ledger.filter(x=>x.event_uid===ev.event_uid):[];
+  const qiOf=iso=>iso?qIndexFromYM(+iso.slice(0,4),+iso.slice(5,7)-1):null;
+  const fb=a.first_billing_date?String(a.first_billing_date).slice(0,10):null, act=a.activation_date?String(a.activation_date).slice(0,10):null;
+  const out=[];
+  [[1,calc.tranche1Cents,tr.t1],[2,calc.tranche2Cents,tr.t2]].forEach(([n,cents,t])=>{
+    const amount=Number(cents)/100; if(!(amount>0))return; t=t||{conditions:[]};
+    const has=st=>led.some(x=>+x.tranche===n&&x.stage===st);
+    const rstate=has('paid')?'paid':has('payable')?'approved':(t.state==='Earned'?'earned':'expected');
+    let date=t.earnedDate||null, note;
+    if(rstate==='paid')note='paid'; else if(rstate==='approved')note='approved for payroll'; else if(rstate==='earned')note=`earned ${t.earnedDate}`;
+    else { note=!ev?'Sale not recorded yet.':friendlyCond27((t.conditions||[])[0]||'Conditions not met yet.');
+      if(n===1)date=fb||act; else date=t.timeDate||(fb?E27.addMonthsClamp(fb,3):(act?E27.addMonthsClamp(act,3):null)); }
+    out.push({a,c,type:'rev'+n,piece:n,amount,rstate,paid:rstate==='paid',note,qi:qiOf(date),frozen:false});
+  });
+  return out;
+}
+const RSTATE27={expected:['c-maturing','Expected'],earned:['c-payable','Earned'],approved:['c-payable','Approved for payroll'],paid:['c-paid','Paid']};
+function revisedPieceRow27(l){
+  const m=RSTATE27[l.rstate]||RSTATE27.expected;
+  return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;flex-wrap:wrap;border-top:1px dashed var(--line)">
+    <span style="min-width:118px"><span class="type-tag" style="background:#eef1f6;color:var(--navy)">Payment ${l.piece} of 2</span></span>
+    <b class="mono" style="min-width:72px;text-align:right">${fmt2(l.amount)}</b>
+    <span style="flex:1;min-width:130px;color:var(--muted);font-size:12px">${esc(l.note)}</span>
+    <span class="chip ${m[0]}" style="font-size:9px">${m[1]}</span></div>`;
+}
+function revisedGroupMeta27(items){ const st=items.map(l=>l.rstate);
+  if(st.every(s=>s==='paid'))return {cls:'c-paid',label:'Paid'}; if(st.some(s=>s==='earned'||s==='approved'))return {cls:'c-payable',label:'Earned'}; return {cls:'c-maturing',label:'Expected'}; }
+
+/* ---- Close the deal: one screen behind Win ---- */
+function cdRow27(){ const v=id=>($(id)||{}).value, n=id=>{ const x=v(id); return x===''||x==null?0:+x; };
+  const hrs=n('cd_hrs');
+  return { agreement_number:(v('cd_num')||'').trim(), customer_name:(v('cd_cust')||'').trim(), owner_email:v('cd_owner')||null,
+    category:v('cd_cat')||'rmr', agreement_type:v('cd_type')||'manual', autorenew:v('cd_type')==='auto',
+    monthly_rmr:n('cd_rmr'), contract_term:n('cd_term'), activation_date:v('cd_date')||null, first_billing_date:v('cd_bill')||null,
+    loaded_labor_rate:n('cd_rate'), labor_schedule:hrs>0?{repeat:true,rows:[{month:12,hours:hrs,label:'Annual service'}]}:{repeat:true,rows:[]},
+    inspection_frequency:hrs>0?1:0, hours_per_inspection:hrs,
+    material_cost_annual:n('cd_mat'), monitoring_cost_annual:n('cd_mon'), software_cost_annual:n('cd_soft'), subcontractor_annual_cost:n('cd_sub'), other_direct_annual:n('cd_other'),
+    cost_confirmed_zero:!!($('cd_zero')&&$('cd_zero').checked), stage:'won' }; }
+function cdEvaluate27(opp){
+  const row=cdRow27(); const a2=Object.assign({},opp||{},row); const out={row,a2,errors:[],blockers:[],calc:null,margin:null,cost:null,res:null};
+  if(!row.agreement_number)out.errors.push('Agreement # is required.'); if(!row.customer_name)out.errors.push('Customer is required.');
+  if(!(row.monthly_rmr>0))out.errors.push('Monthly RMR must be more than $0.'); if(![12,24,36,48,60].includes(row.contract_term))out.errors.push('Pick a term.');
+  if(!row.activation_date)out.errors.push('Signed / activation date is required.'); if(!row.owner_email)out.errors.push('Pick who the deal is assigned to.');
+  const dup=AGREEMENTS.find(x=>x.id!==(opp&&opp.id)&&String(x.agreement_number||'').trim()===row.agreement_number&&row.agreement_number); if(dup)out.errors.push(`Agreement #${row.agreement_number} already exists (${dup.customer_name||'—'}).`);
+  out.cost=E27.modelledCost(a2); if(out.cost.state!=='complete')out.blockers.push(row.cost_confirmed_zero?'':'Enter the direct costs, or tick "No direct costs".');
+  out.res=resolveRevised(row.owner_email,row.activation_date||E27.businessToday());
+  if(out.res.state!=='ok')out.blockers.push(plainText27(out.res.reason).replace(/^Plan not configured — /,'').replace(/^Blocked — /,''));
+  if(!out.errors.length&&out.cost.state==='complete'){
+    const mrrQ=E27.eligibleMrrCentsRational(a2); const qm=E27.qualificationMargin(mrrQ,row.contract_term,out.cost); out.margin=qm.margin;
+    const fam=compFamilyOf(row.owner_email)||'Hybrid'; const plan=out.res.state==='ok'?out.res.version:(out.res.version||liveVersionOf(fam)||latestVersion(fam));
+    if(plan&&!(plan.config&&plan.config.placeholder)){ try{ out.calc=E27.calculate({plan:planVersionPlain(plan),eventType:row.category==='sla'?'sla_new':'new_sale',term:row.contract_term,category:row.category,
+      newMrr:E27.toDollars(E27.roundHalfUp(mrrQ)),priorMrr:null,slaAnnual:row.category==='sla'?E27.toDollars(E27.roundHalfUp(E27.mul(mrrQ,E27.R(12n)))):null,margin:qm.margin,shares:[{email:String(row.owner_email).toLowerCase(),bp:10000}]}); out.planLabel=plan.label; }
+      catch(e){ out.blockers.push(plainText27(e.message)); } }
+  }
+  out.blockers=out.blockers.filter(Boolean); return out;
+}
+function openCloseDeal27(oppId){
+  if(!can('editAgreements')){ toast('Only a manager, executive or admin can set up a won deal.'); return; }
+  const opp=AGREEMENTS.find(x=>String(x.id)===String(oppId)); if(!opp){ toast('Opportunity not found'); return; }
+  const req=P27.worklist.find(w=>w.item_uid===`won:${opp.id}`&&w.status==='open'); const rd=(req&&req.detail)||{};
+  const rates=AGREEMENTS.filter(x=>+x.loaded_labor_rate>0).sort((x,y)=>String(y.updated_at||'').localeCompare(String(x.updated_at||''))); const rate0=rates[0]?+rates[0].loaded_labor_rate:'';
+  const owners=[...new Set([...(KNOWN_USERS||[]),opp.owner_email].filter(Boolean))].sort();
+  let sc=$('cdScrim27'); if(sc)sc.remove(); sc=document.createElement('div'); sc.id='cdScrim27'; sc.className='scrim show';
+  const fld=(lab,html,hint)=>`<div class="fld"><label>${lab}${hint?` <span class="hint">${hint}</span>`:''}</label>${html}</div>`;
+  const num=(id,val,ph)=>`<input id="${id}" type="number" step="0.01" min="0" value="${val??''}" placeholder="${ph||''}">`;
+  sc.innerHTML=`<div class="modal" style="max-width:860px"><div class="modal-head"><div><h3 style="margin:0">Close the deal — ${esc(opp.customer_name||'')}</h3>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px">${esc(opp.opportunity_number||'')}${opp.estimate_ref?' · estimate '+esc(opp.estimate_ref):''}${opp.est_monthly_rmr?' · est. '+fmt(+opp.est_monthly_rmr)+'/mo':''}${req?` · marked won by ${esc(rd.requested_by||'')}${rd.signed_date?' (signed '+esc(rd.signed_date)+')':''}${rd.note?' — '+esc(rd.note):''}`:''}</div></div><button class="x" id="cdClose27">×</button></div>
+   <div class="modal-body" style="display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px">
+    <div>
+     <div class="fieldset-h" style="margin-top:0">1 · The agreement</div>
+     <div class="cd27grid">
+      ${fld('Agreement #',`<input id="cd_num" value="${esc(opp.agreement_number||nextAgreementNumber())}">`)}
+      ${fld('Assigned to',`<select id="cd_owner">${owners.map(e=>`<option ${String(e).toLowerCase()===String(opp.owner_email||'').toLowerCase()?'selected':''}>${esc(e)}</option>`).join('')}</select>`)}
+      <div class="fld full"><label>Customer</label><input id="cd_cust" value="${esc(opp.customer_name||'')}"></div>
+      ${fld('Monthly RMR',num('cd_rmr',rd.final_mrr||(+opp.monthly_rmr>0?opp.monthly_rmr:(opp.est_monthly_rmr||'')),'0.00'),'$ / month')}
+      ${fld('Term',`<select id="cd_term"><option value="">Pick…</option>${[12,24,36,48,60].map(t=>`<option value="${t}" ${+opp.contract_term===t?'selected':''}>${t} months</option>`).join('')}</select>`)}
+      ${fld('Signed / activation date',`<input id="cd_date" type="date" value="${esc(rd.signed_date||(opp.activation_date?String(opp.activation_date).slice(0,10):E27.businessToday()))}">`)}
+      ${fld('First billing date',`<input id="cd_bill" type="date" value="${esc(opp.first_billing_date?String(opp.first_billing_date).slice(0,10):'')}">`,'optional')}
+      ${fld('Type',`<select id="cd_cat"><option value="rmr">RMR</option><option value="sla" ${opp.category==='sla'?'selected':''}>SLA (enter annual ÷ 12)</option></select>`)}
+      ${fld('Renewal',`<select id="cd_type"><option value="manual">Manual renewal</option><option value="auto" ${opp.agreement_type==='auto'?'selected':''}>Auto-renewal</option></select>`)}
+     </div>
+     <div class="fieldset-h">2 · Direct costs <span class="hint">per year — drives the margin check</span></div>
+     <div class="cd27grid">
+      ${fld('Labour hours / year',num('cd_hrs',opp.hours_per_inspection&&opp.inspection_frequency?(+opp.hours_per_inspection*+opp.inspection_frequency):'','e.g. 8'))}
+      ${fld('Loaded labour rate',num('cd_rate',+opp.loaded_labor_rate>0?opp.loaded_labor_rate:rate0,'$/hr'),'$ / hour')}
+      ${fld('Materials',num('cd_mat',opp.material_cost_annual||''))}${fld('Monitoring',num('cd_mon',opp.monitoring_cost_annual||''))}
+      ${fld('Software',num('cd_soft',opp.software_cost_annual||''))}${fld('Subcontractor',num('cd_sub',opp.subcontractor_annual_cost||''))}
+      ${fld('Other direct',num('cd_other',opp.other_direct_annual||''))}
+      <div class="fld" style="align-self:end"><label style="display:flex;gap:6px;align-items:center;font-weight:500"><input type="checkbox" id="cd_zero" style="width:auto"> No direct costs on this deal</label></div>
+      <div class="fld full"><label>Cost evidence <span class="hint">optional — quote, vendor invoice…</span></label><input id="cd_evid" placeholder="e.g. SSE-014-26 cost sheet"></div>
+     </div>
+    </div>
+    <div><div class="fieldset-h" style="margin-top:0">3 · Commission</div><div id="cdPrev27" style="font-size:13px;line-height:1.55"></div></div>
+   </div>
+   <div class="modal-foot" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn-ghost" id="cdCancel27">Cancel</button><button class="btn-ghost" id="cdFull27" title="Open the full agreement editor with every field">Full editor…</button>
+    <div style="margin-left:auto;display:flex;gap:8px"><button class="btn-ghost" id="cdSave27">Save without recording</button><button class="btn-primary" id="cdGo27">Approve &amp; record sale</button></div></div></div>`;
+  document.body.appendChild(sc);
+  const close=()=>sc.remove();
+  const paint=()=>{ const r=cdEvaluate27(opp); const box=$('cdPrev27'); const c=r.calc;
+    const pct=r.margin?(Number(r.margin.n*10000n/r.margin.d)/100).toFixed(1)+'%':'—';
+    box.innerHTML=`<div style="background:#f7f7f8;border:1px solid var(--line);border-radius:10px;padding:12px 14px">
+      <div class="qctx">${esc(r.planLabel||'')}${r.res&&r.res.state==='ok'?'':' · preview'}</div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px"><span>Margin</span><b>${pct}</b></div>
+      <div style="display:flex;justify-content:space-between"><span>Commission</span><b style="font-size:20px">${c?E27.fmtCents(c.totalCents):'—'}</b></div>
+      ${c?`<div style="border-top:1px dashed var(--line);margin-top:8px;padding-top:8px"><div style="display:flex;justify-content:space-between"><span>Payment 1 — when the first invoice is paid</span><b>${E27.fmtCents(c.tranche1Cents)}</b></div>
+       <div style="display:flex;justify-content:space-between"><span>Payment 2 — 3 months after first billing, account current</span><b>${E27.fmtCents(c.tranche2Cents)}</b></div></div>`:''}
+      ${c&&c.totalCents===0n?'<div style="color:var(--held);margin-top:6px">Below the margin floor — this sale pays $0.</div>':''}</div>
+      ${r.errors.length?`<div style="margin-top:10px;color:var(--held);font-size:12.5px">${r.errors.map(esc).join('<br>')}</div>`:''}
+      ${r.blockers.length?`<div style="margin-top:10px;font-size:12.5px;color:var(--orange)"><b>Can't record the sale yet:</b><br>${r.blockers.map(esc).join('<br>')}<div class="qctx" style="margin-top:4px">You can still save the agreement now; it goes on the Worklist as "Sale not recorded yet".</div></div>`:''}`;
+    $('cdGo27').disabled=!!(r.errors.length||r.blockers.length||!c); $('cdSave27').disabled=!!r.errors.length; return r; };
+  sc.querySelectorAll('input,select').forEach(el=>{ el.addEventListener('input',paint); el.addEventListener('change',paint); });
+  $('cdClose27').onclick=close; $('cdCancel27').onclick=close; sc.onclick=e=>{ if(e.target===sc)close(); };
+  $('cdFull27').onclick=()=>{ close(); _origOpenModal27(opp.id,true); };
+  const save=async(record)=>{ const r=paint(); if(r.errors.length)return;
+    const btn=record?$('cdGo27'):$('cdSave27'); btn.disabled=true; btn.textContent=record?'Recording…':'Saving…';
+    try{ await upsert(Object.assign({id:opp.id},r.row)); }catch(e){ toast(e.message||'Save failed'); btn.disabled=false; btn.textContent=record?'Approve & record sale':'Save without recording'; return; }
+    audit('Agreement created from opportunity','Agreements',r.row.agreement_number,{stage:opp.stage},{agreement_number:r.row.agreement_number,customer:r.row.customer_name,mrr:r.row.monthly_rmr,term:r.row.contract_term,owner:r.row.owner_email},null);
+    await load(); let ok=true;
+    if(record){ const a=AGREEMENTS.find(x=>String(x.id)===String(opp.id));
+      const keys=['loaded_labor_rate','labor_schedule','inspection_frequency','hours_per_inspection','material_cost_annual','monitoring_cost_annual','software_cost_annual','subcontractor_annual_cost','other_direct_annual','monthly_direct_cost','cost_confirmed_zero'];
+      const costs={}; keys.forEach(k=>costs[k]=a[k]!==undefined?a[k]:r.row[k]); const mc=E27.modelledCost(costs);
+      const prev=P27.costVersions.filter(x=>String(x.agreement_id)===String(a.id)).sort((x,y)=>y.version_no-x.version_no)[0];
+      const cv={agreement_id:a.id,version_no:(prev?prev.version_no:0)+1,costs,annual_direct_cents:Number(E27.roundHalfUp(E27.mul(mc.annual,E27.R(100n)))),approver:CURRENT_EMAIL,evidence:($('cd_evid').value||'').trim()||null};
+      const {data,error}=await sb.from('rmr_cost_versions').insert(cv).select(); if(error){ toast(error.message); ok=false; }
+      else { P27.costVersions.push((data&&data[0])||cv); audit('Cost version approved and locked','Costs',a.agreement_number,null,cv,null); ok=!!(await commitEvent27(a.category==='sla'?'sla_new':'new_sale',a.id)); } }
+    if(req){ await sb.from('rmr_worklist').update({status:'closed',closed_by:CURRENT_EMAIL,closed_at:new Date().toISOString(),close_basis:record&&ok?'Agreement set up and sale recorded':'Agreement set up'}).eq('id',req.id); }
+    await load27(); render(); close(); if(!record)toast(`Agreement #${r.row.agreement_number} saved — record the sale when ready`); };
+  $('cdSave27').onclick=()=>save(false); $('cdGo27').onclick=()=>save(true);
+  paint();
+}
+const _origOpenModal27=window.openModal;
+window.winOpp=function(id){ openCloseDeal27(id); };
+
+/* ---- Reps: Mark won (goes to the admin's Worklist) and see its status ---- */
+function wonRequest27(oppId){ return P27.worklist.find(w=>w.item_uid===`won:${oppId}`)||null; }
+async function markWon27(oppId,detail){
+  const o=AGREEMENTS.find(x=>String(x.id)===String(oppId)); if(!o)return;
+  const owner=(((P27.settings.feed_owners||{}).agreement_terms||{}).owner)||ADMIN_EMAILS[0];
+  const it={item_uid:`won:${o.id}`,type:'deal_won',record_ref:String(o.id),title:`${o.opportunity_number||''} ${o.customer_name||''}: marked won by ${CURRENT_EMAIL} — set up the agreement and record the sale`,
+    detail:Object.assign({requested_by:CURRENT_EMAIL,opportunity:o.opportunity_number,estimate:o.estimate_ref,est_rmr:o.est_monthly_rmr},detail),owner_email:owner,due_date:E27.addDays(E27.businessToday(),2),status:'open'};
+  const {error}=await sb.from('rmr_worklist').upsert(it,{onConflict:'item_uid',ignoreDuplicates:true}); if(error){ toast(error.message); return; }
+  audit('Opportunity marked won','Opportunities',o.opportunity_number,null,it.detail,null); P27.worklist=await fetchAll('rmr_worklist','id'); renderOpportunities(); toast('Sent — your admin will set up the agreement');
+}
+(function hookOpportunities27(){
+  const orig=window.renderOpportunities; if(typeof orig!=='function')return;
+  window.renderOpportunities=function(){ orig.apply(this,arguments);
+    const intro=$('oppIntro27'); if(intro&&!can('editAgreements')) intro.innerHTML='Your pipeline. Add an <b style="color:var(--ink)">opportunity</b> for each quote; when the customer signs, click <b style="color:var(--ink)">Mark won</b> and your admin sets up the agreement and records the sale. Opportunities never count toward commission until then.';
+    if(!P27.ready)return;
+    const wrap=$('oppTableWrap'); if(!wrap)return;
+    wrap.querySelectorAll('tr').forEach(tr=>{ const ed=tr.querySelector('[data-oppedit]'); const win=tr.querySelector('[data-oppwin]'); const id=(ed&&ed.dataset.oppedit)||(win&&win.dataset.oppwin); if(!id)return;
+      const req=wonRequest27(id); const stageCell=tr.children[2];
+      if(req&&req.status==='open'&&stageCell) stageCell.insertAdjacentHTML('beforeend',' <span class="chip c-payable" style="font-size:9px">Won — awaiting setup</span>');
+      if(can('editAgreements')){ if(win){ win.textContent=req&&req.status==='open'?'Set up deal':'Win'; if(req&&req.status==='open')win.style.fontWeight='700'; } }
+      else if(ed&&!(req&&req.status==='open')){ const b=document.createElement('button'); b.className='paidbtn'; b.textContent='Mark won'; b.style.marginLeft='6px';
+        b.onclick=()=>{ const cell=b.parentElement; cell.innerHTML=`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end"><input type="date" class="cfg-in" id="mw_d_${id}" value="${E27.businessToday()}" title="Signed date"><input type="number" class="cfg-in" id="mw_m_${id}" placeholder="Final $/mo" style="width:100px"><input class="cfg-in" id="mw_n_${id}" placeholder="Note (optional)" style="width:140px"><button class="btn-primary" id="mw_go_${id}" style="padding:5px 10px">Send</button></div>`;
+          $('mw_go_'+id).onclick=()=>markWon27(id,{signed_date:$('mw_d_'+id).value||null,final_mrr:+$('mw_m_'+id).value||null,note:($('mw_n_'+id).value||'').trim()||null}); };
+        ed.after(b); }
+    }); };
+  const oo=window.openOpp; if(typeof oo==='function') window.openOpp=function(){ const r=oo.apply(this,arguments); const s=$('oppSub27'); if(s) s.textContent=can('editAgreements')?'A lightweight stub. Click Win on the list when the customer signs to set up the agreement.':'When the customer signs, click Mark won on the list — your admin sets up the agreement and records the sale.'; return r; };
+})();
+
+/* ---- Reps: read-only agreement view ---- */
+function viewAgreement27(id){
+  const a=AGREEMENTS.find(x=>String(x.id)===String(id)); if(!a)return; const c=compute(a);
+  let sc=$('vwScrim27'); if(sc)sc.remove(); sc=document.createElement('div'); sc.id='vwScrim27'; sc.className='scrim show';
+  const d=x=>x?esc(String(x).slice(0,10)):'—'; const row=(k,v)=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px dashed var(--line)"><span style="color:var(--muted)">${k}</span><b style="text-align:right">${v}</b></div>`;
+  let comm='';
+  if(c.revised&&c.revisedCalc){ const ls=revisedQuarterLines27(a,c); const tr=c.tranches||{};
+    comm=`<div style="display:flex;justify-content:space-between;align-items:baseline"><span>Total commission</span><b style="font-size:20px">${fmt2(Number(c.revisedCalc.totalCents)/100)}</b></div>
+     <table style="width:100%;font-size:12.5px;margin-top:8px"><thead><tr><th style="text-align:left">Payment</th><th class="num">Amount</th><th>Status</th><th style="text-align:left">What it's waiting on</th></tr></thead><tbody>
+     ${ls.map(l=>{ const t=l.piece===1?tr.t1:tr.t2; const m=RSTATE27[l.rstate]; const waits=l.rstate==='expected'?((t&&t.conditions)||[]).map(friendlyCond27).map(esc).join('<br>')||esc(l.note):esc(l.note);
+       return `<tr><td style="white-space:nowrap">Payment ${l.piece} of 2</td><td class="num mono">${fmt2(l.amount)}</td><td><span class="chip ${m[0]}" style="font-size:9px">${m[1]}</span></td><td style="white-space:normal">${waits}</td></tr>`; }).join('')}</tbody></table>
+     <div class="qctx" style="margin-top:6px">Payment 1 is earned when the first invoice is paid. Payment 2 is earned three months after first billing, with the account active and every invoice due by then paid.</div>`;
+  } else if(c.planNotConfigured||c.blockedReason){ comm=`<div style="color:var(--orange)">${esc(plainText27(c.blockedReason||c.planReason||'Plan not configured'))}</div>`; }
+  else { comm=`${row('Initial commission',fmt2(c.initialCommission||0))}${c.holdbackCommission?row('Deferred piece',fmt2(c.holdbackCommission)+(c.holdbackQI!=null?' · '+qLabel(c.holdbackQI):'')):''}${c.renewalCommission?row('Renewal commission',fmt2(c.renewalCommission)):''}<div class="qctx" style="margin-top:6px">Sold before the revised plan — paid under the plan it was sold on.</div>`; }
+  const evs=committedEventsFor(a);
+  sc.innerHTML=`<div class="modal" style="max-width:640px"><div class="modal-head"><div><h3 style="margin:0">#${esc(a.agreement_number||'—')} · ${esc(a.customer_name||'')}</h3><div style="font-size:12px;color:var(--muted);margin-top:2px">View only · ${esc(c.planVersion||'')}</div></div><button class="x" id="vwClose27">×</button></div>
+    <div class="modal-body" style="font-size:13px">
+     ${row('Monthly RMR',fmt2(+a.monthly_rmr||0)+(a.category==='sla'?' (SLA)':''))}${row('Term',a.contract_term?a.contract_term+' months':'—')}${row('Signed / activated',d(a.activation_date))}${row('First billing',d(a.first_billing_date))}
+     ${row('Renewal',a.autorenew?'Auto-renewal':'Manual renewal')}${typeof nextDueDate==='function'&&nextDueDate(a)?row('Next renewal',fmtDate(nextDueDate(a))):''}
+     <div class="fieldset-h">Your commission</div>${comm}
+     ${evs.length?`<div class="fieldset-h">Recorded</div>${evs.map(e=>row(esc(String(e.event_date||'').slice(0,10))+' · '+esc(String(e.event_type).replace(/_/g,' ')),fmt2(+e.total_cents/100))).join('')}`:''}
+    </div><div class="modal-foot"><button class="btn-primary" id="vwOk27" style="margin-left:auto">Close</button></div></div>`;
+  document.body.appendChild(sc); const close=()=>sc.remove(); $('vwClose27').onclick=close; $('vwOk27').onclick=close; sc.onclick=e=>{ if(e.target===sc)close(); };
+}
+(function hookOpenModalForReps27(){ const prev=window.openModal; window.openModal=function(id,promote){ if(!can('editAgreements')){ if(id)viewAgreement27(id); return; } return prev.apply(this,arguments); }; })();
+
+/* ---- Tabs and first-sign-in checks ---- */
+const REP_HIDDEN_TABS=['tabForecast','tabRecon','tabReports','tabWorklist'];
+(function hookPermissions27(){
+  const orig=window.applyPermissions;
+  const labels={tabQuarter:['Quarter view','My pay'],tabAgreements:['Agreements','My agreements'],tabHistory:['Commission History','Payment history']};
+  window.applyPermissions=function(){ orig.apply(this,arguments);
+    const rep=!canViewAll();
+    REP_HIDDEN_TABS.forEach(id=>{ const t=$(id); if(t) t.style.display=rep?'none':''; });
+    Object.entries(labels).forEach(([id,[a,b]])=>{ const t=$(id); if(t) t.textContent=rep?b:a; });
+    setTimeout(firstSignInChecks27,0); };
+})();
+async function firstSignInChecks27(){
+  if(!P27.ready||!CURRENT_EMAIL)return; const me=CURRENT_EMAIL.toLowerCase();
+  let mine=(P27.users||[]).find(u=>String(u.email).toLowerCase()===me);
+  if(!mine&&!ADMIN_EMAILS.includes(me)){ const q=await sb.from('rmr_users').select('*').eq('email',me).limit(1); if(q.error)return; mine=(q.data||[])[0]; }
+  if(!mine&&!ADMIN_EMAILS.includes(me)){
+    let sc=$('notSetUp27'); if(sc)return; sc=document.createElement('div'); sc.id='notSetUp27'; sc.className='scrim show'; sc.style.zIndex='1000';
+    sc.innerHTML=`<div class="modal" style="max-width:460px"><div class="modal-head"><h3 style="margin:0">Your account isn't set up yet</h3></div><div class="modal-body" style="font-size:13.5px;line-height:1.6">You're signed in as <b>${esc(me)}</b>, but you haven't been added to the Bonus Tracker. Ask your administrator to add you in Admin ▸ Employees, then sign in again.</div><div class="modal-foot"><button class="btn-primary" id="nsu27" style="margin-left:auto">Sign out</button></div></div>`;
+    document.body.appendChild(sc); $('nsu27').onclick=()=>{ sc.remove(); doSignOut(); }; return; }
+  if(mine&&mine.must_set_password&&!$('pwScrim27')){
+    const sc=document.createElement('div'); sc.id='pwScrim27'; sc.className='scrim show'; sc.style.zIndex='1001';
+    sc.innerHTML=`<div class="modal" style="max-width:440px"><div class="modal-head"><h3 style="margin:0">Choose your password</h3></div><div class="modal-body" style="font-size:13px;line-height:1.6">Welcome to the Bonus Tracker. Replace the temporary password you were given with one only you know.
+      <div class="fld" style="margin-top:10px"><label>New password <span class="hint">at least 8 characters</span></label><input type="password" id="pw1_27" autocomplete="new-password"></div><div class="fld"><label>Confirm</label><input type="password" id="pw2_27" autocomplete="new-password"></div><div id="pwErr27" style="color:var(--held)"></div></div>
+      <div class="modal-foot"><button class="btn-primary" id="pwGo27" style="margin-left:auto">Save password</button></div></div>`;
+    document.body.appendChild(sc);
+    $('pwGo27').onclick=async()=>{ const p1=$('pw1_27').value, p2=$('pw2_27').value; if(p1.length<8){ $('pwErr27').textContent='Use at least 8 characters.'; return; } if(p1!==p2){ $('pwErr27').textContent="The two entries don't match."; return; }
+      const {error}=await sb.auth.updateUser({password:p1}); if(error){ $('pwErr27').textContent=error.message; return; }
+      await sb.rpc('rmr_password_set'); mine.must_set_password=false; audit('Password set at first sign-in','Admin',me,null,null,null); sc.remove(); toast('Password saved'); };
+  }
+}
+
+/* ---- Plain-language screens: requirement codes stay in the spec and audit trail, not on screen ---- */
+(function stripCodes27(){
+  const re=new RegExp(REQ_CODE); const skip=new Set(['SCRIPT','STYLE','TEXTAREA','INPUT']);
+  const fix=node=>{ if(node.nodeType===3){ if(re.test(node.nodeValue)){ const v=plainText27(node.nodeValue); if(v!==node.nodeValue)node.nodeValue=v; } return; }
+    if(node.nodeType!==1||skip.has(node.nodeName))return;
+    if(node.title&&re.test(node.title))node.title=plainText27(node.title);
+    const w=document.createTreeWalker(node,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT); let n;
+    while((n=w.nextNode())){ if(n.nodeType===3){ if(re.test(n.nodeValue)&&!(n.parentNode&&skip.has(n.parentNode.nodeName))){ const v=plainText27(n.nodeValue); if(v!==n.nodeValue)n.nodeValue=v; } } else if(n.title&&re.test(n.title)) n.title=plainText27(n.title); } };
+  const mo=new MutationObserver(ms=>{ ms.forEach(m=>{ if(m.type==='characterData')fix(m.target); else m.addedNodes.forEach(fix); }); });
+  const start=()=>{ fix(document.body); mo.observe(document.body,{childList:true,subtree:true,characterData:true}); };
+  if(document.body)start(); else document.addEventListener('DOMContentLoaded',start);
 })();

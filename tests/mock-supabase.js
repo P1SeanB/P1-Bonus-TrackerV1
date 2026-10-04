@@ -36,7 +36,8 @@
   };
   window.supabase={createClient:()=>({
     from:t=>new Q(t),
-    auth:{getSession:async()=>({data:{session:{user:{email:window.__EMAIL||'sean.bithell@point1.com'}}}}),onAuthStateChange:()=>{},signOut:async()=>({}),signInWithPassword:async()=>({error:null})},
+    auth:{getSession:async()=>({data:{session:{user:{email:window.__EMAIL||'sean.bithell@point1.com'}}}}),onAuthStateChange:()=>{},signOut:async()=>({}),signInWithPassword:async()=>({error:null}),signUp:async({email})=>{ (window.__SIGNUPS=window.__SIGNUPS||[]).push(email); return {data:{user:{email,identities:[{id:1}]}},error:null}; },updateUser:async()=>({data:{},error:null})},
+    rpc:async(fn)=>{ if(fn==='rmr_password_set'){ (window.__DB.rmr_users||[]).forEach(u=>{ if(u.email===(window.__EMAIL||'sean.bithell@point1.com'))u.must_set_password=false; }); } return {data:null,error:null}; },
     storage:{from:()=>({list:async()=>({data:[],error:null}),upload:async()=>({error:null}),createSignedUrl:async()=>({data:{signedUrl:'#'}})})}
   })};
 })();
