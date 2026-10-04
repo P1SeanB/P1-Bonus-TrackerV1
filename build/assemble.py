@@ -11,7 +11,7 @@ else:
 import base64
 b64=lambda f: 'data:image/png;base64,'+base64.b64encode(open('/home/claude/P1-Bonus-TrackerV1/assets/'+f,'rb').read()).decode()
 shell=src('shell27.js').replace('__P1_LOGO_REV__',b64('point1-logo-reversed.png')).replace('__P1_LOGO__',b64('point1-logo.png'))
-tail_block='</script>\n<script>\n/*V27-UI*/\n'+src('ui27.js')+'\n'+shell+'\n/*/V27-UI*/\nrenderLegend();\nboot();\n</script>\n</body>'
+tail_block='</script>\n<script>\n/*V27-UI*/\n'+src('ui27.js')+'\n'+shell+'\n'+src('deals27.js')+'\n/*/V27-UI*/\nrenderLegend();\nboot();\n</script>\n</body>'
 if '/*V27-UI*/' in s: s=re.sub(r'</script>\n<script>\n/\*V27-UI\*/.*?</body>',lambda m:tail_block,s,flags=re.S)
 else:
     old='renderLegend();\nboot();\n</script>\n</body>'; assert s.count(old)==1; s=s.replace(old,tail_block)

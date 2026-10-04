@@ -40,7 +40,7 @@ const tmp=f=>{ const p=path.join(require('os').tmpdir(),f); fs.writeFileSync(p,'
   let p=await open(browser,'jordan.lee@point1.com');
   ok(await p.evaluate(()=>view==='quarter'&&document.getElementById('pgTitle27').textContent==='My pay'),'rep lands on My pay with the page header');
   const repNav=await p.evaluate(()=>[...document.querySelectorAll('#side27 nav button')].filter(b=>b.offsetParent).map(b=>b.textContent.trim()).join('|'));
-  ok(repNav==='My pay|Pipeline|My deals|Renewals|Payment history|My plan|Guides','rep side menu: '+repNav);
+  ok(repNav==='My pay|My deals|Customers|Renewals|Payment history|My plan|Guides','rep side menu: '+repNav);
   await p.evaluate(()=>switchView('opportunities')); await p.waitForTimeout(300);
   await p.click('tr:has-text("Lakeside") .paidbtn:has-text("Mark won")'); await p.waitForTimeout(200);
   ok(await p.evaluate(()=>!!document.getElementById('mw27')&&document.getElementById('mw27_go').disabled),'Mark won opens the side panel; Send stays off without the contract');
@@ -57,7 +57,7 @@ const tmp=f=>{ const p=path.join(require('os').tmpdir(),f); fs.writeFileSync(p,'
   p=await open(browser,'sean.bithell@point1.com');
   ok(await p.evaluate(()=>view==='today'),'admin lands on Today');
   const admNav=await p.evaluate(()=>[...document.querySelectorAll('#side27 nav button')].filter(b=>b.offsetParent).map(b=>b.textContent.trim()).join('|'));
-  ok(/^Today\|Pipeline\|Agreements\|Renewals\|Payouts\|Worklist.*\|Vista imports\|Commission history\|Renewal forecast\|Reconciliation\|Reports\|Guides\|Admin$/.test(admNav),'admin side menu: '+admNav);
+  ok(/^Today\|Deals\|Customers\|Renewals\|Payouts\|Worklist.*\|Vista imports\|Commission history\|Renewal forecast\|Reconciliation\|Reports\|Guides\|Admin$/.test(admNav),'admin side menu: '+admNav);
   const close=async(id,bill,hrs,signed)=>{ await p.evaluate(id=>winOpp(id),id); await p.waitForTimeout(250); await p.selectOption('#cd_term','36'); if(signed) await p.fill('#cd_date',signed); if(bill) await p.fill('#cd_bill',bill); await p.fill('#cd_hrs',String(hrs)); await p.fill('#cd_rate','110'); await p.fill('#cd_mat','60'); await p.fill('#cd_mon','180'); await p.waitForTimeout(150); await p.click('#cdGo27'); await p.waitForTimeout(800); };
   await close('o1','2026-11-01',1); await close('o3','2026-12-01',1);
   await close('o2','2026-11-01',1,'2026-10-25');
