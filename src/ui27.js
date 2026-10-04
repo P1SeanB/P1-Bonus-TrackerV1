@@ -277,7 +277,7 @@ function priceEvent27(a,e,res,ov){
   if(e.next==null){ out.blocked='Vista shows no monthly rate for this revision.'; return out; }
   const incOnly=et==='auto_renewal'||et==='rate_increase';
   const prior=incOnly?(e.highWater!=null?e.highWater:e.prior):e.prior;
-  if(incOnly&&!(prior!=null&&e.next-prior>0.04)){ out.noPay=true; out.reason='No increase — nothing pays (the amount already commissioned pays once).'; }
+  if(incOnly&&!(prior!=null&&e.next-prior>0.04)){ out.noPay=true; out.reason='No increase — nothing pays (the amount already commissioned pays once).'; return out; }
   let margin=null;
   try{ const mrrQ=E27.R(E27.cents(String(e.next)));
     if(override) margin=E27.ONE; else { const qm=E27.qualificationMargin(mrrQ,term,E27.modelledCost(a)); margin=qm.margin; out.marginReason=qm.reason||null; out.margin=qm.margin; }
