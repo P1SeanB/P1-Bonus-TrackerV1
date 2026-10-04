@@ -228,7 +228,7 @@ function tlFor(a){
   const ots=a.renewal_override_term_start?String(a.renewal_override_term_start).slice(0,10):null;
   const key=a.id+'|'+(a.renewal_type_override||'')+'|'+(ots||'');
   if(!TL_CACHE.has(key)){ const revs=TERMS_BY_NO[String(a.agreement_number)];
-    const tl=revs?R27.timeline(revs,{today:E27.businessToday(),overrideType:a.renewal_type_override||null,overrideTermStart:ots,annualised:a.category==='sla'}):null; TL_CACHE.set(key,tl&&tl.ok?tl:null); }
+    const tl=revs?R27.timeline(revs,{today:E27.businessToday(),overrideType:a.renewal_type_override||null,overrideTermStart:ots,annualised:a.category==='sla',knownRate:+a.monthly_rmr||null}):null; TL_CACHE.set(key,tl&&tl.ok?tl:null); }
   return TL_CACHE.get(key);
 }
 function currentVersionOf27(email){
@@ -255,10 +255,10 @@ function eventsFor27(a){
     return tl.events.map(e=>{ let x=e===last&&e.next!=null&&mrr>0&&Math.abs(e.next-mrr)<=0.6&&e.next!==mrr?Object.assign({},e,{next:mrr,vistaRate:e.next}):e;
       const o=adj.find(o=>o.date===e.date&&(!o.match||o.match===e.kind));
       if(o){ x=Object.assign({},x,{adjusted:o.note||'Adjusted',adjustedBy:o.by||null,vista:{kind:e.kind,prior:e.prior,next:e.next,term:e.term}});
-        ['kind','renewalType','prior','next'].forEach(k=>{ if(o[k]!==undefined)x[k]=o[k]; });
+        ['kind','renewalType','prior','next'].forEach(k=>{ if(o[k]!==undefined)x[k]=o[k]; }); if(o.moveTo){ x.date=o.moveTo; x.vista.date=e.date; }
         if(o.term!==undefined){ x.term=o.term; x.standardTerm=[12,24,36,48,60].includes(+o.term)?+o.term:null; }
         if(o.prior!==undefined){ x.highWater=o.prior; } }
-      return x; }); }
+      return x; }).sort((p,q)=>String(p.date).localeCompare(String(q.date))); }
   const d=eventDateOf(a), t=+a.contract_term||0;
   return [{kind:'new_sale',date:d,term:t,standardTerm:[12,24,36,48,60].includes(t)?t:null,next:Math.round(agreementMrr(a)*100)/100,prior:null,fromAgreement:true}];
 }
@@ -1557,7 +1557,8 @@ function proposedChanges27(a,tl){
     const ty=tl.currentType; if((a.agreement_type||'')!==ty||!!a.autorenew!==(ty==='auto')) ch.agreement_type=[a.agreement_type||'—',ty]; }
   const flags=[];
   if(!tl.live&&!isEnded(a)) flags.push(`Ended in Vista ${tl.endedDate||''} — still live here. Check, then set the end date on the agreement.`);
-  if(tl.live&&tl.currentRate!=null&&Math.abs(tl.currentRate-(+a.monthly_rmr||0))>0.6) flags.push(`Vista rate ${fmt2(tl.currentRate)}/mo vs ${fmt2(+a.monthly_rmr||0)}/mo here — check the agreement price.`);
+  const used=(()=>{ const ev=eventsFor27(a).filter(e=>e.next!=null&&e.date<=E27.businessToday()); return ev.length?ev[ev.length-1].next:tl.currentRate; })();
+  if(tl.live&&used!=null&&Math.abs(used-(+a.monthly_rmr||0))>0.6) flags.push(`Vista rate ${fmt2(used)}/mo vs ${fmt2(+a.monthly_rmr||0)}/mo here — check the agreement price.`);
   return {ch,flags};
 }
 function eventStatus27(p){

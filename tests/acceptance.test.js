@@ -137,6 +137,10 @@ t('Agreement 67: Alarm.com additions take $36 to $115 (the September invoice)',(
 t('SLA (agreement 149): the price is the annual value — $592,664.61 ÷ 12',()=>{
   const tl=RT.timeline([rv(1,'Terminated','2026-01-01','2026-12-31',736993,429912.56,'2026-01-01','2026-12-31'),rv(2,'Active','2026-01-02','2026-12-31',592664.61,130201.64,'2026-01-01','2026-12-31')],{today:'2026-10-03',annualised:true});
   eq(tl.currentRate,49388.72); });
+t('Agreement 14: Vista only holds the months billed since it entered Vista — $1,260 = 28 × $45, so the rate is $45',()=>{
+  const r=[rv(1,'Active','2022-02-01','2027-01-31',1260,1170,'2022-02-01','2027-01-31')];
+  eq(RT.timeline(r,{today:'2026-10-03'}).currentRate,21); eq(RT.timeline(r,{today:'2026-10-03',knownRate:45}).currentRate,45);
+  eq(RT.timeline([rv(1,'Active','2024-11-01','2027-10-31',1924.92,1176,'2024-11-01','2027-10-31')],{today:'2026-10-03',knownRate:60}).currentRate,53.47); });
 t('Engine (v2 switch): auto-renewal pays the increase at the new-sale multiple; without it, nothing',()=>{
   const v2=JSON.parse(JSON.stringify(HYBRID)); v2.config.autoRenewalPaysIncrease=true;
   eq(E.toDollars(E.calculate({plan:v2,eventType:'auto_renewal',term:36,newMrr:'120',priorMrr:'100',margin:M50}).totalCents),'20.00');

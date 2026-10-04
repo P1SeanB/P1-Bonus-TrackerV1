@@ -46,6 +46,10 @@ function timeline(revisions,opts){
       else { // a later revision's price includes what was already billed in the term: spread the rest over the months not yet billed
         const span=Math.round(monthsBetween(first.effective_date,end)||0), own=Math.round(monthsBetween(r.effective_date,end)||0), left=Math.min(span-monthsBilled,own);
         r.rate=(left>0&&r.term_price!=null)?cents((r.term_price-billed)/left):null; }
+      // agreements older than Vista only carry the months billed since they entered Vista (#14: $1,260 = 28 × $45): when the
+      // agreement's own monthly rate divides the price into a whole number of months that fits, that rate is the rate
+      if(i===0&&opts.knownRate>0&&r.term_price>0&&r===revs[revs.length-1]){ const k=r.term_price/opts.knownRate, span=monthsBetween(r.effective_date,end)||0;
+        if(Math.abs(k-Math.round(k))<0.02&&Math.round(k)<=span+0.5&&Math.abs(r.rate-opts.knownRate)>0.004){ r.vistaFormulaRate=r.rate; r.rate=cents(opts.knownRate); } }
       billed+=+r.amount_billed||0; if(r.rate>0)monthsBilled+=Math.round((+r.amount_billed||0)/r.rate); });
     // the date the term really stopped: Vista keeps the printed term end even when every revision expired or was terminated earlier
     const ends=t.revisions.map(r=>iso(r.terminated_date)||iso(r.expiration_date)).filter(Boolean).sort(); const lastEnd=ends[ends.length-1]||t.end;
