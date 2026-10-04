@@ -48,7 +48,7 @@ const PAGE27={
 const isTeam27=()=>canViewAll();
 const lc27=s=>String(s||'').toLowerCase();
 const money27=n=>fmt2(Number(n)||0);
-const fmtD27=iso=>{ if(!iso)return '—'; const d=new Date(String(iso).slice(0,10)+'T00:00:00'); return isNaN(d)?String(iso):d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); };
+const fmtD27=iso=>{ if(!iso)return '—'; const d=/T\d\d:/.test(String(iso))?new Date(iso):new Date(String(iso).slice(0,10)+'T00:00:00'); return isNaN(d)?String(iso):d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); };
 const daysTo27=iso=>{ if(!iso)return null; const t=new Date(E27.businessToday()+'T00:00:00'), d=new Date(String(iso).slice(0,10)+'T00:00:00'); return Math.round((d-t)/86400000); };
 function nameOf27(email){ const u=(P27.users||[]).find(x=>lc27(x.email)===lc27(email)); return (u&&(u.full_name||u.name))||repName(email); }
 
@@ -392,8 +392,10 @@ async function renderGuides27(){
     if($('gd27list')){ $('gd27list').innerHTML=rows.join(''); $('gd27list').querySelectorAll('[data-gd27o]').forEach(b=>b.onclick=()=>openUserGuide27(GUIDE27[b.dataset.gd27o])); }
     $('gd27up').onclick=async()=>{ const f=$('gd27file').files[0], k=$('gd27which').value, msg=t=>{ $('gd27msg').textContent=t; };
       if(!f)return msg('Choose the guide file first.'); if(!/\.html?$/i.test(f.name))return msg('The guide must be an .html file.');
-      $('gd27up').disabled=true; msg('Publishing…');
-      const {error}=await sb.storage.from('guides').upload(GUIDE27[k].path,f,{upsert:true,contentType:'text/html'});
+      $('gd27up').disabled=true; $('gd27msg').style.color='var(--muted)'; msg(`Publishing ${(f.size/1048576).toFixed(1)} MB…`);
+      let error=null;
+      try{ await sb.auth.getSession(); const r=await Promise.race([sb.storage.from('guides').upload(GUIDE27[k].path,f,{upsert:true,contentType:'text/html'}),new Promise(res=>setTimeout(()=>res({error:{message:'The upload did not finish in 90 seconds. Check your connection and press Publish again.'}}),90000))]); error=r.error||null; }
+      catch(e){ error={message:(e&&e.message)||String(e)}; }
       $('gd27up').disabled=false;
       if(error){ $('gd27msg').style.color='#8a1f1f'; return msg(/bucket|not found/i.test(error.message)?'The database needs the v26 update (migration_v26_guides.sql) first.':error.message); }
       audit('User guide published','Guides',GUIDE27[k].path,null,{file:f.name,size:f.size},null); $('gd27msg').style.color='#17603f'; msg(`Published — ${GUIDE27[k].who} now see the new version.`); renderGuides27(); }; }
