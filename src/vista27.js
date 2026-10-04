@@ -69,6 +69,10 @@ function isTotalsRow(cells){ const t=cells.map(norm).join(' '); return /totals? 
 // Vista report footer ("2 Point One Electrical Systems · Page 1 · … · Report.rpt") and footnotes ("* Actual Cost is not yet available…")
 function isFooterRow(cells){ const c=cells.map(v=>String(v==null?'':v).trim()); return c.some(x=>/\.rpt$/i.test(x)||/^page \d+$/i.test(x)||/^date format/i.test(x))||/^\*{1,2} /.test(c[0]||''); }
 const isDateish=v=>v instanceof Date||(typeof v==='number'&&v>20000&&v<80000)||/^\d{4}-\d{2}-\d{2}|^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(String(v==null?'':v).trim());
+// The export's own date range ("Invoice Dates: 01/01/25 - 09/30/26", "Date Entered: 07/01/26 - 09/30/26"): the file covers
+// through the range end even when no transaction fell on that last day.
+function echoRangeEnd(echo,label){ const m=String(echo||'').match(new RegExp(label+':?\\s*(\\d{1,2}/\\d{1,2}/\\d{2,4})\\s*-\\s*(\\d{1,2}/\\d{1,2}/\\d{2,4})','i')); return m?toIsoDate(m[2])||null:null; }
+const throughOf=(found,end)=>end&&(!found||end>=found)?end:found;
 const cellText=v=>String(v==null?'':v).replace(/\s+/g,' ').trim();
 
 /* Grouped Vista layouts. The real SM Agreement List and SM Work Order Profitability Detail exports are not flat
@@ -119,7 +123,7 @@ function parseGrouped(feed,rows){
     const rec={work_order:wo,line_type:lt,description:desc,post_date:toIsoDate(row[2]),amount:amt,agreement_number:agr};
     rec.line_key=[rec.work_order,rec.line_type,rec.post_date,rec.description,rec.amount,r].join('|'); out.push(rec); }
   if(!out.length)return fail('No cost lines found in this file. Nothing was imported.');
-  const dataThrough=out.map(x=>x.post_date).filter(Boolean).sort().pop()||null;
+  const dataThrough=throughOf(out.map(x=>x.post_date).filter(Boolean).sort().pop()||null,echoRangeEnd(echo,'Date Entered'));
   return {ok:true,feed,rows:out,header:(rows[hi]||[]).map(norm),offset:0,layout:'grouped',paramEcho:echo,flags:[],duplicates:0,dataThrough};
 }
 
@@ -190,6 +194,7 @@ function parse(feed,rows,opts){
   let dataThrough=null;
   const dateOf={invoices:'invoice_date',receipts:'receipt_date',posted_cost:'post_date',agreement_terms:'effective_date'}[feed];
   if(dateOf){ dataThrough=out.map(x=>x[dateOf]).filter(Boolean).sort().pop()||null; }
+  if(feed==='invoices')dataThrough=throughOf(dataThrough,echoRangeEnd(echo,'Invoice Dates'));
   if(feed==='invoices'){
     const st={}; out.forEach(x=>{ const k=x.status||'(blank)'; st[k]=(st[k]||0)+1; });
     if(!st.Voided&&!st.Pending&&out.length>50)flags.push('No Voided or Pending invoices in this file — it looks like the default Invoiced-only run (F-20). Voided invoices at zero balance must never read as collected.');

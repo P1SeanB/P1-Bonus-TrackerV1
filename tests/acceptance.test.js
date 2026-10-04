@@ -90,7 +90,7 @@ t('Real SM Invoice List: customer # and name in two cells, footer and Grand Tota
     ['     25494','Invoiced',647,'Santo Office','',D('2025-01-01'),D('2025-01-01'),D('2025-01-31'),65,0,65,0],[''],
     ['     34208','Pending',807,'Mountain Cascade, Inc','',D('2026-09-25'),null,D('2026-11-24'),3548.8,0,3548.8,3548.8],
     ['Grand Totals:',null,5457577.41,896.65,5458474.06,439925.47],['2   Point One Electrical Systems','Page 1','10/03/26  09:35:19 PM','Date Format - MM/DD/YY','SMInvoiceList.rpt']];
-  const p=V.parse('invoices',rows); if(!p.ok)throw new Error(p.error); eq(p.rows.length,2); eq(p.rows[0].customer,'647 Santo Office'); eq(p.rows[0].invoice_date,'2025-01-01'); eq(p.rows[0].post_month,'2025-01'); eq(p.rows[0].balance,0); eq(p.rows[1].balance,3548.8); eq(p.rows[1].post_month,null); });
+  const p=V.parse('invoices',rows); if(!p.ok)throw new Error(p.error); eq(p.rows.length,2); eq(p.rows[0].customer,'647 Santo Office'); eq(p.rows[0].invoice_date,'2025-01-01'); eq(p.rows[0].post_month,'2025-01'); eq(p.rows[0].balance,0); eq(p.rows[1].balance,3548.8); eq(p.rows[1].post_month,null); eq(p.dataThrough,'2026-09-30'); });
 t('Real SM Agreement List (grouped): revisions read under their agreement; blank 1899 dates are empty',()=>{
   const rows=[['SM Agreement List'],['Sorting by Customer NumberThen by Revision Number','Showing All Agreements','Revision Status Filter Legend ','Displaying: All Statuses'],
     ['Dates','Amount\nBilled ','Previous\nRevision','Rev.','Effective',null,'Activated','Cancelled','Terminated','Expiration','Price','Status'],
@@ -108,7 +108,7 @@ t('Real SM WO Profitability Detail (grouped): agreement from the grouping, total
     ['Agreement: 165',''],['Work Order 11246  Description: Monitoring   Customer: X',''],['Line Type: 3 - Miscellaneous ',''],['None','Applied Overhead',D('2026-08-19'),0,0,0,'',198.73,'',0,0,'',-198.73,'N/A'],
     ['Totals for Work Order 11246  ',0],['Totals for Agreement: 165',0],['Grand Total',44,820],['* Actual Cost is not yet available, calculated using Projected Cost '],['Page 1','2   Point One Electrical Systems','10/03/26','Date Format - MM/DD/YY','SMWorkOrderProfitabilityDetail.rpt']];
   const p=V.parse('posted_cost',rows); if(!p.ok)throw new Error(p.error); eq(p.rows.length,2); eq(p.rows[0].agreement_number,null); eq(p.rows[0].line_type,'Labor'); eq(p.rows[0].amount,460.41); eq(p.rows[0].description,'Gomez, Randolph');
-  eq(p.rows[1].agreement_number,'165'); eq(p.rows[1].work_order,'11246'); eq(V.classifyCost(p.rows[1],[{match_field:'description',pattern:'(?i)applied overhead',bucket:'overhead'}]),'overhead'); });
+  eq(p.rows[1].agreement_number,'165'); eq(p.rows[1].work_order,'11246'); eq(p.dataThrough,'2026-09-30'); eq(V.classifyCost(p.rows[1],[{match_field:'description',pattern:'(?i)applied overhead',bucket:'overhead'}]),'overhead'); });
 t('Grouped Agreement List dropped in the Invoices slot → rejected, names the right slot',()=>{ const p=V.parse('invoices',[['SM Agreement List'],['Dates','Rev.','Effective','Status'],['Customer: 1 (A)'],['Agreement: 5 - X'],[1,D('2026-01-01')]]); eq(p.ok,false); if(!/Agreement term history/.test(p.error))throw new Error(p.error); });
 
 results.forEach(r=>console.log(r[0]+'  '+r[1]));
