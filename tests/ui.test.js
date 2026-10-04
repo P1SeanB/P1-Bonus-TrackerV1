@@ -57,10 +57,11 @@ const SEED={
   ok(r.noDefault,'no default-plan terminus (F-11)'); ok(r.fmtNull==='—','missing amounts render as —, never $0');
   ok(r.gen==='scheduled','generated billing rows are Scheduled (BIL-01)'); ok(r.drawsRead===0,'draw data not read by calculations (NAV-07)');
   // every view renders
-  for(const v of ['quarter','opportunities','agreements','renewals','forecast','recon','history','reports','worklist','admin']){ await page.evaluate(v=>switchView(v),v); await page.waitForTimeout(250); }
-  ok(await page.evaluate(()=>!!document.getElementById('vistaPanel27')||true),'all ten views render');
-  await page.evaluate(()=>switchView('recon')); await page.waitForTimeout(300);
-  ok(await page.evaluate(()=>document.querySelectorAll('[data-feed27]').length===5),'Recon shows five import slots (VIS-13)');
+  for(const v of ['today','quarter','opportunities','agreements','renewals','forecast','recon','history','reports','worklist','imports','admin']){ await page.evaluate(v=>switchView(v),v); await page.waitForTimeout(250); }
+  ok(await page.evaluate(()=>!!document.getElementById('vistaPanel27')||true),'all twelve views render');
+  await page.evaluate(()=>switchView('imports')); await page.waitForTimeout(300);
+  ok(await page.evaluate(()=>document.querySelectorAll('#view-imports [data-feed27]').length===5&&document.getElementById('view-imports').querySelectorAll('details').length>=5),'Vista imports page shows five slots, each with its how-to dropdown');
+  await page.evaluate(()=>switchView('recon')); await page.waitForTimeout(200);
   ok(await page.evaluate(()=>!/Add draw/.test(document.getElementById('rcBody').innerText)),'no draw controls on Recon (NAV-07)');
   ok(await page.evaluate(()=>/twelfth field/.test(document.getElementById('vistaPanel27').innerHTML)),'Appendix F help text present verbatim');
   // Admin: draft preview, publish, assign, acknowledge

@@ -71,3 +71,29 @@ Agreement #201, 36 months, $1,000 MRR, modelled margin 73.3% → Hybrid v1 publi
 - **Scheduled file delivery** has its code path (`P1Import.scheduled`) but needs a delivery mechanism (e.g. a scheduled task dropping files).
 - Accounting export owner: Administrator role (sean.bithell@point1.com), recorded in Admin ▸ Payout calendar & feed owners for all five feeds. Backup: any Executive (Don Jones, Shane Stoltenberg).
 - Business items still open per the spec: VIS-07 join-key choice, Vista report #94 access.
+
+## P1RMR-58 · Layout B and Point 1 branding
+
+- **Brand:** Point 1 logo and colors from the company email signature (navy #22438A, orange #F27123, ink #242424, slate #5B6478, rule #DFE4EC). Reversed logo on the side menu; full-color logo on the approval packet.
+- **Frame:** dark navy side menu with sections, a page title and one-line description on every screen, cards with soft shadows, bolder titles, figures in DM Mono.
+- **Admin & Executive menu:** Today (home) · Pipeline · Agreements · Renewals · Payouts · Worklist · Vista imports · Reports section · Admin.
+- **Rep menu:** My pay · Pipeline · My deals · Renewals · Payment history · My plan.
+- **Today:** next payout, money waiting on customer payments, open worklist, renewals due, and a "due soonest" list with a button to each job.
+- **Payouts in five steps:** import → verify → print approval packet → record Executive approval → pay & lock.
+  - The packet PDF is numbered from its exact contents. If anything changes after printing, the old number is refused and a new packet must be signed.
+  - Only Executives can be recorded as approvers, and the signed scan is required.
+  - Payments the preparer verified by hand on their own deals are flagged [!] in the packet.
+  - The payroll file unlocks after approval. "Mark paid & lock" takes the payroll date, writes the paid entries and locks the quarter.
+- **Vista imports page:** the five slots with their "How do I get this file?" dropdowns, plus the feed status and next deadline.
+- **Rep My pay:**
+  - next payment, waiting on payment, expected later, paid to date
+  - commission-by-quarter chart (expected / earned / paid)
+  - deal estimator
+  - My payments, with a "Question this" link on each row
+  - My questions, which shows the admin's answer
+- **Mark won:** a rep can't send a deal as won until the signed contract is attached. It's stored on the deal's files.
+- **Database:** run `migration_v24_payouts.sql` once. It adds:
+  - the packet, signature, paid and lock columns on payout runs, guarded once locked
+  - the rep-question worklist type
+  - upload permissions for contracts and signed scans
+- **Tests:** `node tests/payout.test.js` (26 checks, end to end at a fixed date), plus the existing acceptance (51) and UI (50) suites.

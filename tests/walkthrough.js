@@ -50,9 +50,9 @@ const clicks={}; const step=(who,what)=>{ clicks[who]=(clicks[who]||0)+1; note(`
   step('rep','Opportunities ▸ + New opportunity ▸ fill ▸ Save'); await p.evaluate(()=>switchView('opportunities')); await p.waitForTimeout(300); await p.click('#oppAddBtn'); await p.waitForTimeout(300);
   await p.fill('#o_cust','Lakeside Medical Plaza'); await p.selectOption('#o_stage','quoting'); await p.fill('#o_est','SSE-014-26'); await p.fill('#o_rmr','100'); await p.fill('#o_close','2026-10-17'); await p.fill('#o_notes','Fire alarm monitoring + annual inspection');
   await shot(p,'rep_new_opportunity','#oppScrim .modal'); await p.click('#oppSave'); await p.waitForTimeout(500);
-  step('rep','Customer signed ▸ Mark won ▸ signed date + final $/mo ▸ Send'); const rid=await p.evaluate(()=>AGREEMENTS.find(a=>a.customer_name==='Lakeside Medical Plaza').id);
-  await p.click('.paidbtn:has-text("Mark won")'); await p.waitForTimeout(200); await p.fill(`#mw_d_${rid}`,'2026-10-20'); await p.fill(`#mw_m_${rid}`,'100'); await shot(p,'rep_mark_won');
-  await p.click(`#mw_go_${rid}`); await p.waitForTimeout(500); await shot(p,'rep_opportunity_won_waiting');
+  step('rep','Customer signed ▸ Mark won ▸ signed date + final $/mo ▸ Send');   await p.click('.paidbtn:has-text("Mark won")'); await p.waitForTimeout(200); await p.fill('#mw27_d','2026-10-20'); await p.fill('#mw27_m','100');
+  { const f=path.join(require('os').tmpdir(),'Lakeside-signed.pdf'); fs.writeFileSync(f,'%PDF-1.4'); await p.setInputFiles('#mw27_f',f); } await shot(p,'rep_mark_won');
+  await p.click('#mw27_go'); await p.waitForTimeout(600); await shot(p,'rep_opportunity_won_waiting');
   note('rep page errors: '+JSON.stringify(p.__errors)); await save(p); await p.close();
   // ===== ADMIN: Worklist → Set up deal → Approve & record sale
   p=await open(browser,'sean.bithell@point1.com');
