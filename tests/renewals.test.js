@@ -111,7 +111,7 @@ async function open(browser,email){ const ctx=await browser.newContext({viewport
   items=await p.evaluate(()=>{ const v=P27.versions.find(x=>x.id==='v-hyb2'); Object.assign(v.config,{tranche1Trigger:'marked_sold',tranche2Trigger:'first_invoice_collected',tranche2ExpectDays:60}); PRICE_STAMP++;
     const run=E27.payoutCalendar(P27.settings.payout_calendar); return payoutItems(run).map(i=>({n:i.a.agreement_number,l:i.label,s:i.state,r:i.reason||'',amt:i.amount})); });
   const s205=items.filter(i=>i.n==='205');
-  ok(s205.some(i=>i.l==='Payment 1 of 2'&&i.s==='Ready to pay'&&i.amt===100),'v3: the $200 sale has Payment 1 ($100) ready once marked sold, with no invoice yet: '+JSON.stringify(s205));
+  ok(s205.some(i=>i.l==='Payment 1 of 2'&&i.s==='Ready to pay'&&i.amt===100&&/marked sold by/.test(i.r)),'v3: the $200 sale has Payment 1 ($100) ready once marked sold, with no invoice yet: '+JSON.stringify(s205));
   ok(!s205.some(i=>i.l==='Payment 2 of 2'&&i.s==='Ready to pay'),'v3: its Payment 2 waits for the first invoice to be paid');
   ok(items.some(i=>i.n==='202'&&/Payment 2/.test(i.l)&&i.s==='Ready to pay'),'v3: manual renewal Payment 2 is ready — first invoice 8/1 paid 8/12, inside net 60');
   ok(await p.evaluate(()=>{ const t=termsText(P27.versions.find(x=>x.id==='v-hyb2')); return /marks the sale sold/.test(t)&&/net 60/.test(t); }),'v3 written terms state both earning rules');

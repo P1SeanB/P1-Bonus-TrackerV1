@@ -5737,7 +5737,7 @@ function payoutItems(run){
       // every event (sale, renewal, rate change) pays in two parts; anything sold before the plan's paid-through date was paid under the manager override
       hybridLines27(a).forEach(l=>{ if(l.override)return; const t=l.t||{conditions:[]}; const paid=l.rstate==='paid';
         const earned=t.state==='Earned', inQ=earned&&t.earnedDate<=run.quarterEnd;
-        const cl=paid?{state:'Excluded from this run',reason:'Already paid.'}:(!l.p.evRow?{state:'Excluded from this run',reason:'Not marked sold yet — a manager records this commission event on the Renewals page.'}:(!earned?{state:'Excluded from this run',reason:(t.conditions||[]).join(' ')}:(!inQ?{state:'Excluded from this run',reason:'Earned after quarter end — next run.'}:{state:'Ready to pay',reason:`Earned ${t.earnedDate} on verified evidence.`})));
+        const cl=paid?{state:'Excluded from this run',reason:'Already paid.'}:(!l.p.evRow?{state:'Excluded from this run',reason:'Not marked sold yet — a manager records this commission event on the Renewals page.'}:(!earned?{state:'Excluded from this run',reason:(t.conditions||[]).join(' ')}:(!inQ?{state:'Excluded from this run',reason:'Earned after quarter end — next run.'}:{state:'Ready to pay',reason:/marked sold/.test(t.dateBasis||'')?`Earned ${t.earnedDate} — ${t.dateBasis.replace(/^sale date — /,'')}.`:`Earned ${t.earnedDate} on verified evidence${t.dateBasis?' ('+t.dateBasis+')':''}.`})));
         items.push({a,label:l.label,amount:l.amount,cents:l.cents,tranche:l.tranche,revised:true,evRow:l.p.evRow,earnedDate:t.earnedDate||null,kind:l.kind,...cl}); });
       return; }
     const pieces=[]; if(c.legacyFull){ if(c.initialQI===qi)pieces.push(['initial','paid_initial',frozenAmount(a,'initial').amount]); }
