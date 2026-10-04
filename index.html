@@ -5458,6 +5458,149 @@ function renderForecast27(v){
   box.innerHTML=`Transaction-derived forecast (this draft applied to ${y} sales as entered): <b>${E27.fmtCents(newC)}</b> new-sale commission. <span class="qctx">Assumptions: renewal volume, expansion volume, term mix and retention are not yet stated (open business input) — renewal, expansion and portfolio bonus are therefore not included.</span>`;
 }
 
+/* ---------------- In-app guide (ADM-03 "remove conflicting preset help text", AGR-04) ----------------
+   Every number is read from the plan VERSION's stored config, never from a preset or default.
+   Hunter / Farmer render the same structure with "Not set" wherever their config is empty, so the
+   guide fills in by itself once an administrator enters and publishes their numbers.            */
+let GUIDE_FAMILY=null;
+const GUIDE_FAMS=['Hybrid','Hunter','Farmer'];
+function guideStyles27(){
+  if(document.getElementById('guide27css'))return; const st=document.createElement('style'); st.id='guide27css';
+  st.textContent=`.gd27-fams{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}.gd27-fams button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 12px;font-size:12.5px;cursor:pointer;color:var(--ink)}
+  .gd27-fams button.on{background:var(--orange);border-color:var(--orange);color:#fff;font-weight:600}.gd27-fams small{opacity:.8;font-weight:400;margin-left:4px}
+  .gd27-unset{display:inline-block;white-space:nowrap;background:#f3f4f6;color:#6b7280;border:1px dashed #cbd5e1;border-radius:4px;padding:0 6px;font-size:12px;font-weight:600}
+  .gd27-banner{border-radius:8px;padding:10px 13px;font-size:13px;margin:0 0 14px;line-height:1.5}.gd27-banner.ok{background:#ecfdf5;border:1px solid #a7f3d0}.gd27-banner.warn{background:#fffbeb;border:1px solid #fde68a}.gd27-banner.bad{background:#f8fafc;border:1px solid #cbd5e1}
+  .gd27-hist{margin-top:26px;border-top:1px solid var(--line);padding-top:12px}.gd27-hist>summary{cursor:pointer;font-weight:700;font-size:13.5px;color:var(--ink)}.gd27-hist[open]>summary{margin-bottom:10px}
+  .gd27-note{font-size:12.5px;color:var(--muted)}`;
+  document.head.appendChild(st);
+}
+function guideVersionFor27(fam){
+  const me=String(CURRENT_EMAIL||'').toLowerCase(), today=E27.businessToday();
+  const mine=P27.assignments.filter(x=>String(x.email).toLowerCase()===me&&(!x.effective_to||today<x.effective_to)).map(x=>versionById(x.plan_version_id)).filter(v=>v&&v.family===fam);
+  if(mine.length)return {v:mine[0],mine:true};
+  const vs=P27.versions.filter(v=>v.family===fam).sort((a,b)=>b.version_no-a.version_no);
+  const live=vs.filter(v=>v.status==='published'&&(!v.effective_date||v.effective_date<=today));
+  return {v:live[0]||vs.find(v=>v.status==='published')||vs.find(v=>v.status==='draft')||vs[0]||null,mine:false};
+}
+function guide27HTML(fam){
+  const {v,mine}=guideVersionFor27(fam); const c=(v&&v.config)||{}; const ph=!v||!!c.placeholder;
+  const U='<span class="gd27-unset">Not set</span>';
+  const num=x=>(x===null||x===undefined||x===''||isNaN(+x))?null:+x;
+  const xm=x=>num(x)==null?U:`<b>${+(+x).toFixed(4)}×</b>`;
+  const pc=(x,dp=2)=>num(x)==null?U:`<b>${+(+x*100).toFixed(dp)}%</b>`;
+  const usd=n=>'$'+(Math.round(n*100)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const $$=x=>num(x)==null?U:`<b>${usd(+x)}</b>`;
+  const terms=[12,24,36,48,60], nm=c.newMult||{}, sl=c.slaNewMult||{};
+  const t1=num(c.tranche1Pct), t2=num(c.tranche2Pct), floor=num(c.minMargin), target=num(c.targetMargin), ren=num(c.renewalMult), slaRen=num(c.slaRenewalMult);
+  const pcal=P27.settings.payout_calendar||{}, run=E27.payoutCalendar(pcal);
+  const off=num(c.releaseOffsetMonths);
+  // ---- banner
+  let banner, kind;
+  if(!v){ kind='bad'; banner=`<b>${fam}</b> has no plan version yet.`; }
+  else if(ph){ kind='bad'; banner=`<b>${fam}</b> — the structure is set up, but the numbers <b>haven't been entered yet</b>. Anything marked ${U} is waiting on your administrator. Nothing calculates under ${fam} until a complete version is published, assigned and acknowledged.`; }
+  else if(v.status==='published'){ const r=resolveRevised(CURRENT_EMAIL); kind='ok';
+    banner=`<b>${esc(v.label)}</b> · live from <b>${esc(v.effective_date||'—')}</b>${v.approved_by?` · approved by ${esc(v.approved_by)}`:''}.`+
+      (mine?(r.state==='ok'?' You are assigned to this plan and have acknowledged it.':r.state==='ack_required'?' You are assigned to this plan — <b>acknowledge its terms</b> before anything calculates.':''):''); }
+  else { kind='warn'; banner=`<b>${esc(v.label)}</b> is a <b>draft</b> — these are the proposed numbers. Nothing is calculated under it until it is published, assigned to you, and you acknowledge it. Deals before ${REVISED_CUTOVER.replace(/^(\d{4})-(\d\d)-(\d\d)$/,(m,y,mo,d)=>`${+mo}/${+d}/${y}`)} stay on the historical rules below.`; }
+  const famBtns=`<div class="gd27-fams">${GUIDE_FAMS.map(f=>{ const s=famStatus(f); return `<button data-gdfam="${f}" class="${f===fam?'on':''}">${f}<small>${esc(s.txt.split(' · ')[0])}</small></button>`; }).join('')}</div>`;
+  const intro={Hybrid:`Hybrid is the combined role: ${num(c.allocation&&c.allocation.hunter)==null?U:pc(c.allocation.hunter,0)} new-customer acquisition and ${num(c.allocation&&c.allocation.farmer)==null?U:pc(c.allocation.farmer,0)} managing existing accounts.`,
+    Hunter:`Hunter is the new-customer acquisition role.${c.allocation?` Role split: ${pc(c.allocation.hunter,0)} acquisition, ${pc(c.allocation.farmer,0)} account management.`:''}`,
+    Farmer:`Farmer is the account-management role — renewing and growing existing customers.${c.allocation?` Role split: ${pc(c.allocation.hunter,0)} acquisition, ${pc(c.allocation.farmer,0)} account management.`:''}`}[fam];
+  // ---- examples (display only; the engine computes the authoritative amounts in exact decimals)
+  const m36=num(nm[36]);
+  const ex1=m36==null?`A $1,000/mo, 36-month deal at or above the margin floor earns $1,000 × ${U} = ${U}.`
+    :`A <b>$1,000/mo, 36-month</b> deal at or above the margin floor earns $1,000 × ${xm(m36)} = <b>${usd(1000*m36)}</b>${t1!=null&&t2!=null?` — <b>${usd(1000*m36*t1)}</b> first tranche and <b>${usd(1000*m36-1000*m36*t1)}</b> second tranche`:''}.`;
+  const ex2=(m36==null||ren==null)?`Renewing $1,000/mo up to $1,300/mo for 36 months pays the renewal multiple (${U}) on the retained $1,000 plus the new-sale multiple on the added $300.`
+    :`Renewing <b>$1,000/mo → $1,300/mo</b> for 36 months: ${usd(1000)} retained × ${xm(ren)} = ${usd(1000*ren)}, plus the ${usd(300)} increase × ${xm(m36)} = ${usd(300*m36)} → <b>${usd(1000*ren+300*m36)}</b> total. No conversion bonus.`;
+  const s36=num(sl[36]);
+  const ex3=s36==null?`A $10,000/yr SLA on 36 months: $10,000 ÷ 12 = $833.33 MRR equivalent × ${U}.`
+    :`A <b>$10,000/yr SLA</b> on 36 months: $10,000 ÷ 12 = $833.33 MRR equivalent × ${xm(s36)} = <b>${usd(10000/12*s36)}</b>.`;
+  const sal=num(c.salaryAssumption), grr=c.grrBonus||null, nrr=c.nrrBonus||null;
+  const tierPct=(tiers,val)=>{ if(!tiers)return null; let p=0; tiers.forEach(t=>{ if(val>=+t.min)p=Math.max(p,+t.pct); }); return p; };
+  const gP=tierPct(grr,0.98), nP=tierPct(nrr,1.05);
+  const ex4=(sal==null||gP==null||nP==null)?`Bonus example: a full year at ${sal==null?U:usd(sal)} salary with 98% GRR and 105% NRR — tiers ${U}.`
+    :`A full year at <b>${usd(sal)}</b> with <b>98% GRR</b> and <b>105% NRR</b>: ${usd(sal*gP)} + ${usd(sal*nP)} = <b>${usd(sal*gP+sal*nP)}</b>.`;
+  const tierRows=(tiers,label)=>tiers&&tiers.length?tiers.map(t=>`<tr><td>${label} ≥ ${+(+t.min*100).toFixed(1)}%</td><td>${pc(t.pct,1)} of salary</td></tr>`).join(''):`<tr><td>${label} tiers</td><td>${U}</td></tr>`;
+  return famBtns+`<div class="gd27-banner ${kind}">${banner}</div>
+  <h3>The big idea</h3>
+  <p>${intro} Your commission is a <b>multiple of the monthly recurring revenue (MRR)</b> you sell, set by the contract term. It is earned in two pieces once the customer is actually paying, and paid quarterly.</p>
+  <div class="guide-callout"><b>Commission = eligible MRR × term multiple × margin gate.</b> The percentages of contract value shown below are for reference only — the multiple is what's paid.</div>
+  <h3>Term multiples</h3>
+  <table class="guide-table"><thead><tr><th>Term</th><th>New sale or expansion</th><th>Manual renewal</th><th>Same as % of TCV</th></tr></thead><tbody>
+  ${terms.map(t=>`<tr><td>${t} months</td><td>${xm(nm[t])} MRR</td><td>${xm(c.renewalMult)} retained MRR</td><td>${num(nm[t])==null?U:(+nm[t]/t*100).toFixed(4)+'%'}</td></tr>`).join('')}
+  </tbody></table>
+  <p class="gd27-note">Terms over 60 months are capped at ${xm(c.newMultCapAbove60!=null?c.newMultCapAbove60:nm[60])}. Other non-standard terms (for example 30 months) need an approved term mapping — they are never rounded down to the next bracket.</p>
+  <h3>Margin gate</h3>
+  <p>Gross margin is measured on direct cost only, over the committed term. At or above ${pc(floor,0)} the deal qualifies at <b>1.0×</b>; below it pays <b>$0</b>. ${target==null?'':`The target is ${pc(target,0)}.`} If margin is <b>unknown</b> — costs not entered or not verified — the deal can't qualify until they are. It shows <i>Missing cost verification</i>, never a silent $0.</p>
+  <h3>Example — a new sale</h3>
+  <div class="guide-callout">${ex1}</div>
+  <h3>Renewals and expansions</h3>
+  <p>A <b>manual renewal</b> pays ${xm(ren)} on the MRR you keep. Any <b>increase</b> pays the new-sale multiple on the increase only — never both on the same dollars. An expansion without a renewal is the new-sale multiple on the added MRR.</p>
+  <div class="guide-callout">${ex2}</div>
+  <p class="gd27-note">Auto-renewals pay ${xm(c.autoRenewalMult)}, automatic price escalators ${xm(c.escalatorMult)} and term conversions ${xm(c.termConversionMult)}. A win-back of a cancelled agreement counts as a new sale. Saving an agreement never creates commission — use the <b>New sale</b>, <b>Expansion</b>, <b>Renewal</b> or <b>SLA</b> buttons on the agreement.</p>
+  <h3>SLA agreements</h3>
+  <p>SLAs use the same engine: annual value ÷ 12 gives an MRR equivalent, then the SLA multiple for the term.</p>
+  <table class="guide-table"><thead><tr><th>Term</th><th>New SLA</th><th>≈ % of annual value</th></tr></thead><tbody>
+  ${terms.map(t=>`<tr><td>${t} months</td><td>${xm(sl[t])}</td><td>${num(sl[t])==null?U:(+sl[t]/12*100).toFixed(2)+'%'}</td></tr>`).join('')}
+  <tr><td>Renewal, any term</td><td>${xm(slaRen)} retained</td><td>${slaRen==null?U:(slaRen/12*100).toFixed(2)+'%'}</td></tr></tbody></table>
+  <div class="guide-callout">${ex3}</div>
+  <h3>When it's earned — two tranches</h3>
+  <table class="guide-table"><thead><tr><th>Piece</th><th>Share</th><th>Earned when</th></tr></thead><tbody>
+  <tr><td><b>First tranche</b></td><td>${pc(t1,0)}</td><td>The signed agreement is activated <b>and</b> its first real, non-zero invoice is fully collected.</td></tr>
+  <tr><td><b>Second tranche</b></td><td>${pc(t2,0)}</td><td>${off==null?U:`<b>${off} calendar months</b>`} after the first actual invoice, with the account still active <b>and</b> every invoice due by then paid.</td></tr>
+  </tbody></table>
+  <p class="gd27-note">Both conditions are required for the second tranche — time alone never releases it. The second tranche is the total less the first, so the two always add up to the cent.</p>
+  <h3>What counts as "collected"</h3>
+  <p>Only <b>real cash</b>: a Vista receipt, or a collection verified on the agreement's Billing tab against Vista's SM Agreements ▸ Invoices tab. A billing row that's just <b>Scheduled</b> counts for nothing, a date passing never marks anything paid, and a <b>zero balance is not the same as collected</b> — an invoice voided or settled by a credit note doesn't trigger commission.</p>
+  <h3>When you get paid</h3>
+  <p>Earned amounts are paid <b>quarterly</b>, within <b>${+pcal.payWithinDays||30} days</b> after quarter end. Collections must be verified within <b>${+pcal.verifyWithinDays||15} days</b> after quarter end to make that quarter's run. Next run: <b>Q${run.q} ${run.y}</b> — verification cutoff <b>${run.cutoff}</b>, pay by <b>${run.payBy}</b>. Anything not verified by the cutoff rolls to the next run; it isn't lost.</p>
+  <h3>Quota and accelerator</h3>
+  <p>New-MRR quota: ${$$(c.quotaMonthlyMrr)} per month${num(c.quotaMonthlyMrr)==null?'':` (${usd(+c.quotaMonthlyMrr*12)} a year)`}. Above quota the accelerator is ${xm(c.accelMultiplier)}${num(c.accelMultiplier)===1?' — currently dormant, so commission above quota is paid at the normal rate':''}. There is no annual cap.</p>
+  <h3>Portfolio bonus — retention</h3>
+  <p>Paid on the calendar year${c.bonusPayBy?`, by ${esc(c.bonusPayBy.replace(/^(\d\d)-(\d\d)$/,(m,mo,d)=>['','January','February','March','April','May','June','July','August','September','October','November','December'][+mo]+' '+(+d)))}`:''}. Use the highest tier you reach on each measure and add the two together. <b>GRR</b> = your opening customers' MRR kept (after churn and downgrades). <b>NRR</b> adds growth from those same customers. New customers don't count in either.</p>
+  <table class="guide-table"><thead><tr><th>Measure</th><th>Bonus</th></tr></thead><tbody>${tierRows(grr,'GRR')}${tierRows(nrr,'NRR')}</tbody></table>
+  <p class="gd27-note">Based on base salary actually paid over the year${sal==null?'':` (planning assumption ${usd(sal)})`}. If a measure can't be calculated it shows <i>Unknown</i>, never 0%.</p>
+  <div class="guide-callout">${ex4}</div>
+  <h3>Cancellations and corrections</h3>
+  <p>If an agreement cancels <b>before</b> a tranche is earned, that tranche stops. Anything after that — refunds, credits, cancellation after earning, leaving the company — needs a documented decision under the written plan. Nothing is ever deducted from salary or clawed back automatically, and earned money is never silently forfeited. Corrections are added as new, linked entries; the original record is kept.</p>
+  <h3>What the statuses mean</h3>
+  <table class="guide-table"><tbody>
+  <tr><td><b>Expected commission</b></td><td>Calculated, but not earned yet.</td></tr>
+  <tr><td><b>Conditional holdback</b></td><td>The second tranche, waiting on its time and collection conditions.</td></tr>
+  <tr><td><b>Pending verification</b></td><td>Earned on paper, but the collection hasn't been verified for this run.</td></tr>
+  <tr><td><b>Earned unpaid</b></td><td>Earned and owed — waiting for the next payout run.</td></tr>
+  <tr><td><b>Ready to pay / Excluded</b></td><td>How each amount sits in the quarter's payout run; excluded amounts show the reason.</td></tr>
+  <tr><td><b>Plan not configured</b></td><td>No published, assigned plan covers the deal. Shown instead of a misleading $0.</td></tr>
+  <tr><td><b>Blocked — acknowledgement</b></td><td>You haven't acknowledged the plan's written terms yet.</td></tr>
+  </tbody></table>
+  <h3>Where to see your money</h3>
+  <table class="guide-table"><tbody>
+  <tr><td><b>Quarter view</b></td><td>The payout run: Ready to pay, Pending verification, Excluded — with reasons.</td></tr>
+  <tr><td><b>Agreement ▸ Commission history</b></td><td>Every event and tranche on that agreement, with dates and evidence.</td></tr>
+  <tr><td><b>Worklist</b></td><td>Anything waiting on a person: collections to verify, costs to approve, import issues.</td></tr>
+  </tbody></table>`;
+}
+(function installGuide27(){
+  const legacyRender=window.renderGuide;
+  window.renderGuide=function(){
+    const body=document.querySelector('#guideScrim .guide-body'); if(!body)return;
+    guideStyles27();
+    if(!document.getElementById('guide27')){
+      const hist=document.createElement('details'); hist.className='gd27-hist'; hist.id='guideHist27';
+      hist.innerHTML=`<summary>Historical rules — deals before ${REVISED_CUTOVER.replace(/^(\d{4})-(\d\d)-(\d\d)$/,(m,y,mo,d)=>`${+mo}/${+d}/${y}`)}</summary><p class="gd27-note">Agreements signed before the revised plan took effect keep the plan that applied when they were sold, for both pieces. This is how those older plans work.</p>`;
+      while(body.firstChild)hist.appendChild(body.firstChild);
+      const g=document.createElement('div'); g.id='guide27'; body.appendChild(g); body.appendChild(hist);
+      body.addEventListener('click',e=>{ const b=e.target.closest('[data-gdfam]'); if(b){ GUIDE_FAMILY=b.dataset.gdfam; window.renderGuide(); } });
+    }
+    try{ if(typeof legacyRender==='function')legacyRender(); }catch(_){}
+    const g=document.getElementById('guide27');
+    if(!P27.ready){ g.innerHTML='<div class="gd27-banner bad">The revised plan tables aren\'t available, so only the historical rules are shown.</div>'; document.getElementById('guideHist27').open=true; return; }
+    if(!GUIDE_FAMILY){ const me=String(CURRENT_EMAIL||'').toLowerCase(); const a=P27.assignments.find(x=>String(x.email).toLowerCase()===me&&(!x.effective_to||E27.businessToday()<x.effective_to)); const v=a&&versionById(a.plan_version_id); GUIDE_FAMILY=(v&&v.family)||'Hybrid'; }
+    g.innerHTML=guide27HTML(GUIDE_FAMILY);
+    const sub=document.querySelector('#guideScrim .guide-head .sub'); if(sub)sub.textContent='Read straight from the plan settings in Admin — no finance background needed.';
+  };
+})();
+
 /*/V27-UI*/
 renderLegend();
 boot();
