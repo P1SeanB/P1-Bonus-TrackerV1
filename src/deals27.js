@@ -457,7 +457,9 @@ function decorateModal27(){
   // Invoices
   if(inv){ let rows=[]; try{ rows=agreementInvoices(a); }catch(e){}
     let P=[]; try{ P=(pricedEvents27(a)||[]).filter(p=>!p.noPay&&!p.override); }catch(e){}
-    const firstOf={}; P.forEach(p=>{ const f=rows.filter(i=>i.status&&i.status!=='Scheduled'&&i.status!=='Voided'&&i.number&&(+i.total||0)>0&&(p.e.kind==='new_sale'||String(i.date)>=p.date))[0];
+    const firstOf={}; P.forEach(p=>{ let cand=rows.filter(i=>i.status&&i.status!=='Scheduled'&&i.status!=='Voided'&&i.number&&(+i.total||0)>0&&(p.e.kind==='new_sale'||String(i.date)>=p.date));
+      if(p.e.kind!=='new_sale'&&p.e.increase>0&&p.e.next>0){ const atNew=cand.find(i=>(+i.total||0)>=p.e.next-0.6); if(atNew)cand=cand.filter(i=>String(i.date)>=String(atNew.date)); }
+      const f=cand[0];
       if(f)firstOf[f.number]=(KIND_LABEL27&&KIND_LABEL27[p.e.kind])||'Sale'; });
     const t=E27.businessToday();
     const real=rows.filter(r=>r.status!=='Scheduled');

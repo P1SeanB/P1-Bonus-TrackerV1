@@ -276,6 +276,7 @@ function earningByInvoice(prev,firstBill,ctx,today,cashOk,evDate){
     if(!firstBill){ t2.conditions.push('Waiting for the first invoice.'); }
     else{ const expectBy=addDays(firstBill.date,days); t2.timeDate=expectBy; t2.expectBy=expectBy;
       if(firstBill.status==='Settled by credit')t2.conditions.push('First invoice settled by credit — a credit is not cash collected (BIL-03).');
+      else if(!cashOk(firstBill)&&firstBill.status==='Paid')t2.conditions.push(`Vista shows first invoice ${firstBill.number} paid (balance $0) — record the receipt with Verify collection to earn Payment 2.`);
       else if(!cashOk(firstBill))t2.conditions.push(today>expectBy?`First invoice ${firstBill.number} is past net ${days} (${expectBy}) and not paid yet — Payment 2 is earned when it is paid.`:`Waiting for payment of first invoice ${firstBill.number} — expected by ${expectBy} (net ${days}).`);
       if(ctx.cancelledDate&&!(cashOk(firstBill)&&evDate(firstBill)<=ctx.cancelledDate))t2.conditions.push('Cancelled before the first invoice was paid — Payment 2 is not earned (PAY-04).'); }
     if(!t2.conditions.length){ t2.state='Earned'; t2.earnedDate=[ctx.activationDate,evDate(firstBill)].filter(Boolean).sort().pop(); t2.dateBasis=firstBill.collected.date?'receipt date':'date of verified confirmation (VIS-10)';

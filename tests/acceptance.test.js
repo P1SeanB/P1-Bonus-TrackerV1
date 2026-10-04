@@ -157,5 +157,9 @@ t('v3 rule: Payment 2 earns when the first invoice is paid; past net 60 it waits
   const b=E.evaluateTranches({},{activationDate:'2026-07-01',today:'2026-10-04',invoices:[inv('1','2026-07-01','Invoiced',null)],rules:R3,markedSold:ms}); eq(b.t2.state,'Conditional holdback'); eq(/past net 60/.test(b.t2.conditions[0]),true);
   const c=E.evaluateTranches({},{activationDate:'2026-07-01',today:'2026-10-04',invoices:[inv('1','2026-07-01','Paid','2026-09-20')],rules:R3,markedSold:ms}); eq(c.t2.state,'Earned'); eq(c.t2.earnedDate,'2026-09-20'); eq(c.t2.late,true); });
 
+t('v3 rule: Vista balance $0 without a receipt says to record it, not "not paid"',()=>{
+  const r=E.evaluateTranches({},{activationDate:'2026-08-01',today:'2026-10-04',invoices:[{number:'9',date:'2026-08-01',dueDate:'2026-08-31',total:50,status:'Paid',collected:{state:'Unverified'}}],rules:R3,markedSold:{by:'m',on:'2026-10-04'}});
+  eq(r.t2.state,'Conditional holdback'); eq(/paid \(balance \$0\) — record the receipt/.test(r.t2.conditions[0]),true); });
+
 results.forEach(r=>console.log(r[0]+'  '+r[1]));
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail?1:0);

@@ -1274,6 +1274,7 @@ function earningByInvoice(prev,firstBill,ctx,today,cashOk,evDate){
     if(!firstBill){ t2.conditions.push('Waiting for the first invoice.'); }
     else{ const expectBy=addDays(firstBill.date,days); t2.timeDate=expectBy; t2.expectBy=expectBy;
       if(firstBill.status==='Settled by credit')t2.conditions.push('First invoice settled by credit — a credit is not cash collected (BIL-03).');
+      else if(!cashOk(firstBill)&&firstBill.status==='Paid')t2.conditions.push(`Vista shows first invoice ${firstBill.number} paid (balance $0) — record the receipt with Verify collection to earn Payment 2.`);
       else if(!cashOk(firstBill))t2.conditions.push(today>expectBy?`First invoice ${firstBill.number} is past net ${days} (${expectBy}) and not paid yet — Payment 2 is earned when it is paid.`:`Waiting for payment of first invoice ${firstBill.number} — expected by ${expectBy} (net ${days}).`);
       if(ctx.cancelledDate&&!(cashOk(firstBill)&&evDate(firstBill)<=ctx.cancelledDate))t2.conditions.push('Cancelled before the first invoice was paid — Payment 2 is not earned (PAY-04).'); }
     if(!t2.conditions.length){ t2.state='Earned'; t2.earnedDate=[ctx.activationDate,evDate(firstBill)].filter(Boolean).sort().pop(); t2.dateBasis=firstBill.collected.date?'receipt date':'date of verified confirmation (VIS-10)';
@@ -5259,7 +5260,9 @@ function priceEvent27(a,e,res,ov){
       slaAnnual:isSla?String(Math.round(e.next*1200)/100):null,priorSlaAnnual:(isSla&&prior!=null)?String(Math.round(prior*1200)/100):null,
       margin,shares:[{email:String(a.owner_email||'').toLowerCase(),bp:10000}]}); }
   catch(err){ out.blocked=err.message; out.blockedField=err.field||null; return out; }
-  if(!override){ const inv=agreementInvoices(a); const ctx=e.kind==='new_sale'?inv:inv.filter(i=>String(i.date)>=e.date);
+  if(!override){ const inv=agreementInvoices(a); let ctx=e.kind==='new_sale'?inv:inv.filter(i=>String(i.date)>=e.date);
+    // an increase is earned from the first invoice billed at the NEW rate — Vista often bills a month or two at the old rate after the revision date
+    if(e.kind!=='new_sale'&&e.increase>0&&e.next>0){ const atNew=ctx.find(i=>i.status!=='Scheduled'&&i.status!=='Voided'&&(+i.total||0)>=e.next-0.6); if(atNew)ctx=ctx.filter(i=>String(i.date)>=String(atNew.date)); }
     const k=out.evRow?{totalCents:BigInt(out.evRow.total_cents),tranche1Cents:BigInt(out.evRow.snapshot.tranche1Cents),tranche2Cents:BigInt(out.evRow.snapshot.tranche2Cents)}:out.calc;
     out.tranches=E27.evaluateTranches(k,{activationDate:e.date,ended:isEnded(a),cancelledDate:a.ended_date||null,invoices:ctx,offsetMonths:+(res.version.config.releaseOffsetMonths||3),rules:earningRules27(res.version),markedSold:out.evRow?{by:out.evRow.created_by||null,on:String(out.evRow.created_at||'').slice(0,10)||null}:null}); }
   return out;
@@ -7713,7 +7716,9 @@ function decorateModal27(){
   // Invoices
   if(inv){ let rows=[]; try{ rows=agreementInvoices(a); }catch(e){}
     let P=[]; try{ P=(pricedEvents27(a)||[]).filter(p=>!p.noPay&&!p.override); }catch(e){}
-    const firstOf={}; P.forEach(p=>{ const f=rows.filter(i=>i.status&&i.status!=='Scheduled'&&i.status!=='Voided'&&i.number&&(+i.total||0)>0&&(p.e.kind==='new_sale'||String(i.date)>=p.date))[0];
+    const firstOf={}; P.forEach(p=>{ let cand=rows.filter(i=>i.status&&i.status!=='Scheduled'&&i.status!=='Voided'&&i.number&&(+i.total||0)>0&&(p.e.kind==='new_sale'||String(i.date)>=p.date));
+      if(p.e.kind!=='new_sale'&&p.e.increase>0&&p.e.next>0){ const atNew=cand.find(i=>(+i.total||0)>=p.e.next-0.6); if(atNew)cand=cand.filter(i=>String(i.date)>=String(atNew.date)); }
+      const f=cand[0];
       if(f)firstOf[f.number]=(KIND_LABEL27&&KIND_LABEL27[p.e.kind])||'Sale'; });
     const t=E27.businessToday();
     const real=rows.filter(r=>r.status!=='Scheduled');

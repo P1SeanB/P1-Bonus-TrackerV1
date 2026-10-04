@@ -286,7 +286,9 @@ function priceEvent27(a,e,res,ov){
       slaAnnual:isSla?String(Math.round(e.next*1200)/100):null,priorSlaAnnual:(isSla&&prior!=null)?String(Math.round(prior*1200)/100):null,
       margin,shares:[{email:String(a.owner_email||'').toLowerCase(),bp:10000}]}); }
   catch(err){ out.blocked=err.message; out.blockedField=err.field||null; return out; }
-  if(!override){ const inv=agreementInvoices(a); const ctx=e.kind==='new_sale'?inv:inv.filter(i=>String(i.date)>=e.date);
+  if(!override){ const inv=agreementInvoices(a); let ctx=e.kind==='new_sale'?inv:inv.filter(i=>String(i.date)>=e.date);
+    // an increase is earned from the first invoice billed at the NEW rate — Vista often bills a month or two at the old rate after the revision date
+    if(e.kind!=='new_sale'&&e.increase>0&&e.next>0){ const atNew=ctx.find(i=>i.status!=='Scheduled'&&i.status!=='Voided'&&(+i.total||0)>=e.next-0.6); if(atNew)ctx=ctx.filter(i=>String(i.date)>=String(atNew.date)); }
     const k=out.evRow?{totalCents:BigInt(out.evRow.total_cents),tranche1Cents:BigInt(out.evRow.snapshot.tranche1Cents),tranche2Cents:BigInt(out.evRow.snapshot.tranche2Cents)}:out.calc;
     out.tranches=E27.evaluateTranches(k,{activationDate:e.date,ended:isEnded(a),cancelledDate:a.ended_date||null,invoices:ctx,offsetMonths:+(res.version.config.releaseOffsetMonths||3),rules:earningRules27(res.version),markedSold:out.evRow?{by:out.evRow.created_by||null,on:String(out.evRow.created_at||'').slice(0,10)||null}:null}); }
   return out;
