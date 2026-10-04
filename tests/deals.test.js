@@ -69,6 +69,14 @@ async function open(browser,email){ const ctx=await browser.newContext({viewport
   ok(await p.evaluate(()=>!!document.querySelector('#dealsHost27 [data-pill="lost"]')&&!!document.getElementById('dealFlat27')),'pills and the All agreements link render');
   ok(await p.evaluate(()=>/st27-sig/.test(document.getElementById('dealTbl27').innerHTML)),'stage chips use the purple stage colors');
 
+  // totals follow the pill and search
+  ok(await p.evaluate(()=>{ DEAL_PILL27='quoted'; renderDeals27(); const t=document.querySelector('#dealTbl27 .tot27').innerText; return /Quoted/.test(t)&&/1 deal\b/.test(t)&&/\$250\/mo/.test(t); }),'totals line follows the Quoted pill (1 deal, $250/mo)');
+  ok(await p.evaluate(()=>{ DEAL_PILL27='open'; window.DEAL_Q27='Prospect 30'; renderDeals27(); const t=document.querySelector('#dealTbl27 .tot27').innerText; window.DEAL_Q27=''; DEAL_PILL27='open'; renderDeals27(); return /2 deals/.test(t)&&/matching/.test(t); }),'totals line follows the search');
+  ok(await p.evaluate(()=>{ DEAL_PILL27='open'; DSORT27={k:null,d:1}; renderDeals27(); document.querySelector('#dealTbl27 [data-dsort="mrr"]').click();
+    const v=[...document.querySelectorAll('#dealTbl27 tbody tr[data-dl] td.num:nth-of-type(1)')]; const first=document.querySelector('#dealTbl27 tbody tr[data-dl]').innerText;
+    const ok1=/Prospect 302|Cust 304/.test(first)&&/▼/.test(document.querySelector('#dealTbl27 [data-dsort="mrr"]').innerText);
+    document.querySelector('#dealTbl27 [data-dsort="mrr"]').click(); const ok2=/▲/.test(document.querySelector('#dealTbl27 [data-dsort="mrr"]').innerText);
+    DSORT27={k:null,d:1}; renderDeals27(); return ok1&&ok2; }),'clicking a column header sorts, and clicking again reverses it');
   // record the sales (mark sold), then 304/305 move to Sold
   await p.evaluate(()=>switchView('renewals')); await p.waitForTimeout(400);
   if(await p.evaluate(()=>!!document.getElementById('tm27rec'))){ await p.click('#tm27rec'); await p.waitForTimeout(900); }

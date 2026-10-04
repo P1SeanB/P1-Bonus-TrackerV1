@@ -28,6 +28,9 @@ function stageChip27(s,extra){ const d=STAGE27[s]||STAGE27.opportunity; return `
   .chip.st27-sig{color:#46309a;background:#e3dcf6}
   .chip.st27-sold{color:#ffffff;background:#4b2e8a}
   .chip.st27-lost{color:#6e6e6e;background:transparent;border:1px solid #c9c9c9}
+  .tot27{display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;padding:8px 14px;margin:0 0 8px;border:1px solid var(--line);border-radius:8px;background:#fafbfc;font-size:12.5px}
+  .tot27 .lb{font-weight:800;color:var(--ink);margin-right:auto}
+  .tot27 .it{color:var(--muted)} .tot27 .it b{color:var(--ink);font-size:14px}
   .pillrow27{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:2px 0 12px}
   .pillrow27 button{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:5px 13px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted)}
   .pillrow27 button.on{background:#1c1c1c;color:#fff;border-color:#1c1c1c}
@@ -112,6 +115,31 @@ function pfBar27(onchange){
   </span>`;
 }
 
+/* clickable column sorting for the Deals and Hunt tables */
+let DSORT27=(()=>{ try{ return JSON.parse(LS.get('dsort27')||'0')||{k:null,d:1}; }catch(e){ return {k:null,d:1}; } })();
+const STORD27={opportunity:0,quoted:1,signed:2,sold:3,lost:4};
+function sortVal27(r,k){ const a=r.a;
+  switch(k){ case 'deal': return String(custNameOf27(a)||a.customer_name||'').toLowerCase();
+    case 'stage': return STORD27[r.stage]!=null?STORD27[r.stage]:(r.lost?4:5);
+    case 'what': return String(r.label||r.what||'').toLowerCase();
+    case 'owner': return String(a.owner_email||'').toLowerCase();
+    case 'mrr': return r.rmr==null?-1:+r.rmr;
+    case 'comm': return r.amount==null?-1:+r.amount;
+    case 'date': return String(r.date||'');
+    case 'why': return String(r.why||'').toLowerCase();
+    case 'revisit': return String(r.revisit||'');
+    case 'age': return r.date?-new Date(r.date).getTime():0;
+    default: return 0; } }
+function applySort27(list){ if(!DSORT27.k)return list; const k=DSORT27.k,d=DSORT27.d;
+  return [...list].sort((x,y)=>{ const a=sortVal27(x,k),b=sortVal27(y,k); return (a<b?-1:a>b?1:0)*d; }); }
+function th27(label,k,cls){ const on=DSORT27.k===k; return `<th data-dsort="${k}" class="${cls||''}" style="cursor:pointer;user-select:none" title="Sort by ${esc(label)}">${label}${on?(DSORT27.d>0?' ▲':' ▼'):''}</th>`; }
+function wireSort27(host,rerender){ host.querySelectorAll('[data-dsort]').forEach(h=>h.onclick=()=>{ const k=h.dataset.dsort;
+  DSORT27=DSORT27.k===k?{k,d:-DSORT27.d}:{k,d:(k==='mrr'||k==='comm'||k==='date')?-1:1}; LS.set('dsort27',JSON.stringify(DSORT27)); rerender(); }); }
+
+/* totals line that follows the current filter and search */
+function totalsBar27(items,label){
+  return `<div class="tot27"><span class="lb">${esc(label||'')}</span>${items.map(([v,k])=>`<span class="it"><b>${v}</b> ${esc(k)}</span>`).join('')}</div>`; }
+
 /* ---------------- deal rows ---------------- */
 function custNoOf27(a){
   if(a.customer_number)return String(a.customer_number);
@@ -165,7 +193,7 @@ function dealRows27(){
     let rows=[]; try{ rows=openWork27(a); }catch(e){}
     rows.forEach(r=>{
       const lab=r.kind==='new_sale'?'Sale':(KIND_LABEL27&&KIND_LABEL27[r.kind])||r.kind;
-      out.push({a,stage:r.state,label:lab,rmr:r.p?(r.kind==='new_sale'?+r.p.e.next:(+r.p.e.increase||+r.p.e.next)):(+a.monthly_rmr||null),
+      out.push({a,stage:r.state,label:lab,rmr:r.p&&r.p.e.next!=null?+r.p.e.next:(+agreementMrr(a)||null),
         date:r.date,note:r.note||'',amount:r.amount,soldBy:r.soldBy,soldOn:r.soldOn});
     });
   });
@@ -186,7 +214,7 @@ function renderDeals27(){
   let list=DEAL_PILL27==='open'?openRows:DEAL_PILL27==='lost'?huntRows27():rows.filter(r=>r.stage===DEAL_PILL27);
   if(q)list=list.filter(r=>String(r.a.customer_name||'').toLowerCase().includes(q)||String(r.a.agreement_number||'').toLowerCase().includes(q)||String(r.a.opportunity_number||'').toLowerCase().includes(q));
   const ord={opportunity:0,quoted:1,signed:2,sold:3,lost:4};
-  list=[...list].sort((x,y)=>(ord[x.stage]-ord[y.stage])||String(y.date||'').localeCompare(String(x.date||'')));
+  list=[...list].sort((x,y)=>(ord[x.stage]-ord[y.stage])||String(y.date||'').localeCompare(String(x.date||''))); list=applySort27(list);
   const team=canViewAll();
   const sumRmr=openRows.reduce((s,r)=>s+(+r.rmr||0),0);
   host.innerHTML=`
@@ -209,8 +237,11 @@ function renderDeals27(){
   if(DEAL_PILL27==='lost'){ renderHunt27(list); return; }
   const tb=$('dealTbl27');
   if(!list.length){ tb.innerHTML='<div class="empty"><b>Nothing here</b>Deals appear as opportunities are created and leave once every commission payment is paid.</div>'; return; }
-  tb.innerHTML=`<div class="panel"><div class="admin-body" style="padding:0"><table class="cfg-table" style="font-size:12.5px"><thead><tr>
-    <th>Deal</th><th>Stage</th><th>What</th>${team?'<th>Owner</th>':''}<th class="num">MRR</th><th class="num">Commission</th><th>Date</th><th>Next step</th><th></th></tr></thead><tbody>
+  const tMrr=list.reduce((s,r)=>s+(+r.rmr||0),0), tCom=list.reduce((s,r)=>s+(+r.amount||0),0);
+  const pillName=(pills.find(x=>x[0]===DEAL_PILL27)||[0,''])[1];
+  tb.innerHTML=`${totalsBar27([[list.length+' deal'+(list.length===1?'':'s'),'showing'],[fmt(tMrr)+'/mo','monthly RMR'],[fmt2(tCom),'commission']],pillName+(q?` · matching "${esc(window.DEAL_Q27)}"`:''))}
+  <div class="panel"><div class="admin-body" style="padding:0"><table class="cfg-table" style="font-size:12.5px"><thead><tr>
+    ${th27('Deal','deal')}${th27('Stage','stage')}${th27('What','what')}${team?th27('Owner','owner'):''}${th27('MRR','mrr','num')}${th27('Commission','comm','num')}${th27('Date','date')}<th>Next step</th><th></th></tr></thead><tbody>
    ${list.map((r,i)=>{ const a=r.a; const no=a.agreement_number?('#'+a.agreement_number):(a.opportunity_number||'—');
      return `<tr data-dl="${i}" class="rowlink">
       <td><b>${esc(custNameOf27(a)||a.customer_name||'—')}</b><div class="qctx">${esc(no)}${a.site_number?' · site '+esc(a.site_number):''}</div></td>
@@ -223,8 +254,10 @@ function renderDeals27(){
       <td style="font-size:11.5px;max-width:320px">${esc(plainText27(r.note||''))}${r.soldBy?`<div class="qctx">marked sold by ${esc(r.soldBy)}${r.soldOn?' on '+esc(r.soldOn):''}</div>`:''}</td>
       <td>${(r.stage==='opportunity'||r.stage==='quoted')&&can('editOpps')?`<button class="iconbtn" data-dedit="${i}">Edit</button>${can('editAgreements')?` <button class="iconbtn" data-dwin="${i}">Win ▸</button>`:''}`:''}</td>
      </tr>`; }).join('')}
+   <tr style="font-weight:800;background:#fafbfc"><td>Total · ${list.length}</td><td></td><td></td>${team?'<td></td>':''}<td class="num mono">${fmt(tMrr)}</td><td class="num mono">${fmt2(tCom)}</td><td colspan="3"></td></tr>
   </tbody></table></div></div>
   <div class="qctx" style="margin-top:8px">A deal leaves this page once every commission payment on it is paid; it then lives under <b>Customers</b>. A renewal or rate change from Vista brings the agreement back as its own row.</div>`;
+  wireSort27(tb,renderDeals27);
   tb.querySelectorAll('[data-dedit]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); openOpp(list[+b.dataset.dedit].a.id); });
   tb.querySelectorAll('[data-dwin]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); winOpp(list[+b.dataset.dwin].a.id); });
   tb.querySelectorAll('tr[data-dl]').forEach(tr=>tr.onclick=()=>{ const r=list[+tr.dataset.dl];
@@ -247,9 +280,11 @@ function huntRows27(){
 function renderHunt27(list){
   const tb=$('dealTbl27'); const team=canViewAll(); const t=E27.businessToday();
   if(!list.length){ tb.innerHTML='<div class="empty"><b>Nothing to hunt</b>Lost quotes and cancelled accounts land here so they can be chased again.</div>'; return; }
-  tb.innerHTML=`<div class="panel"><div class="panel-head"><h2>Hunt list</h2><span class="qctx">lost quotes and cancelled accounts — worth another call. A win-back pays as its own commission.</span></div>
+  const hM=list.reduce((s,r)=>s+(+r.rmr||0),0), nL=list.filter(r=>r.lost).length;
+  tb.innerHTML=`${totalsBar27([[String(list.length),'showing'],[String(nL),'lost quotes'],[String(list.length-nL),'cancelled accounts'],[fmt(hM)+'/mo','monthly RMR to win back']],'Hunt list'+((window.DEAL_Q27||'')?` · matching "${esc(window.DEAL_Q27)}"`:''))}
+  <div class="panel"><div class="panel-head"><h2>Hunt list</h2><span class="qctx">lost quotes and cancelled accounts — worth another call. A win-back pays as its own commission.</span></div>
   <div class="admin-body" style="padding:0"><table class="cfg-table" style="font-size:12.5px"><thead><tr>
-    <th>Customer</th><th>What</th><th>Why</th>${team?'<th>Owner</th>':''}<th class="num">MRR</th><th>Lost / ended</th><th>Age</th><th>Revisit</th><th></th></tr></thead><tbody>
+    ${th27('Customer','deal')}${th27('What','stage')}${th27('Why','why')}${team?th27('Owner','owner'):''}${th27('MRR','mrr','num')}${th27('Lost / ended','date')}${th27('Age','age')}${th27('Revisit','revisit')}<th></th></tr></thead><tbody>
    ${list.map((r,i)=>{ const a=r.a; const age=r.date?Math.max(0,Math.round((new Date(t)-new Date(r.date))/86400000)):null;
      return `<tr><td><b>${esc(a.customer_name||'—')}</b><div class="qctx">${esc(a.agreement_number?('#'+a.agreement_number):(a.opportunity_number||''))}</div></td>
       <td>${r.lost?stageChip27('lost'):'<span class="chip c-held">Cancelled</span>'} <span style="font-size:11px">${esc(r.what)}</span></td>
@@ -259,7 +294,9 @@ function renderHunt27(list){
       <td class="mono" style="color:var(--muted)">${esc(r.date||'—')}</td><td class="mono">${age!=null?age+'d':'—'}</td>
       <td class="mono">${r.revisit?esc(String(r.revisit).slice(0,10)):'—'}</td>
       <td>${r.lost&&can('editOpps')?`<button class="iconbtn" data-hreopen="${i}">Reopen</button>`:''}</td></tr>`; }).join('')}
+   <tr style="font-weight:800;background:#fafbfc"><td>Total · ${list.length}</td><td></td><td></td>${team?'<td></td>':''}<td class="num mono">${fmt(hM)}</td><td colspan="4"></td></tr>
   </tbody></table></div></div>`;
+  wireSort27(tb,renderDeals27);
   tb.querySelectorAll('[data-hreopen]').forEach(b=>b.onclick=()=>reopenOpp(list[+b.dataset.hreopen].a.id));
 }
 
@@ -352,12 +389,15 @@ function renderCustomers27(){
   if(q)groups=groups.filter(g=>g.nm.toLowerCase().includes(q)||String(g.no||'').includes(q)||g.items.some(a=>String(a.agreement_number||'').toLowerCase().includes(q)));
   groups.sort((x,y)=>x.nm.localeCompare(y.nm));
   const totRmr=ags.filter(a=>!isEnded(a)).reduce((s,a)=>s+(+agreementMrr(a)||0),0);
+  const shownAgs=groups.reduce((s,g)=>s.concat(g.items),[]); const shownLive=shownAgs.filter(a=>!isEnded(a));
+  const shownRmr=shownLive.reduce((s,a)=>s+(+agreementMrr(a)||0),0);
   host.innerHTML=`
    <div class="kpis27">
     <div class="kpi27 hero"><span class="k">Customers</span><span class="v">${groups.length}</span><span class="s">with ${ags.length} agreements</span></div>
     <div class="kpi27"><span class="k">Monthly RMR</span><span class="v">${money27(totRmr)}</span><span class="s">live agreements</span></div></div>
    <div class="pillrow27"><input id="custQ27" class="cfg-in" placeholder="Search customer, customer # or agreement #" value="${esc(window.CUST_Q27||'')}" style="width:280px;font-size:12px">
     <span style="flex:1"></span><button class="iconbtn" id="custFlat27">All agreements ▸</button></div>
+   ${totalsBar27([[String(groups.length),'customers'],[String(shownLive.length),'live agreements'],[String(shownAgs.length-shownLive.length),'ended'],[fmt(shownRmr)+'/mo','monthly RMR']],q?`matching "${esc(window.CUST_Q27)}"`:'All customers')}
    <div id="custList27">${groups.map(g=>{
      const live=g.items.filter(a=>!isEnded(a)), ended=g.items.filter(a=>isEnded(a));
      const rmr=live.reduce((s,a)=>s+(+agreementMrr(a)||0),0);
