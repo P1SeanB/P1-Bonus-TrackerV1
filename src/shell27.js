@@ -139,8 +139,8 @@ function renderToday27(){
   const add=(date,what,detail,go,label,extra)=>rows.push(Object.assign({date,what,detail,go,label},extra||{}));
   if(!S.steps[0]) add(run.cutoff,'Import the Vista invoice and receipt files',`Invoices: ${S.fi.due.label} · Receipts: ${S.fr.due.label}. Data must reach ${fmtD27(run.quarterEnd)}.`,'imports','Open imports');
   if(!S.steps[1]) add(run.cutoff,`Verify customer payments for the Q${run.q} ${run.y} payout`,`${S.groups['Pending verification'].length} payment(s), ${money27(S.tot('Pending verification'))}, waiting on verification. Anything not verified by ${fmtD27(run.cutoff)} moves to the next payout.`,'quarter','Open payouts');
-  if(!S.steps[3]&&S.pkt.items.length) add(run.payBy,`Get the Q${run.q} ${run.y} approval packet signed`,`${money27(S.tot('Ready to pay'))} ready for ${new Set(S.groups['Ready to pay'].map(i=>lc27(i.a.owner_email))).size} rep(s). Print the packet, have an Executive sign it, then record the approval.`,'quarter','Open payouts');
-  else if(!S.steps[4]) add(run.payBy,`Mark the Q${run.q} ${run.y} payout paid`,`Approved ${fmtD27(S.done.approved_at)}. Send the payroll file, then enter the payroll date to lock the quarter.`,'quarter','Open payouts');
+  if(!S.done){ if(S.pkt.items.length) add(run.payBy,`Get the Q${run.q} ${run.y} approval packet signed`,`${money27(S.tot('Ready to pay'))} ready for ${new Set(S.groups['Ready to pay'].map(i=>lc27(i.a.owner_email))).size} rep(s). Print the packet, have an Executive sign it, then record the approval.`,'quarter','Open payouts');
+  } else if(!S.done.locked_at) add(run.payBy,`Mark the Q${run.q} ${run.y} payout paid`,`Approved ${fmtD27(S.done.approved_at)}. Send the payroll file, then enter the payroll date to lock the quarter.`,'quarter','Open payouts');
   openWl.filter(w=>w.type!=='rep_question').forEach(w=>{ const T=(typeof WL_TYPES!=='undefined'&&WL_TYPES[w.type])||[w.type]; add(w.due_date||null,T[0],w.title,'worklist','Open worklist',{wl:w}); });
   qs.forEach(w=>add(w.due_date||null,`Answer ${nameOf27((w.detail||{}).requested_by)}'s question`,(w.detail&&w.detail.question)||w.title,'worklist','Answer'));
   ren.forEach(r=>add(r.iso,`Renewal due · #${r.a.agreement_number||''} ${r.a.customer_name||''}`,'Manual renewal — confirm it on the Renewals page to record the renewal commission.','renewals','Open renewals'));
@@ -174,11 +174,11 @@ function packetFor27(run,groups){
   const key=`${run.y}Q${run.q}|`+ready.map(i=>`${i.a.id}|${i.label}|${Math.round(i.amount*100)}`).join(';');
   const no=`${run.y}-Q${run.q}-${fnv27(key)}`;
   const me=lc27(CURRENT_EMAIL);
-  const items=ready.map(i=>{ const owner=lc27(i.a.owner_email);
+  const items=ready.map(i=>{ const owner=lc27(i.owner||i.a.owner_email);
     const handVerified=owner===me&&(P27.verifs||[]).some(v=>String(v.agreement_id)===String(i.a.id)&&MANUAL_SOURCES27.includes(v.source)&&lc27(v.verified_by)===me);
-    const piece=i.revised?`Payment ${i.tranche} of 2`:String(i.label).replace(/\b\w/,c=>c.toUpperCase());
+    const piece=i.adjustment?'Adjustment':i.revised?`Payment ${i.tranche} of 2`:String(i.label).replace(/\b\w/,c=>c.toUpperCase());
     const ed=(/Earned (\d{4}-\d{2}-\d{2})/.exec(i.reason||'')||[])[1];
-    const why=i.revised&&ed?(i.tranche===1?`First invoice paid ${fmtD27(ed)}`:`Three months after first billing, invoices paid · ${fmtD27(ed)}`)+(handVerified?' · verified by hand':' · Vista receipt'):plainText27(i.reason||'');
+    const why=i.adjustment?plainText27(i.reason||''):i.revised&&ed?(i.tranche===1?`First invoice paid ${fmtD27(ed)}`:`Three months after first billing, invoices paid · ${fmtD27(ed)}`)+(handVerified?' · verified by hand':' · Vista receipt'):plainText27(i.reason||'');
     return {agreement_id:i.a.id,agreement:String(i.a.agreement_number||''),customer:i.a.customer_name||'',owner:owner,rep:nameOf27(owner),piece,label:i.label,amount:i.amount,cents:Math.round(i.amount*100),why,flag:handVerified}; });
   return {no,items,total:items.reduce((s,i)=>s+i.cents,0)/100};
 }
@@ -198,7 +198,7 @@ function renderSteps27(){
   const S=payoutState27(), run=S.run, d=S.done;
   const stale=S.printed&&!d&&S.printed!==S.pkt.no;
   const st=(i,title,desc,action)=>`<div class="step27 ${S.steps[i]?'done':(i===S.now?'now':'')}"><span class="n">${S.steps[i]?'✓':i+1}</span><span class="t">${title}</span><span class="d">${desc}</span><span class="a">${action||''}</span></div>`;
-  el.innerHTML=`<div class="hd"><h2>Q${run.q} ${run.y} payout · ${d&&d.locked_at?'paid and locked':(d?'approved':'in progress')}</h2><span class="qctx">quarter ended ${fmtD27(run.quarterEnd)} · verify by ${fmtD27(run.cutoff)} · pay by ${fmtD27(run.payBy)}</span></div>
+  el.innerHTML=`<div class="hd"><h2>Q${run.q} ${run.y} payout · ${d&&d.locked_at?'paid and locked':(d?'approved':'in progress')}</h2><span class="qctx">quarter ended ${fmtD27(run.quarterEnd)} · verify by ${fmtD27(run.cutoff)} · pay by ${fmtD27(run.payBy)} · <button class="lnk27" id="st27adj">Add an adjustment</button></span></div>
    <div class="steps27">
     ${st(0,'Import Vista files',`Invoices: ${esc(S.fi.due.label)}<br>Receipts: ${esc(S.fr.due.label)}`,`<button class="lnk27" data-go27="imports">Open imports</button>`)}
     ${st(1,'Verify payments',S.groups['Pending verification'].length?`${S.groups['Pending verification'].length} waiting · ${money27(S.tot('Pending verification'))}${S.pastCut?'<br>Past the cutoff: these move to the next payout.':''}`:'Every payment in this run is verified.',`<button class="lnk27" id="st27wait">See what's waiting</button>`)}
@@ -211,6 +211,7 @@ function renderSteps27(){
   if($('st27print')) $('st27print').onclick=()=>{ printPacket27(S); LS.set('pkt27:'+run.y+'Q'+run.q,S.pkt.no); audit('Approval packet printed','Payout',S.pkt.no,null,{total:S.pkt.total,items:S.pkt.items.length},null); renderSteps27(); };
   if($('st27pdf')) $('st27pdf').onclick=()=>printPacket27(S,d);
   if($('st27rec')) $('st27rec').onclick=()=>openRecordApproval27(S);
+  if($('st27adj')) $('st27adj').onclick=()=>openAdjust27();
   if($('st27scan')) $('st27scan').onclick=async()=>{ const {data,error}=await sb.storage.from(FILE_BUCKET).createSignedUrl(d.signed_scan_path,120); if(error){toast(error.message);return;} window.open(data.signedUrl,'_blank','noopener'); };
   if($('st27csv')) $('st27csv').onclick=()=>downloadPayroll27(d);
   if($('st27paid')) $('st27paid').onclick=()=>openMarkPaid27(d);
@@ -309,6 +310,7 @@ async function recordApproval27(S,m){
   ready.filter(i=>i.revised).forEach(i=>{ const ev=committedEventsFor(i.a).slice(-1)[0]; if(!ev)return; const t=compute(i.a).tranches; const tt=t&&(i.tranche===1?t.t1:t.t2);
     (ev.snapshot.shares||[]).forEach(s=>entries.push({entry_uid:`${ev.event_uid}|T${i.tranche}|earned|${s.email}`,event_uid:ev.event_uid,tranche:i.tranche,stage:'earned',recipient_email:s.email,amount_cents:Number(i.tranche===1?s.t1Cents:s.t2Cents),earned_date:tt?tt.earnedDate:null,verified_at:new Date().toISOString(),evidence:{conditions:'met',basis:tt&&tt.dateBasis||null},actor:CURRENT_EMAIL}));
     (ev.snapshot.shares||[]).forEach(s=>entries.push({entry_uid:`${ev.event_uid}|T${i.tranche}|payable|${s.email}`,event_uid:ev.event_uid,tranche:i.tranche,stage:'payable',recipient_email:s.email,amount_cents:Number(i.tranche===1?s.t1Cents:s.t2Cents),payout_run_id:runId,approver:m.by,actor:CURRENT_EMAIL})); });
+  ready.filter(i=>i.adjustment).forEach(i=>{ const x=i.adjustment; entries.push({entry_uid:String(x.entry_uid).replace('|adjustment|','|payable|'),event_uid:x.event_uid,tranche:null,stage:'payable',recipient_email:x.recipient_email,amount_cents:x.amount_cents,payout_run_id:runId,reason:x.reason,approver:m.by,actor:CURRENT_EMAIL}); });
   if(entries.length){ const r=await sb.from('rmr_ledger_entries').upsert(entries,{onConflict:'entry_uid',ignoreDuplicates:true}); if(r.error) toast('Ledger: '+r.error.message); }
   audit('Payout approved by Executive','Payout',pk.no,null,{approved_by:m.by,signed_on:m.on,total:pk.total,items:pk.items.length,scan:path},null);
   LS.set('pkt27:'+run.y+'Q'+run.q,pk.no);
@@ -341,6 +343,42 @@ function openMarkPaid27(d){
     closeDrawer27(); await load27(); render(); toast('Marked paid — the quarter is locked'); };
 }
 
+/* ---------------- Adjusting a recorded commission ---------------- */
+function openAdjust27(agreementId){
+  if(!can('approvePayout')){ toast('Only an Administrator or Executive can adjust a commission.'); return; }
+  const recorded=AGREEMENTS.filter(a=>committedEventsFor(a).length).sort((x,y)=>String(x.agreement_number).localeCompare(String(y.agreement_number),undefined,{numeric:true}));
+  const ex=executives27();
+  drawer27('adj27','Adjust a commission','Separate line in the next payout',
+    `<div class="note27">A recorded commission is never edited. An adjustment adds a separate line — positive or negative — that goes in the next approval packet with your reason and the Executive who approved it.</div>
+     <label class="fld27">Agreement<select id="aj_ag">${recorded.map(a=>`<option value="${esc(a.id)}" ${String(a.id)===String(agreementId)?'selected':''}>#${esc(a.agreement_number||'—')} · ${esc(a.customer_name||'')}</option>`).join('')||'<option value="">No recorded sales yet</option>'}</select></label>
+     <label class="fld27">Paid to<select id="aj_to"></select></label>
+     <label class="fld27"><span>Amount <span class="h">· use a minus sign to reduce, e.g. -25.00</span></span><input type="number" step="0.01" id="aj_amt" placeholder="0.00"></label>
+     <label class="fld27">Reason<textarea id="aj_why" rows="3" placeholder="e.g. Customer added a second monitoring line on Nov 12 — $25/mo × 1.0 for 36 months"></textarea></label>
+     <label class="fld27">Approved by (Executive)<select id="aj_by">${ex.map(u=>`<option value="${esc(u.email)}">${esc(nameOf27(u.email))}</option>`).join('')||'<option value="">No Executive set up</option>'}</select></label>
+     <div id="aj_cur" class="qctx"></div><div id="aj_err" style="color:#8a1f1f;font-size:13px;font-weight:700"></div>`,
+    `<button class="btn-primary" id="aj_go" style="padding:12px 16px;font-size:15px">Add adjustment</button><span class="qctx" style="text-align:center">Shows on the rep's My pay and in the next packet.</span>`);
+  const fill=()=>{ const a=AGREEMENTS.find(x=>String(x.id)===$('aj_ag').value); const ev=a&&committedEventsFor(a).slice(-1)[0]; const sh=(ev&&ev.snapshot&&ev.snapshot.shares)||[{email:a&&a.owner_email}];
+    $('aj_to').innerHTML=sh.filter(x=>x.email).map(x=>`<option value="${esc(x.email)}">${esc(nameOf27(x.email))}</option>`).join('');
+    $('aj_cur').textContent=ev?`Recorded commission: ${E27.fmtCents(BigInt(ev.total_cents))} (${ev.snapshot.planLabel||''}, ${String(ev.event_date||'').slice(0,10)}).`:''; };
+  if(recorded.length){ $('aj_ag').onchange=fill; fill(); }
+  $('aj_go').onclick=async()=>{ const err=t=>{ $('aj_err').textContent=t; };
+    const a=AGREEMENTS.find(x=>String(x.id)===$('aj_ag').value); const ev=a&&committedEventsFor(a).slice(-1)[0]; if(!ev)return err('Pick an agreement with a recorded sale.');
+    const amt=Math.round((+$('aj_amt').value||0)*100), why=($('aj_why').value||'').trim(), by=$('aj_by').value, to=$('aj_to').value;
+    if(!amt)return err('Enter the amount.'); if(why.length<8)return err('Explain the reason — it prints on the packet.'); if(!by)return err('Choose the Executive who approved it.');
+    const row={entry_uid:`${ev.event_uid}|ADJ${Date.now()}|adjustment|${to}`,event_uid:ev.event_uid,tranche:null,stage:'adjustment',recipient_email:to,amount_cents:amt,earned_date:E27.businessToday(),reason:why,approver:by,actor:CURRENT_EMAIL};
+    const {error}=await sb.from('rmr_ledger_entries').insert(row); if(error)return err(error.message);
+    audit('Commission adjustment added','Payout',a.agreement_number,null,{to,amount:amt/100,reason:why,approved_by:by},why);
+    closeDrawer27(); await load27(); render(); toast(`Adjustment of ${money27(amt/100)} added — it goes in the next payout`); };
+}
+(function hookAdjustButton27(){
+  const orig=window.bindRevisedPreview; if(typeof orig!=='function')return;
+  window.bindRevisedPreview=function(row,c){ orig.apply(this,arguments);
+    if(!can('approvePayout')||typeof editingId==='undefined'||!editingId)return; const a=AGREEMENTS.find(x=>x.id===editingId); if(!a||!committedEventsFor(a).length)return;
+    const box=$('mPreview'); if(!box||$('adjBtn27'))return; const d=document.createElement('div'); d.style.cssText='margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap';
+    d.innerHTML=`<button type="button" class="btn-ghost" id="adjBtn27">Adjust commission…</button><span class="qctx">Adds a separate approved line to the next payout. The recorded commission stays as it is.</span>`; box.appendChild(d);
+    $('adjBtn27').onclick=()=>openAdjust27(a.id); };
+})();
+
 /* ---------------- Vista imports page ---------------- */
 function renderImports27(){
   const host=$('importsHost27'); if(!host)return;
@@ -370,6 +408,10 @@ function myLines27(){
     const push=(type,flag,qi)=>{ if(qi==null)return; const f=frozenAmount(a,type); if(!(f.amount>0))return; out.push({a,piece:type,label:type==='holdback'?'Deferred piece':'Initial piece',amount:f.amount,qi,state:a[flag]?'paid':(qi<=CUR_QI?'earned':'expected'),rstate:a[flag]?'paid':'expected',note:a[flag]?'paid':'historical plan'}); };
     if(c.legacyFull) push('initial','paid_initial',c.initialQI); else { push('immediate','paid_immediate',c.initialQI); push('holdback','paid_holdback',c.holdbackQI); }
   });
+  const team=isTeam27(), me=lc27(CURRENT_EMAIL);
+  P27.ledger.filter(x=>x.stage==='adjustment'&&(team||lc27(x.recipient_email)===me)).forEach(x=>{ const ev=P27.events.find(e=>e.event_uid===x.event_uid); const a=ev&&AGREEMENTS.find(g=>String(g.id)===String(ev.agreement_id)); if(!a)return;
+    const paid=P27.ledger.some(y=>y.entry_uid===String(x.entry_uid).replace('|adjustment|','|paid|')); const d=String(x.earned_date||x.created_at||E27.businessToday()).slice(0,10);
+    out.push({a,piece:'adj',label:'Adjustment',amount:Number(x.amount_cents)/100,qi:qIndexFromYM(+d.slice(0,4),+d.slice(5,7)-1),state:paid?'paid':'earned',rstate:paid?'paid':'earned',note:(x.reason||'Adjustment')+(paid?' · paid':' · in the next payout')}); });
   return out;
 }
 function renderMyPay27(){

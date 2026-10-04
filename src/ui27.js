@@ -557,6 +557,13 @@ function payoutItems(run){
     pieces.forEach(([type,flag,amt])=>{ if(!(amt>0))return; if(a[flag]){ items.push({a,label:type,amount:amt,state:'Excluded from this run',reason:'Already paid.'}); return; }
       const r=legacyLineReadiness(a,type); items.push({a,label:type+' (historical plan)',amount:amt,state:r.verified?'Ready to pay':'Pending verification',reason:r.verified?'Collection verified.':r.reason}); });
   });
+  // commission adjustments: a separate, approved line in the next payout (never an edit of a recorded commission)
+  const scoped=new Set(scopedAgreements().map(a=>String(a.id))); const done=P27.payoutRuns.find(r=>r.year===run.y&&r.quarter===run.q);
+  P27.ledger.filter(x=>x.stage==='adjustment').forEach(x=>{ const ev=P27.events.find(e=>e.event_uid===x.event_uid); const a=ev&&AGREEMENTS.find(g=>String(g.id)===String(ev.agreement_id)); if(!a||!scoped.has(String(a.id)))return;
+    const uid=s=>String(x.entry_uid).replace('|adjustment|','|'+s+'|'); const paid=P27.ledger.some(y=>y.entry_uid===uid('paid')), payable=P27.ledger.some(y=>y.entry_uid===uid('payable'));
+    const late=!payable&&done&&String(x.created_at||'')>String(done.approved_at||'');
+    items.push({a,label:'Adjustment',amount:Number(x.amount_cents)/100,cents:Number(x.amount_cents),adjustment:x,owner:x.recipient_email,
+      state:paid?'Excluded from this run':(late?'Excluded from this run':'Ready to pay'),reason:paid?'Already paid.':(late?'Added after this payout was approved — goes in the next payout.':`${x.reason||'Adjustment'} (approved by ${x.approver||'—'})`)}); });
   return items;
 }
 function renderPayoutRun(){

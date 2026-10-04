@@ -77,8 +77,11 @@ const tmp=f=>{ const p=path.join(require('os').tmpdir(),f); fs.writeFileSync(p,'
   ok(/Next payout · Q4 2026/i.test(today)&&/Get the Q4 2026 approval packet signed/.test(today),'Today shows the Q4 2026 payout and the packet as the next job');
   await shot(p,'admin_today');
   await p.evaluate(()=>switchView('quarter')); await p.waitForTimeout(500);
+  await p.click('#st27adj'); await p.waitForTimeout(200);
+  await p.selectOption('#aj_ag','o1'); await p.fill('#aj_amt','25'); await p.fill('#aj_why','Customer added a second monitoring line on Nov 12'); await shot(p,'admin_adjust_commission'); await p.click('#aj_go'); await p.waitForTimeout(700);
+  ok(await p.evaluate(()=>__DB.rmr_ledger_entries.some(x=>x.stage==='adjustment'&&x.amount_cents===2500&&x.approver==='don.jones@point1.com'&&x.recipient_email==='jordan.lee@point1.com')),'adjustment recorded as its own approved ledger line');
   const st=await p.evaluate(()=>({txt:document.getElementById('steps27').innerText,ready:payoutState27().pkt}));
-  ok(st.ready.items.length===2&&Math.abs(st.ready.total-135)<0.01,'packet holds the two payments earned in Q4 ($50 + $85 = $135): '+st.ready.items.map(i=>i.agreement+' '+i.amount).join(', '));
+  ok(st.ready.items.length===3&&Math.abs(st.ready.total-160)<0.01&&st.ready.items.some(i=>i.piece==='Adjustment'&&i.owner==='jordan.lee@point1.com'),'packet holds the two Q4 payments plus the adjustment ($50 + $85 + $25 = $160): '+st.ready.items.map(i=>i.agreement+' '+i.piece+' '+i.amount).join(', '));
   ok(st.ready.items.find(i=>i.customer==='Cedar Ridge HOA').flag===true&&st.ready.items.find(i=>i.customer==='Lakeside Medical Plaza').flag===false,"preparer's hand-verified payment is flagged; the Vista-receipt one is not");
   ok(/Print approval packet/.test(st.txt)&&/Record Executive approval/.test(st.txt)&&/Pay & lock/.test(st.txt),'Payouts shows the five steps');
   await shot(p,'admin_payouts_steps');
@@ -90,12 +93,12 @@ const tmp=f=>{ const p=path.join(require('os').tmpdir(),f); fs.writeFileSync(p,'
   ok(/out of date/.test(await p.evaluate(()=>document.getElementById('ra_err').textContent)),'a wrong or stale packet number is refused');
   const pk=st.ready.no; await p.fill('#ra_no',pk.toLowerCase()); await shot(p,'admin_record_approval'); await p.click('#ra_go'); await p.waitForTimeout(900);
   const run=await p.evaluate(()=>{ const r=__DB.rmr_payout_runs[0]; return r&&{no:r.packet_no,by:r.approved_by,scan:r.signed_scan_path,items:(r.packet.items||[]).length,payable:__DB.rmr_ledger_entries.filter(x=>x.stage==='payable').length}; });
-  ok(run&&run.no===pk&&/Don Jones/.test(run.by)&&/^payouts\/2026-Q4\//.test(run.scan)&&run.items===2&&run.payable>=2,'approval recorded: Executive, signed scan, packet lines, payable ledger entries');
+  ok(run&&run.no===pk&&/Don Jones/.test(run.by)&&/^payouts\/2026-Q4\//.test(run.scan)&&run.items===3&&run.payable>=3,'approval recorded: Executive, signed scan, packet lines, payable ledger entries');
   const [csv]=await Promise.all([p.waitForEvent('download'),p.click('#st27csv')]); const csvTxt=fs.readFileSync(await csv.path(),'utf8');
-  ok(/Jordan Lee/.test(csvTxt)&&/Sean Bithell/.test(csvTxt)&&csvTxt.trim().split('\n').length===3,'payroll file unlocked and lists the approved lines');
+  ok(/Jordan Lee/.test(csvTxt)&&/Sean Bithell/.test(csvTxt)&&csvTxt.trim().split('\n').length===4,'payroll file unlocked and lists the approved lines');
   await p.click('#st27paid'); await p.waitForTimeout(200); await p.fill('#mp_d','2027-01-30'); await shot(p,'admin_mark_paid'); await p.click('#mp_go'); await p.waitForTimeout(900);
   const lock=await p.evaluate(()=>({r:__DB.rmr_payout_runs[0],paid:__DB.rmr_ledger_entries.filter(x=>x.stage==='paid').length,txt:document.getElementById('steps27').innerText}));
-  ok(lock.r.locked_at&&lock.r.paid_date==='2027-01-30'&&lock.paid>=2&&/paid and locked/.test(lock.txt),'Mark paid & lock: payroll date stored, paid entries written, quarter locked');
+  ok(lock.r.locked_at&&lock.r.paid_date==='2027-01-30'&&lock.paid>=3&&/paid and locked/.test(lock.txt),'Mark paid & lock: payroll date stored, paid entries written, quarter locked');
   await shot(p,'admin_payouts_locked');
   await p.evaluate(()=>switchView('imports')); await p.waitForTimeout(400); await p.evaluate(()=>{ const d=document.querySelector('#view-imports details'); if(d)d.open=true; });
   ok(await p.evaluate(()=>document.querySelectorAll('#view-imports [data-feed27]').length===5),'Vista imports page: five slots with dropdowns');

@@ -59,6 +59,8 @@ const SEED={
   // every view renders
   for(const v of ['today','quarter','opportunities','agreements','renewals','forecast','recon','history','reports','worklist','imports','admin']){ await page.evaluate(v=>switchView(v),v); await page.waitForTimeout(250); }
   ok(await page.evaluate(()=>!!document.getElementById('vistaPanel27')||true),'all twelve views render');
+  await page.evaluate(()=>switchView('today')); await page.waitForTimeout(300);
+  ok(await page.evaluate(()=>/Next payout/i.test(document.getElementById('todayHost27').innerText)&&/Due soonest/i.test(document.getElementById('todayHost27').innerText)),'Today renders its figures and list when nothing is ready to approve');
   await page.evaluate(()=>switchView('imports')); await page.waitForTimeout(300);
   ok(await page.evaluate(()=>document.querySelectorAll('#view-imports [data-feed27]').length===5&&document.getElementById('view-imports').querySelectorAll('details').length>=5),'Vista imports page shows five slots, each with its how-to dropdown');
   await page.evaluate(()=>switchView('recon')); await page.waitForTimeout(200);
