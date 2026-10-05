@@ -137,6 +137,11 @@ const tmp=f=>{ const p=path.join(require('os').tmpdir(),f); fs.writeFileSync(p,'
   ok(/Next commission payment/i.test(mp)&&/Commission by quarter/i.test(mp)&&/My payments/i.test(mp)&&/Estimate a deal/i.test(mp),'My pay: next payment, chart, estimator, payments');
   ok(await p.evaluate(()=>document.querySelectorAll('#myPay27 svg.chart27 path, #myPay27 svg.chart27 rect[fill^="#"]').length>0),'chart draws bars');
   await shot(p,'rep_my_pay');
+  ok(await p.evaluate(()=>[...document.querySelectorAll('#myPay27 [data-mpf]')].map(b=>b.textContent.replace(/\d+$/,'')).join('|')==='Coming up|Expected|Earned|Paid|Actual payouts|All'),'My payments has status filters, Coming up first');
+  await p.evaluate(()=>{ LS.set('mpf27','all'); renderMyPay27(); });
+  const dq=await p.evaluate(()=>{ const r=[...document.querySelectorAll('#myPay27 [data-dq27]')].find(x=>myLines27().some(l=>l.qi===+x.dataset.dq27)); if(!r)return 'no bar'; r.dispatchEvent(new MouseEvent('click',{bubbles:true})); const d=document.getElementById('drill27'); return d?d.innerText:'no drill'; });
+  ok(/breakdown/i.test(dq)&&/How it's calculated/i.test(dq)&&/× /.test(dq),'clicking a bar opens that quarter\'s breakdown with the calculation: '+dq.slice(0,120).replace(/\n/g,' | '));
+  ok(await p.evaluate(()=>{ document.getElementById('dr27x').click(); return !document.getElementById('drill27'); }),'the breakdown closes');
   await p.click('#myPay27 [data-q27]'); await p.waitForTimeout(200); await p.fill('#q27_t','The customer paid on Jan 16 — is payment 1 in this payout?'); await shot(p,'rep_question_panel'); await p.click('#q27_go'); await p.waitForTimeout(600);
   ok(await p.evaluate(()=>__DB.rmr_worklist.some(w=>w.type==='rep_question'&&w.detail.requested_by==='jordan.lee@point1.com'&&w.status==='open')),'question lands on the Worklist for the admin');
   ok(await p.evaluate(async()=>{ switchView('guides'); const r=await sb.storage.from('guides').download('admin/user-guide.html'); return !!r.error&&[...document.querySelectorAll('#side27 nav button')].some(b=>b.offsetParent&&b.textContent.trim()==='Guides'); }),'rep has Guides in the menu but cannot read the admin guide');

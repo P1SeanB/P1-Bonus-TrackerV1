@@ -1390,7 +1390,7 @@ function friendlyCond27(t){ t=plainText27(String(t||'')); let m;
   return t; }
 /* ---- Quarter view lines for revised deals: payment 1 / payment 2 with their real state ---- */
 function revisedQuarterLines27(a,c){
-  if(pricedEvents27(a)) return hybridLines27(a).map(l=>({a,c,type:'rev'+l.uid+'|'+l.piece,piece:l.piece,label:l.label,amount:l.amount,rstate:l.rstate,paid:l.rstate==='paid',note:l.note,qi:l.qi,frozen:false,t:l.t,override:l.override}));
+  if(pricedEvents27(a)) return hybridLines27(a).map(l=>({a,c,p:l.p,type:'rev'+l.uid+'|'+l.piece,piece:l.piece,label:l.label,amount:l.amount,rstate:l.rstate,paid:l.rstate==='paid',note:l.note,qi:l.qi,date:l.date,frozen:false,t:l.t,override:l.override}));
   const calc=c.revisedCalc; if(!calc)return [];
   const tr=c.tranches||{t1:{conditions:[]},t2:{conditions:[]}}; const ev=committedEventsFor(a).slice(-1)[0];
   const led=ev?P27.ledger.filter(x=>x.event_uid===ev.event_uid):[];
