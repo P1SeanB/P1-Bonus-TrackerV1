@@ -7549,6 +7549,9 @@ function th27(label,k,cls){ const on=DSORT27.k===k; return `<th data-dsort="${k}
 function wireSort27(host,rerender){ host.querySelectorAll('[data-dsort]').forEach(h=>h.onclick=()=>{ const k=h.dataset.dsort;
   DSORT27=DSORT27.k===k?{k,d:-DSORT27.d}:{k,d:(k==='mrr'||k==='comm'||k==='date')?-1:1}; LS.set('dsort27',JSON.stringify(DSORT27)); rerender(); }); }
 
+/* friendlier next-step text: readable dates, plain wording */
+function niceNote27(t){ t=plainText27(t||''); return String(t).replace(/\b(\d{4}-\d{2}-\d{2})\b/g,(m)=>fmtD27(m)).replace(/^earned /i,'Earned '); }
+
 /* totals line that follows the current filter and search */
 function totalsBar27(items,label){
   return `<div class="tot27"><span class="lb">${esc(label||'')}</span>${items.map(([v,k])=>`<span class="it"><b>${v}</b> ${esc(k)}</span>`).join('')}</div>`; }
@@ -7664,7 +7667,7 @@ function renderDeals27(){
       <td class="num mono">${r.rmr!=null?fmt(+r.rmr):'—'}</td>
       <td class="num mono">${r.amount!=null?fmt2(r.amount):'—'}</td>
       <td class="mono" style="color:var(--muted)">${r.date?esc(fmtD27(r.date)):'—'}</td>
-      <td style="font-size:11.5px;max-width:320px">${esc(plainText27(r.note||''))}${r.soldBy?`<div class="qctx">marked sold by ${esc(r.soldBy)}${r.soldOn?' on '+esc(fmtD27(r.soldOn)):''}</div>`:''}</td>
+      <td style="min-width:240px">${esc(niceNote27(r.note))}${r.soldBy?`<div class="qctx" style="font-size:12.5px">Sold ✓ ${esc(nameOf27(r.soldBy))}${r.soldOn?' · '+esc(fmtD27(r.soldOn)):''}</div>`:''}</td>
       <td>${(r.stage==='opportunity'||r.stage==='quoted')&&can('editOpps')?`<button class="iconbtn" data-dedit="${i}">Edit</button>${can('editAgreements')?` <button class="iconbtn" data-dwin="${i}">Win ▸</button>`:''}`:''}</td>
      </tr>`; }).join('')}
    <tr style="font-weight:800;background:#fafbfc"><td>Total · ${list.length}</td><td></td><td></td>${team?'<td></td>':''}<td class="num mono">${fmt(tMrr)}</td><td class="num mono">${fmt2(tCom)}</td><td colspan="3"></td></tr>
