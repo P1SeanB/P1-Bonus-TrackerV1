@@ -578,3 +578,12 @@ function renderSalesReports27(){
       if(bar)bar.innerHTML=pfBar27(renderHistory);
     }catch(e){} };
 })();
+
+/* ---------------- portfolio bonus: the RMR book only ---------------- */
+// Retention (GRR) and growth (NRR) measure the rep's RMR book. SLAs are their own book — they earn
+// their own new-sale and renewal commission, and never count toward the RMR retention bonus.
+(function rmrBookOnly27(){
+  if(typeof portfolioMetrics!=='function')return;
+  const pm=portfolioMetrics;
+  portfolioMetrics=function(y,book){ return pm.call(this,y,(book||[]).filter(a=>a.category!=='sla')); };
+})();

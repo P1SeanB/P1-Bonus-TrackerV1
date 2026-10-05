@@ -856,7 +856,7 @@ async function approveRun(run,groups){
 function termsText(v){
   const c=v.config||{}; const m=c.newMult||{}; const sl=c.slaNewMult||{};
   return `${v.label} — written commission terms (effective ${v.effective_date||'on publication'})\n\n`+
-  `Commission = eligible MRR × term multiple × margin gate. New sale or expansion: 12 mo ${m[12]}×, 24 mo ${m[24]}×, 36 mo ${m[36]}×, 48 mo ${m[48]}×, 60 mo ${m[60]}× (terms above 60 months are capped at ${c.newMultCapAbove60||m[60]}×). Manual renewal: ${c.renewalMult}× retained MRR; any increase at renewal pays the new-sale multiple on the increase only. ${c.autoRenewalPaysIncrease?'Auto-renewals and rate increases (including built-in escalations) pay only the increase, as new money at the new-sale multiple for the term; the amount already commissioned never pays again, and a decrease pays nothing and takes nothing back. Term conversions pay nothing.':'Auto-renewals, contractual escalations and term conversions pay nothing.'}\n`+
+  `Commission = eligible MRR × term multiple × margin gate. New sale or expansion: 12 mo ${m[12]}×, 24 mo ${m[24]}×, 36 mo ${m[36]}×, 48 mo ${m[48]}×, 60 mo ${m[60]}× (terms above 60 months pay the 60-month multiple, ${m[60]}×). Manual renewal: ${c.renewalMult}× retained MRR; any increase at renewal pays the new-sale multiple on the increase only. ${c.autoRenewalPaysIncrease?'Auto-renewals and rate increases (including built-in escalations) pay only the increase, as new money at the new-sale multiple for the term; the amount already commissioned never pays again, and a decrease pays nothing and takes nothing back. Term conversions pay nothing.':'Auto-renewals, contractual escalations and term conversions pay nothing.'}\n`+
   `Renewal type follows the contract term recorded in Vista: a 12-month term renews manually; longer terms auto-renew. An Administrator may switch the type for a term. A term within one month of a standard term (co-terminous stub months) counts as that term.\n`+
   `SLA agreements: annual recurring value ÷ 12, then 12 mo ${sl[12]}×, 24 mo ${sl[24]}×, 36 mo ${sl[36]}×, 48 mo ${sl[48]}×, 60 mo ${sl[60]}×; SLA renewal ${c.slaRenewalMult}× retained.\n`+
   `Margin: gross margin on modelled direct cost over the committed term must be at least ${Math.round((+c.minMargin||0)*100)}% (multiplier 1.0); below it pays 0; unknown margin cannot qualify.\n`+
@@ -914,7 +914,7 @@ function renderAdmin27(){
     <div class="panel"><div class="panel-head"><h2>Commission rates</h2><span class="qctx">exact multiples of eligible MRR · % shown is derived</span></div><div class="admin-body">
       <table class="cfg-table"><thead><tr><th>Term</th><th>New sale / expansion</th><th>Displayed TCV %</th><th>New SLA (× MRR equiv.)</th></tr></thead><tbody>${terms.map(t=>`<tr><td>${t} months</td><td>${inp('m_new_'+t,c.newMult&&c.newMult[t],'style="width:80px"')} ×</td><td class="mono" id="m_tcv_${t}">${derived(t)}</td><td>${inp('m_sla_'+t,c.slaNewMult&&c.slaNewMult[t],'style="width:80px"')} ×</td></tr>`).join('')}</tbody></table>
       <div class="cfg-two" style="margin-top:8px"><div><label class="cfg-lbl">Manual renewal (× retained MRR, all terms)</label>${inp('m_ren',c.renewalMult,'style="width:80px"')} ×</div><div><label class="cfg-lbl">SLA renewal (× retained MRR equiv.)</label>${inp('m_slaren',c.slaRenewalMult,'style="width:80px"')} ×</div></div>
-      <div class="qctx" style="margin-top:6px">Above 60 months: capped at ${val(c.newMultCapAbove60||'—')}×. Auto-renewal ${val(c.autoRenewalMult||'—')}×, escalation ${val(c.escalatorMult||'—')}×, term conversion ${val(c.termConversionMult||'—')}× (fixed at 0, COM-04). Nonstandard terms below 60 months need an approved mapping. ${c.approvedTermNote48?esc(c.approvedTermNote48):''}</div></div></div>
+      <div class="qctx" style="margin-top:6px">Above 60 months: paid at the 60-month multiple (${val((c.newMult||{})[60]||'—')}×). Auto-renewal ${val(c.autoRenewalMult||'—')}×, escalation ${val(c.escalatorMult||'—')}×, term conversion ${val(c.termConversionMult||'—')}× (fixed at 0, COM-04). Nonstandard terms below 60 months need an approved mapping. ${c.approvedTermNote48?esc(c.approvedTermNote48):''}</div></div></div>
     <div class="panel"><div class="panel-head"><h2>Margin</h2></div><div class="admin-body">
       <div class="cfg-two"><div><label class="cfg-lbl">Target gross margin</label>${inp('g_target',pct(c.targetMargin),'type="number" step="0.5"')} %</div><div><label class="cfg-lbl">Qualification floor</label>${inp('g_min',pct(c.minMargin),'type="number" step="0.5"')} %</div></div>
       <div class="qctx" style="margin-top:6px">1.0 at or above the floor, 0 below; unknown margin blocks. Measured on modelled direct cost only — overhead never enters (CST-01, CST-03).</div></div></div>
@@ -967,7 +967,7 @@ function renderAdmin27(){
   if(can('viewAudit')) renderAudit();
 }
 function readDraft27(v){
-  const c=JSON.parse(JSON.stringify(v.config||{})); const g=id=>{ const el=$(id); return el?el.value.trim():''; }; const frac=x=>x===''?null:String(Math.round(+x*1000)/100000);
+  const c=JSON.parse(JSON.stringify(v.config||{})); delete c.newMultCapAbove60; const g=id=>{ const el=$(id); return el?el.value.trim():''; }; const frac=x=>x===''?null:String(Math.round(+x*1000)/100000);
   const num=x=>x===''?null:+x; const errs=[];
   c.allocation={hunter:frac(g('a_hunt')),farmer:frac(g('a_farm'))}; if(c.allocation.hunter==null&&c.allocation.farmer==null)c.allocation=null;
   c.salaryAssumption=num(g('a_sal')); c.quotaMonthlyMrr=num(g('a_quota')); c.accelMultiplier=g('a_accel')||null;
@@ -1023,27 +1023,46 @@ function publishForm27(v){
   if(val.length){ box.innerHTML=`<div class="panel" style="margin-top:12px"><div class="admin-body" style="color:var(--held);font-size:12.5px"><b>Publication rejected:</b><br>${val.map(esc).join('<br>')}</div></div>`; return; }
   if(!v.preview_checked_at&&!(ADM_PREVIEW&&ADM_PREVIEW.id===v.id)){ box.innerHTML=`<div class="panel" style="margin-top:12px"><div class="admin-body" style="color:var(--held)">Run <b>Preview calculation</b> on this draft first (ADM-06).</div></div>`; return; }
   box.innerHTML=`<div class="panel" style="margin-top:12px;border:2px solid var(--navy)"><div class="panel-head"><h2>Publish ${esc(v.label)}</h2><span class="qctx">creates an immutable version · cannot rewrite historical events</span></div><div class="admin-body" style="font-size:12.5px">
-    <div class="cfg-two"><div><label class="cfg-lbl">Effective date (not before ${REVISED_CUTOVER})</label><input type="date" class="cfg-in" id="pf_eff" min="${REVISED_CUTOVER}" value="${[REVISED_CUTOVER,E27.businessToday()].sort().pop()}" style="min-width:170px"></div><div><label class="cfg-lbl">Approved by</label><input class="cfg-in wide" id="pf_by" value="Sean Bithell"></div></div>
+    <label class="cfg-lbl">Version name</label><input class="cfg-in" id="pf_name" value="${esc(v.label)}" style="min-width:320px" maxlength="60">
+    <div class="cfg-two"><div><label class="cfg-lbl">Effective date — the first free date is filled in</label><input type="date" class="cfg-in" id="pf_eff" min="${REVISED_CUTOVER}" value="${nextFreeDate27(v.family)}" style="min-width:170px"></div><div><label class="cfg-lbl">Approved by</label><input class="cfg-in wide" id="pf_by" value="Sean Bithell"></div></div>
     <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="pf_48"> I approve the 48-month multiple of ${esc((v.config.newMult||{})[48]||'—')}× (carried from the planning workbook)</label>
     <label style="display:flex;gap:8px;align-items:center;margin-top:4px"><input type="checkbox" id="pf_terms"> These earning terms match the written compensation agreement (Labor Code §2751)</label>
+    ${(()=>{ const reps=repsOnFamily27(v.family); return reps.length?`<label style="display:flex;gap:8px;align-items:center;margin-top:4px"><input type="checkbox" id="pf_asg" checked> Move ${reps.length===1?esc(reps[0]):reps.length+' reps'} on ${esc(v.family)} to this version from the effective date (they acknowledge it at next sign-in)</label>`:''; })()}
     <div class="qctx" style="margin-top:6px">Approver and sole representative are the same person at this revision — recorded deliberately; add a second approver when the team grows (COM-07).</div>
     <div style="margin-top:10px"><button class="btn-primary" id="pf_go">Publish version</button> <span id="pf_msg" style="color:var(--held);font-weight:600;font-size:13px;margin-left:8px"></span></div></div></div>`;
   const pfSay=(m)=>{ $('pf_msg').textContent=m; toast(m); };
-  $('pf_go').onclick=async()=>{ const eff=$('pf_eff').value, by=$('pf_by').value.trim();
+  $('pf_go').onclick=async()=>{ const eff=$('pf_eff').value, by=$('pf_by').value.trim(), name=($('pf_name').value||'').trim()||v.label;
+    const clash=P27.versions.find(x=>x.family===v.family&&x.status==='published'&&x.effective_date===eff);
+    if(clash){ pfSay(`${clash.label} already starts on ${eff}. Each published version needs its own start date — ${nextFreeDate27(v.family)} is free.`); $('pf_eff').value=nextFreeDate27(v.family); return; }
+    if(P27.versions.some(x=>x.family===v.family&&x.id!==v.id&&x.label===name)){ pfSay(`"${name}" is already used — give this version its own name.`); $('pf_name').focus(); return; }
     if(!eff||eff<REVISED_CUTOVER){ pfSay('Pick an effective date on or after '+REVISED_CUTOVER+'.'); $('pf_eff').focus(); return; }
     if(!by){ pfSay('Enter who approved it.'); $('pf_by').focus(); return; }
     if(!$('pf_48').checked||!$('pf_terms').checked){ pfSay('Tick both confirmation boxes to publish.'); return; }
     $('pf_go').disabled=true; $('pf_go').textContent='Publishing…';
     const cfg=JSON.parse(JSON.stringify(v.config)); cfg.approvedTermNote48=`48-month ${cfg.newMult[48]}× approved explicitly by ${by} at publication`;
     const fail=(m)=>{ pfSay(m); $('pf_go').disabled=false; $('pf_go').textContent='Publish version'; };
-    const upd1=await sb.from('rmr_plan_versions').update({config:cfg}).eq('id',v.id); if(upd1.error){ fail(upd1.error.message); return; }
-    const pv=Object.assign({},v,{config:cfg,effective_date:eff,approved_by:by});
+    const upd1=await sb.from('rmr_plan_versions').update({config:cfg,label:name}).eq('id',v.id); if(upd1.error){ fail(upd1.error.message); return; }
+    v.label=name; const pv=Object.assign({},v,{config:cfg,effective_date:eff,approved_by:by,label:name});
     const {error}=await sb.from('rmr_plan_versions').update({status:'published',effective_date:eff,approved_by:by,approved_at:new Date().toISOString(),preview_checked_at:v.preview_checked_at||(ADM_PREVIEW&&ADM_PREVIEW.at),published_at:new Date().toISOString(),published_by:CURRENT_EMAIL,terms_text:termsText(pv)}).eq('id',v.id);
-    if(error){ fail(error.message); return; }
+    if(error){ fail(/same effective|effective date/i.test(error.message)?`Another ${v.family} version already starts on ${eff} — pick a later date.`:error.message); return; }
     const prior=P27.versions.filter(x=>x.family===v.family&&x.status==='published'&&x.id!==v.id);
-    audit('Plan version published','Admin',v.label,null,{effective:eff,approved_by:by,supersedes:prior.map(p=>p.label)},null);
-    await load27(); renderAdmin27(); toast(v.label+' published — assign it to employees below'); };
+    const moved=[]; if($('pf_asg')&&$('pf_asg').checked){ for(const em of repsOnFamily27(v.family)){ const r=await assignVersion27(em,v.id,eff,name); if(r)moved.push(em); } }
+    audit('Plan version published','Admin',v.label,null,{effective:eff,approved_by:by,supersedes:prior.map(p=>p.label),assigned:moved},null);
+    await load27(); renderAdmin27(); toast(v.label+' published'+(moved.length?` — ${moved.join(', ')} moved to it from ${eff}`:' — assign it to employees below')); };
 }
+/* the day after the latest published start date in a family (never before the cutover or today) */
+function nextFreeDate27(fam){ const ds=P27.versions.filter(x=>x.family===fam&&x.status==='published'&&x.effective_date).map(x=>String(x.effective_date).slice(0,10)).sort();
+  let d=[REVISED_CUTOVER,E27.businessToday()].sort().pop(); if(ds.length&&ds[ds.length-1]>=d)d=E27.addDays(ds[ds.length-1],1); return d; }
+/* reps whose current or upcoming assignment is a version of this family */
+function repsOnFamily27(fam){ const t=E27.businessToday(); const out=new Set();
+  P27.assignments.forEach(a=>{ const v=versionById(a.plan_version_id); if(v&&v.family===fam&&(!a.effective_to||a.effective_to>t))out.add(String(a.email).toLowerCase()); }); return [...out]; }
+async function assignVersion27(em,vid,from,label){
+  const open=P27.assignments.filter(a=>String(a.email).toLowerCase()===em&&(!a.effective_to||a.effective_to>from));
+  for(const a of open){ if(a.effective_from>=from){ continue; } const r=await sb.from('rmr_plan_assignments').update({effective_to:from}).eq('id',a.id); if(r.error)return false; }
+  if(open.some(a=>a.effective_from>=from))return false;   // something already starts on/after that date — leave it for a person
+  const row={email:em,plan_version_id:vid,effective_from:from,effective_to:null,approved_by:CURRENT_EMAIL,reason:`Moved to ${label} at publication`};
+  const r=await sb.from('rmr_plan_assignments').insert(row); if(r.error)return false;
+  audit('Plan assignment approved','Admin',em,null,row,row.reason); return true; }
 function historicalRulesHTML(){
   const rows=PLANS.map(p=>{ const c=p.config||{}; const users=Object.entries(USER_PLAN).filter(([e,id])=>String(id)===String(p.id)).map(([e])=>e);
     const pm=m=>m?Object.entries(m).map(([t,v])=>`${t}:${Math.round(v*100000)/1000}%`).join(' '):'—';
@@ -1259,7 +1278,7 @@ function guide27HTML(fam){
   <table class="guide-table"><thead><tr><th>Term</th><th>New sale or expansion</th><th>Manual renewal</th><th>Same as % of TCV</th></tr></thead><tbody>
   ${terms.map(t=>`<tr><td>${t} months</td><td>${xm(nm[t])} MRR</td><td>${xm(c.renewalMult)} retained MRR</td><td>${num(nm[t])==null?U:(+nm[t]/t*100).toFixed(4)+'%'}</td></tr>`).join('')}
   </tbody></table>
-  <p class="gd27-note">Terms over 60 months are capped at ${xm(c.newMultCapAbove60!=null?c.newMultCapAbove60:nm[60])}. Other non-standard terms (for example 30 months) need an approved term mapping — they are never rounded down to the next bracket.</p>
+  <p class="gd27-note">Terms over 60 months pay the 60-month multiple, ${xm(nm[60])}. Other non-standard terms (for example 30 months) need an approved term mapping — they are never rounded down to the next bracket.</p>
   <h3>Margin gate</h3>
   <p>Gross margin is measured on direct cost only, over the committed term. At or above ${pc(floor,0)} the deal qualifies at <b>1.0×</b>; below it pays <b>$0</b>. ${target==null?'':`The target is ${pc(target,0)}.`} If margin is <b>unknown</b> — costs not entered or not verified — the deal can't qualify until they are. It shows <i>Missing cost verification</i>, never a silent $0.</p>
   <h3>Example — a new sale</h3>

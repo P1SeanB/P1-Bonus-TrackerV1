@@ -82,7 +82,7 @@ function termMultiple(cfg,term,kind){   // exact multiples only; nonstandard ter
   if(!table)throw new Blocked('plan_not_configured','Plan not configured — no term multiples.');
   if(!(term>0))throw new Blocked('term_required','A committed term in months is required.','term');
   if(table[term]!=null&&table[term]!=='')return {mult:dec(table[term]),source:`${term}-month multiple`};
-  if(term>60){ const cap=kind==='sla'?table[60]:(cfg.newMultCapAbove60!=null?cfg.newMultCapAbove60:table[60]); return {mult:dec(cap),source:`${term} months — capped at the 60-month multiple`}; }
+  if(term>60){ /* terms over 60 months pay the 60-month multiple — the cap always follows it */ const cap=table[60]; return {mult:dec(cap),source:`${term} months — capped at the 60-month multiple`}; }
   const map=cfg.termMappings&&cfg.termMappings[term];
   if(map&&map.approved_by&&map.mult!=null)return {mult:dec(map.mult),source:`${term} months — approved mapping (${map.approved_by})`};
   throw new Blocked('term_mapping_required',`${term}-month term is nonstandard: an approved term mapping is required. It is not paid the next lower bracket.`,'term');
