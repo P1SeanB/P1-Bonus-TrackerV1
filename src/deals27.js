@@ -391,13 +391,16 @@ function renderCustomers27(){
   let groups=Object.values(by);
   if(q)groups=groups.filter(g=>g.nm.toLowerCase().includes(q)||String(g.no||'').includes(q)||g.items.some(a=>String(a.agreement_number||'').toLowerCase().includes(q)));
   groups.sort((x,y)=>x.nm.localeCompare(y.nm));
-  const totRmr=ags.filter(a=>!isEnded(a)).reduce((s,a)=>s+(+agreementMrr(a)||0),0);
+  const curRate=a=>{ try{ const tl=tlFor(a); if(tl&&tl.live&&tl.currentRate!=null)return +tl.currentRate; }catch(e){} return +agreementMrr(a)||0; };
+  const liveAg=ags.filter(a=>!isEnded(a)); const bookRmr=liveAg.filter(a=>a.category!=='sla').reduce((s,a)=>s+curRate(a),0), slaRmr=liveAg.filter(a=>a.category==='sla').reduce((s,a)=>s+curRate(a),0);
+  const totRmr=bookRmr+slaRmr;
   const shownAgs=groups.reduce((s,g)=>s.concat(g.items),[]); const shownLive=shownAgs.filter(a=>!isEnded(a));
   const shownRmr=shownLive.reduce((s,a)=>s+(+agreementMrr(a)||0),0);
   host.innerHTML=`
    <div class="kpis27">
     <div class="kpi27 hero"><span class="k">Customers</span><span class="v">${groups.length}</span><span class="s">with ${ags.length} agreements</span></div>
-    <div class="kpi27"><span class="k">Monthly RMR</span><span class="v">${money27(totRmr)}</span><span class="s">live agreements</span></div></div>
+    <div class="kpi27"><span class="k">RMR book</span><span class="v">${money27(bookRmr)}</span><span class="s">per month · live RMR agreements, current Vista rates</span></div>
+    <div class="kpi27"><span class="k">SLA book</span><span class="v">${money27(slaRmr)}</span><span class="s">per month equivalent · kept separate</span></div></div>
    <div class="pillrow27"><input id="custQ27" class="cfg-in" placeholder="Search customer, customer # or agreement #" value="${esc(window.CUST_Q27||'')}" style="width:280px;font-size:12px">
     <span style="flex:1"></span><button class="iconbtn" id="custFlat27">All agreements ▸</button></div>
    ${totalsBar27([[String(groups.length),'customers'],[String(shownLive.length),'live agreements'],[String(shownAgs.length-shownLive.length),'ended'],[fmt(shownRmr)+'/mo','monthly RMR']],q?`matching "${esc(window.CUST_Q27)}"`:'All customers')}
