@@ -158,6 +158,11 @@ async function open(browser,email){ const ctx=await browser.newContext({viewport
     return P27.versions.filter(v=>v.family==='Hybrid').map(v=>v.version_no+':'+v.status).join(',')+' | '+document.getElementById('adminWrap').innerText.match(/Editing[^\n]*/)[0]; });
   ok(/^2:published \| Editing Hybrid v2/.test(dd),'Discard draft deletes the draft and the editor shows the live version again: '+dd);
   ok(await p.evaluate(()=>!!document.getElementById('newdraft27')&&!document.getElementById('dd27')),'after discarding, the Edit button is back in its place');
+  // changing the renewal type in the agreement window sets the current term's switch everywhere
+  await p.evaluate(()=>{ closeModal&&closeModal(); openModal('a-305'); }); await p.waitForTimeout(400);
+  await p.evaluate(()=>{ document.getElementById('f_type').value='manual'; }); await p.click('#mSave'); await p.waitForTimeout(1200);
+  const sw=await p.evaluate(()=>{ const a=AGREEMENTS.find(x=>x.id==='a-305'); const tl=tlFor(a); return [a.renewal_type_override,a.renewal_override_term_start,tl&&tl.currentType].join('|'); });
+  ok(sw==='manual|2026-09-01|manual','agreement window renewal type → current-term switch, shown everywhere: '+sw);
   ok(!p.__errors.length,'no page errors'+(p.__errors.length?': '+p.__errors.slice(0,3).join(' | '):''));
   await browser.close();
   results.forEach(r=>console.log(r)); console.log(`\n${results.length-fail} passed, ${fail} failed`); process.exit(fail?1:0);

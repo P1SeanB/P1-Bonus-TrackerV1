@@ -8011,6 +8011,8 @@ function initModal27(){
       document.querySelectorAll('.agpane').forEach(p=>p.style.display=(p.dataset.pane==='files')?'':'none'); };
     tabs.addEventListener('click',e=>{ const x=e.target.closest('button'); if(x&&x!==b)b.classList.remove('active'); });
   }
+  // the agreement type field is the renewal type of the CURRENT term (the same switch as on Renewals)
+  const ft=$('f_type'); if(ft){ const lb=ft.closest('.fld')&&ft.closest('.fld').querySelector('label'); if(lb) lb.innerHTML='Renewal type — current term <span class="hint">12-month terms renew manually by default; switching here changes this term only and is audited</span>'; }
   // hide the fields nobody edits any more (they stay in the DOM)
   const hide=['Revision #','Vista source reference','Quote expiration','Term conversion','Continuity reason'];
   document.querySelectorAll('.agpane[data-pane="deal"] .fld label').forEach(l=>{
@@ -8025,6 +8027,12 @@ function initModal27(){
   if(billPane&&!$('agInv27')){ const d=document.createElement('div'); d.className='fld full'; d.innerHTML='<div id="agInv27"></div>'; billPane.insertBefore(d,billPane.firstChild); }
   const commPane=document.querySelector('.agpane[data-pane="comm"]');
   if(commPane&&!$('agComm27')){ const d=document.createElement('div'); d.className='fld full'; d.innerHTML='<div id="agComm27"></div>'; commPane.insertBefore(d,commPane.firstChild); }
+  // saving the agreement window with a different renewal type sets the current term's switch (same as Renewals)
+  const sv=$('mSave'); if(sv&&sv.onclick&&!sv.dataset.rt27){ sv.dataset.rt27='1'; const orig=sv.onclick;
+    sv.onclick=async function(ev){ const id=editingId; const before=id?(AGREEMENTS.find(x=>x.id===id)||{}).agreement_type:null;
+      const r=await orig.call(this,ev);
+      try{ const a=id&&AGREEMENTS.find(x=>x.id===id); if(a&&a.agreement_type&&a.agreement_type!==before) await syncRenewalSwitch27(a,before); }catch(e){ console.warn('renewal switch',e); }
+      return r; }; }
   const om=window.openModal; window.openModal=function(id,promote){ om.apply(this,arguments); try{ decorateModal27(); }catch(e){ console.warn('modal27',e); } };
 }
 function decorateModal27(){
@@ -8147,6 +8155,18 @@ function renderSalesReports27(){
   const pm=portfolioMetrics;
   portfolioMetrics=function(y,book){ return pm.call(this,y,(book||[]).filter(a=>a.category!=='sla')); };
 })();
+
+/* the agreement window's renewal type = the current term's renewal switch */
+async function syncRenewalSwitch27(a,before){
+  const revs=TERMS_BY_NO[String(a.agreement_number)]; if(!revs||typeof R27==='undefined')return;
+  const tl=R27.timeline(revs,{today:E27.businessToday(),annualised:a.category==='sla',knownRate:+a.monthly_rmr||null}); if(!tl||!tl.ok||!tl.live)return;
+  const v=a.agreement_type, rule=tl.ruleType;
+  const patch={renewal_type_override:v===rule?null:v,renewal_override_term_start:v===rule?null:tl.current.start,updated_at:new Date().toISOString()};
+  const {error}=await sb.from('rmr_agreements').update(patch).eq('id',a.id); if(error){ toast(error.message); return; }
+  Object.assign(a,patch); TL_CACHE=new Map(); PRICE_STAMP++;
+  audit('Renewal type switched','Agreement',a.agreement_number,{agreement_type:before||null},Object.assign({agreement_type:v},patch),`From the agreement window · current term from ${tl.current.start}`);
+  render();
+}
 
 /*/V27-UI*/
 renderLegend();
