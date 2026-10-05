@@ -250,8 +250,8 @@ function renderDeals27(){
       ${team?`<td style="font-size:11.5px;color:var(--muted)">${esc(a.owner_email||'—')}</td>`:''}
       <td class="num mono">${r.rmr!=null?fmt(+r.rmr):'—'}</td>
       <td class="num mono">${r.amount!=null?fmt2(r.amount):'—'}</td>
-      <td class="mono" style="color:var(--muted)">${esc(String(r.date||'—').slice(0,10))}</td>
-      <td style="font-size:11.5px;max-width:320px">${esc(plainText27(r.note||''))}${r.soldBy?`<div class="qctx">marked sold by ${esc(r.soldBy)}${r.soldOn?' on '+esc(r.soldOn):''}</div>`:''}</td>
+      <td class="mono" style="color:var(--muted)">${r.date?esc(fmtD27(r.date)):'—'}</td>
+      <td style="font-size:11.5px;max-width:320px">${esc(plainText27(r.note||''))}${r.soldBy?`<div class="qctx">marked sold by ${esc(r.soldBy)}${r.soldOn?' on '+esc(fmtD27(r.soldOn)):''}</div>`:''}</td>
       <td>${(r.stage==='opportunity'||r.stage==='quoted')&&can('editOpps')?`<button class="iconbtn" data-dedit="${i}">Edit</button>${can('editAgreements')?` <button class="iconbtn" data-dwin="${i}">Win ▸</button>`:''}`:''}</td>
      </tr>`; }).join('')}
    <tr style="font-weight:800;background:#fafbfc"><td>Total · ${list.length}</td><td></td><td></td>${team?'<td></td>':''}<td class="num mono">${fmt(tMrr)}</td><td class="num mono">${fmt2(tCom)}</td><td colspan="3"></td></tr>
@@ -291,8 +291,8 @@ function renderHunt27(list){
       <td style="font-size:11.5px">${esc(r.why)}</td>
       ${team?`<td style="font-size:11.5px;color:var(--muted)">${esc(a.owner_email||'—')}</td>`:''}
       <td class="num mono">${r.rmr!=null?fmt(+r.rmr):'—'}</td>
-      <td class="mono" style="color:var(--muted)">${esc(r.date||'—')}</td><td class="mono">${age!=null?age+'d':'—'}</td>
-      <td class="mono">${r.revisit?esc(String(r.revisit).slice(0,10)):'—'}</td>
+      <td class="mono" style="color:var(--muted)">${r.date?esc(fmtD27(r.date)):'—'}</td><td class="mono">${age!=null?age+'d':'—'}</td>
+      <td class="mono">${r.revisit?esc(fmtD27(r.revisit)):'—'}</td>
       <td>${r.lost&&can('editOpps')?`<button class="iconbtn" data-hreopen="${i}">Reopen</button>`:''}</td></tr>`; }).join('')}
    <tr style="font-weight:800;background:#fafbfc"><td>Total · ${list.length}</td><td></td><td></td>${team?'<td></td>':''}<td class="num mono">${fmt(hM)}</td><td colspan="4"></td></tr>
   </tbody></table></div></div>`;

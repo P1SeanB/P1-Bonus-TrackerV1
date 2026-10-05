@@ -6,7 +6,7 @@
 <title>P1 — Bonus Tracking Tool</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
 <style>
   :root{
     --navy:#1c1c1c; --navy-d:#333333; --orange:#e8620a; --ink:#1c1c1c; --muted:#555555;
@@ -369,6 +369,124 @@ a{color:var(--navy)}
 .file27.ok{border-style:solid;border-color:#cfe7d9;background:#f2faf5}
 
 @media print{#side27,#app > header{display:none!important}#app.show{display:block}}
+
+/* =====================================================================================================
+   Readability pass (P1RMR-63): one sans-serif at a 14px base with even-width numbers, three text shades,
+   real-size controls with one solid primary action, clearer surfaces, and wider popups.
+   Inline font sizes from older screens are lifted to a readable floor.
+   ===================================================================================================== */
+:root{
+  --ink:#1b2333; --ink-2:#3d4759; --muted:#4d5869; --hint:#7a8496;
+  --line:#d6dce6; --line-2:#e6eaf0; --bg:#eceff5; --card:#ffffff;
+  --focus:0 0 0 3px rgba(34,67,138,.22);
+  --shadow:0 1px 2px rgba(16,24,40,.07),0 4px 12px rgba(16,24,40,.06);
+}
+body,button,input,select,textarea{font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif!important}
+body{font-size:14px;line-height:1.5;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+/* numbers: same font, even widths so columns line up — no typewriter font */
+.mono,.num,.stat .val,.kpi27 .v,.tbl27 .num,td.num,th.num,[style*="DM Mono"]{font-family:'Inter',system-ui,sans-serif!important;font-variant-numeric:tabular-nums;letter-spacing:0}
+.stat .val,.kpi27 .v{font-weight:700!important;font-size:26px!important;letter-spacing:-.015em!important}
+.qctx,.file-hint{color:var(--muted)!important;font-size:13px}
+
+/* lift tiny inline sizes to a readable floor */
+[style*="font-size:9px"],[style*="font-size:9.5px"]{font-size:11px!important}
+[style*="font-size:10px"],[style*="font-size:10.5px"]{font-size:12px!important}
+[style*="font-size:11px"],[style*="font-size:11.5px"]{font-size:12.5px!important}
+[style*="font-size:12px"],[style*="font-size:12.5px"]{font-size:13.5px!important}
+[style*="color:var(--none)"]{color:var(--hint)!important}
+
+/* ---- surfaces ---- */
+.panel,.stat,.kpi27,.card27,.cust27{background:var(--card);border:1px solid var(--line)!important;border-radius:12px;box-shadow:var(--shadow)}
+.panel-head{border-bottom:1px solid var(--line-2)}
+.panel-head h2,.card27 .hd h2{font-size:16px;font-weight:700;color:var(--ink)}
+.kpi27 .k,.stat .lbl{font-size:12px!important;font-weight:700!important;letter-spacing:.04em!important;color:var(--muted)!important}
+.kpi27 .s{font-size:13px;color:var(--muted)}
+.kpi27.hero .k,.kpi27.hero .s{color:rgba(255,255,255,.86)!important}
+#pageHead27 h1{font-size:24px;font-weight:700;letter-spacing:-.02em}
+#pageHead27 .sub{font-size:14px;color:var(--muted)}
+
+/* ---- tables ---- */
+table{font-size:14px}
+th,.cfg-table th,.tbl27 th{font-size:12.5px!important;font-weight:600!important;letter-spacing:0!important;text-transform:none!important;color:var(--ink-2)!important;background:#f4f6fa!important;padding:10px 12px!important;border-bottom:1px solid var(--line)!important;white-space:nowrap}
+td,.cfg-table td,.tbl27 td{padding:10px 12px!important;border-bottom:1px solid var(--line-2)!important;color:var(--ink);vertical-align:middle}
+.cfg-table{font-size:13.5px}
+tbody tr:hover{background:#f3f6fc!important}
+td.mono,td.num,td[class*="mono"]{white-space:nowrap}
+th[data-dsort]:hover,th.sortable:hover{color:var(--p1-navy)!important;background:#eaeef6!important}
+
+/* ---- buttons: one solid primary, clear secondary, real hit size ---- */
+.btn-primary{min-height:38px;padding:8px 16px!important;font-size:14px!important;font-weight:600!important;border-radius:8px!important;background:var(--p1-navy)!important;color:#fff!important;border:0!important}
+.btn-primary:hover{background:var(--p1-navy-d)!important}
+.btn-primary:focus-visible,.iconbtn:focus-visible,.btn-ghost:focus-visible,button:focus-visible{outline:none;box-shadow:var(--focus)!important}
+.iconbtn,.btn-ghost,.signout,.hdr-help{min-height:36px;padding:7px 14px!important;font-size:13.5px!important;font-weight:600!important;color:var(--ink)!important;background:#fff!important;border:1px solid #c3cbd8!important;border-radius:8px!important}
+.iconbtn:hover,.btn-ghost:hover,.signout:hover,.hdr-help:hover{background:#f3f6fb!important;border-color:#9fabbf!important}
+.iconbtn:disabled,.btn-ghost:disabled{opacity:.55;cursor:not-allowed}
+td .iconbtn{min-height:30px;padding:4px 10px!important;font-size:13px!important}
+
+/* ---- filters: segmented, obvious selected state ---- */
+.pillrow27{gap:8px!important;margin-bottom:14px!important}
+.pillrow27 button[data-pill],.pillrow27 button[data-pf]{min-height:36px;padding:7px 14px!important;font-size:13.5px!important;font-weight:600!important;color:var(--ink-2)!important;background:#fff!important;border:1px solid #c3cbd8!important;border-radius:8px!important}
+.pillrow27 button[data-pill]:hover,.pillrow27 button[data-pf]:hover{border-color:#9fabbf!important;background:#f3f6fb!important}
+.pillrow27 button.on{background:var(--p1-navy)!important;border-color:var(--p1-navy)!important;color:#fff!important}
+.pillrow27 .cnt{display:inline-block;min-width:20px;margin-left:6px;padding:1px 6px;border-radius:999px;background:#e9edf4;color:var(--ink-2);font-size:12px;font-weight:700;text-align:center}
+.pillrow27 button.on .cnt{background:rgba(255,255,255,.22);color:#fff}
+.tot27{background:#fff!important;border-color:var(--line)!important;font-size:13.5px!important;padding:10px 16px!important}
+.tot27 .it b{font-size:15px!important}
+
+/* ---- form fields ---- */
+input:not([type=checkbox]):not([type=radio]):not([type=file]),select,textarea,.cfg-in{min-height:36px;font-size:14px!important;color:var(--ink)!important;border:1px solid #c3cbd8!important;border-radius:8px!important;padding:7px 10px!important;background:#fff;box-sizing:border-box}
+input:focus,select:focus,textarea:focus,.cfg-in:focus{outline:none;border-color:var(--p1-navy)!important;box-shadow:var(--focus)}
+.fld label,.cfg-lbl{font-size:13px!important;font-weight:600!important;color:var(--ink-2)!important}
+.fld label .hint{font-weight:400;color:var(--muted)}
+.fieldset-h{font-size:13px!important;letter-spacing:.03em!important;color:var(--p1-navy)!important;border-top-color:var(--line)!important}
+.chip{font-size:12.5px!important;font-weight:600!important;padding:4px 10px!important}
+
+/* ---- popups and side panels ---- */
+.scrim.show{background:rgba(15,23,42,.48)}
+.modal{max-width:960px!important;border-radius:14px!important}
+.modal-head{padding:18px 26px!important;border-bottom:1px solid var(--line)!important}
+.modal-head h3{font-size:19px!important;font-weight:700!important;color:var(--ink)}
+.modal-body{padding:22px 26px!important;font-size:14px}
+.modal-foot{padding:16px 26px!important;background:#f7f9fc;border-radius:0 0 14px 14px}
+.modal-tabs{gap:4px!important;flex-wrap:nowrap!important;overflow-x:auto;border-bottom:1px solid var(--line)!important}
+.modal-tabs button{padding:11px 14px!important;font-size:14px!important;font-weight:600!important;color:var(--muted)!important;border-bottom:3px solid transparent!important;white-space:nowrap}
+.modal-tabs button:hover{color:var(--ink)!important}
+.modal-tabs button.active{color:var(--p1-navy)!important;border-bottom-color:var(--p1-orange)!important}
+.drawer27{font-size:14px}
+.drawer27 h2,.drawer27 h3{color:var(--ink)}
+
+/* ---- side menu: a touch larger ---- */
+#side27 nav.tabs button{font-size:14.5px!important;padding:10px 12px!important}
+#side27 .sec27{font-size:11.5px!important;color:rgba(255,255,255,.6)!important}
+
+/* ---- depth & roundness (P1RMR-63) ---- */
+:root{
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 4px 8px rgba(16,24,40,.05),0 12px 28px rgba(16,24,40,.07);
+  --shadow-hover:0 2px 4px rgba(16,24,40,.07),0 10px 20px rgba(16,24,40,.08),0 22px 44px rgba(16,24,40,.10);
+  --btn-shadow:0 1px 1px rgba(16,24,40,.06),0 2px 5px rgba(16,24,40,.08);
+}
+.panel,.stat,.kpi27,.card27,.cust27,.tot27{border-radius:16px!important;box-shadow:var(--shadow)!important;border-color:#dde3ec!important}
+.kpi27,.stat,.cust27{transition:box-shadow .18s ease,transform .18s ease}
+.kpi27:hover,.stat:hover,.cust27:hover{box-shadow:var(--shadow-hover)!important;transform:translateY(-1px)}
+.kpi27.hero{background:linear-gradient(160deg,#2b56ad 0%,#22438A 55%,#1a3470 100%)!important;border-color:transparent!important;box-shadow:0 6px 16px rgba(34,67,138,.28),0 18px 40px rgba(34,67,138,.18)!important}
+.panel-head{border-radius:16px 16px 0 0}
+.panel > .admin-body:last-child,.panel table{border-radius:0 0 16px 16px}
+.panel table{overflow:hidden}
+.btn-primary{border-radius:999px!important;padding:9px 20px!important;background:linear-gradient(180deg,#2c55a8 0%,#22438A 100%)!important;box-shadow:0 1px 0 rgba(255,255,255,.18) inset,0 2px 4px rgba(16,24,40,.12),0 6px 14px rgba(34,67,138,.26)!important;transition:transform .12s ease,box-shadow .12s ease}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 1px 0 rgba(255,255,255,.18) inset,0 4px 8px rgba(16,24,40,.14),0 10px 22px rgba(34,67,138,.32)!important}
+.btn-primary:active{transform:translateY(0)}
+.iconbtn,.btn-ghost,.signout,.hdr-help{border-radius:999px!important;box-shadow:var(--btn-shadow);transition:transform .12s ease,box-shadow .12s ease}
+.iconbtn:hover,.btn-ghost:hover,.signout:hover,.hdr-help:hover{transform:translateY(-1px);box-shadow:0 2px 4px rgba(16,24,40,.08),0 6px 14px rgba(16,24,40,.10)}
+.pillrow27 button[data-pill],.pillrow27 button[data-pf]{border-radius:999px!important;box-shadow:var(--btn-shadow);transition:transform .12s ease,box-shadow .12s ease}
+.pillrow27 button[data-pill]:hover,.pillrow27 button[data-pf]:hover{transform:translateY(-1px)}
+.pillrow27 button.on{box-shadow:0 2px 4px rgba(16,24,40,.12),0 6px 14px rgba(34,67,138,.28)!important}
+input:not([type=checkbox]):not([type=radio]):not([type=file]),select,textarea,.cfg-in{border-radius:10px!important;box-shadow:inset 0 1px 2px rgba(16,24,40,.05)}
+.chip{border-radius:999px!important;box-shadow:0 1px 1px rgba(16,24,40,.05)}
+.modal{border-radius:20px!important;box-shadow:0 10px 24px rgba(15,23,42,.18),0 30px 70px rgba(15,23,42,.28)!important;overflow:hidden}
+.modal-foot{border-radius:0 0 20px 20px!important}
+.drawer27{box-shadow:-12px 0 40px rgba(15,23,42,.22)!important}
+#side27 nav.tabs button{border-radius:10px!important}
+#side27 nav.tabs button.active{box-shadow:inset 3px 0 0 var(--p1-orange),0 4px 12px rgba(0,0,0,.25)!important}
 
 </style>
 </head>
@@ -2481,7 +2599,7 @@ function showLogin(needConn){
   setTimeout(()=>{(needConn?$('sbUrl'):$('loginEmail')).focus();},50);
 }
 /* ===== Security & governance (PRD Ch.10) ===== */
-const APP_VERSION='P1RMR-62 · spec 2.7';
+const APP_VERSION='P1RMR-63 · spec 2.7';
 const ADMIN_EMAILS=['sean.bithell@point1.com'];   // break-glass owner: Administrator only when no other Administrator exists or rmr_users is unreadable
 let CURRENT_EMAIL='', CURRENT_ROLE='Administrator';
 async function resolveRole(email){
@@ -7545,8 +7663,8 @@ function renderDeals27(){
       ${team?`<td style="font-size:11.5px;color:var(--muted)">${esc(a.owner_email||'—')}</td>`:''}
       <td class="num mono">${r.rmr!=null?fmt(+r.rmr):'—'}</td>
       <td class="num mono">${r.amount!=null?fmt2(r.amount):'—'}</td>
-      <td class="mono" style="color:var(--muted)">${esc(String(r.date||'—').slice(0,10))}</td>
-      <td style="font-size:11.5px;max-width:320px">${esc(plainText27(r.note||''))}${r.soldBy?`<div class="qctx">marked sold by ${esc(r.soldBy)}${r.soldOn?' on '+esc(r.soldOn):''}</div>`:''}</td>
+      <td class="mono" style="color:var(--muted)">${r.date?esc(fmtD27(r.date)):'—'}</td>
+      <td style="font-size:11.5px;max-width:320px">${esc(plainText27(r.note||''))}${r.soldBy?`<div class="qctx">marked sold by ${esc(r.soldBy)}${r.soldOn?' on '+esc(fmtD27(r.soldOn)):''}</div>`:''}</td>
       <td>${(r.stage==='opportunity'||r.stage==='quoted')&&can('editOpps')?`<button class="iconbtn" data-dedit="${i}">Edit</button>${can('editAgreements')?` <button class="iconbtn" data-dwin="${i}">Win ▸</button>`:''}`:''}</td>
      </tr>`; }).join('')}
    <tr style="font-weight:800;background:#fafbfc"><td>Total · ${list.length}</td><td></td><td></td>${team?'<td></td>':''}<td class="num mono">${fmt(tMrr)}</td><td class="num mono">${fmt2(tCom)}</td><td colspan="3"></td></tr>
@@ -7586,8 +7704,8 @@ function renderHunt27(list){
       <td style="font-size:11.5px">${esc(r.why)}</td>
       ${team?`<td style="font-size:11.5px;color:var(--muted)">${esc(a.owner_email||'—')}</td>`:''}
       <td class="num mono">${r.rmr!=null?fmt(+r.rmr):'—'}</td>
-      <td class="mono" style="color:var(--muted)">${esc(r.date||'—')}</td><td class="mono">${age!=null?age+'d':'—'}</td>
-      <td class="mono">${r.revisit?esc(String(r.revisit).slice(0,10)):'—'}</td>
+      <td class="mono" style="color:var(--muted)">${r.date?esc(fmtD27(r.date)):'—'}</td><td class="mono">${age!=null?age+'d':'—'}</td>
+      <td class="mono">${r.revisit?esc(fmtD27(r.revisit)):'—'}</td>
       <td>${r.lost&&can('editOpps')?`<button class="iconbtn" data-hreopen="${i}">Reopen</button>`:''}</td></tr>`; }).join('')}
    <tr style="font-weight:800;background:#fafbfc"><td>Total · ${list.length}</td><td></td><td></td>${team?'<td></td>':''}<td class="num mono">${fmt(hM)}</td><td colspan="4"></td></tr>
   </tbody></table></div></div>`;

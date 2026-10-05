@@ -15,7 +15,10 @@ tail_block='</script>\n<script>\n/*V27-UI*/\n'+src('ui27.js')+'\n'+shell+'\n'+sr
 if '/*V27-UI*/' in s: s=re.sub(r'</script>\n<script>\n/\*V27-UI\*/.*?</body>',lambda m:tail_block,s,flags=re.S)
 else:
     old='renderLegend();\nboot();\n</script>\n</body>'; assert s.count(old)==1; s=s.replace(old,tail_block)
-s=s.replace("const APP_VERSION='P1RMR-55';","const APP_VERSION='P1RMR-62 · spec 2.7';")
+s=s.replace("const APP_VERSION='P1RMR-55';","const APP_VERSION='P1RMR-63 · spec 2.7';")
+_fl='family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap'
+assert _fl in s
+s=s.replace(_fl,'family=Inter:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap')
 # The owner's address is a break-glass Administrator only: it follows its Employees role like anyone else,
 # and is forced to Administrator only when the users table can't be read or no other Administrator exists.
 _old_guard="  if(ADMIN_EMAILS.includes(lc)){ CURRENT_ROLE='Administrator'; return; }   // guaranteed admin\n"
