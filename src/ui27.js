@@ -667,7 +667,37 @@ async function commitStaged(){
     await sb.from('rmr_worklist').update({status:'closed',closed_by:CURRENT_EMAIL,closed_at:new Date().toISOString(),close_basis:`Invoices now on the billing rows (batch #${batch})`}).eq('id',w.id); }
   audit('Vista import committed','Import',String(batch),null,{feed:s.feed,file:s.file,rows:p.rows.length,matched:s.matched,unmatched:s.unmatched,dataThrough:p.dataThrough,flags:p.flags},null);
   toast(s.needsV27?`Imported ${p.rows.length} rows — run migration_v27_terms_renewals.sql, then import this file again so renewals can be read`:`Imported ${p.rows.length} ${V27.FEEDS[s.feed].label.toLowerCase()} rows · batch #${batch}`);
-  STAGED27=null; await load27(); render();
+  STAGED27=null; await load27();
+  if(s.feed==='invoices'||s.feed==='agreement_terms'){ try{ const r=await autoMatchInvoices27(true); if(r.linked)toast(`Linked ${r.linked} more invoice${r.linked===1?'':'s'} to agreements by customer, date and amount`); }catch(e){ console.warn('automatch',e); } }
+  render();
+}
+/* Invoices with no agreement: link one when exactly ONE of the customer's agreements has a Vista term
+   covering the invoice date at a rate that explains the amount (1, 3, 6 or 12 months, or the whole term). */
+function invoiceMatchCandidates27(inv){
+  const cno=(String(inv.customer||'').match(/^\s*(\d+)/)||[])[1]; if(!cno||!inv.invoice_date)return [];
+  const d=String(inv.invoice_date).slice(0,10), amt=+(inv.amount!=null?inv.amount:inv.total)||0; if(!(amt>0))return [];
+  const out=[];
+  AGREEMENTS.forEach(a=>{ if(isPipeline(a)||!a.agreement_number)return;
+    const terms=(TERMS_BY_NO[String(a.agreement_number)]||[]); if(!terms.length)return;
+    const tcust=(String(terms[0].customer||'').match(/^\s*(\d+)/)||[])[1]||String(a.customer_number||'');
+    if(tcust!==cno)return;
+    let tl=null; try{ tl=tlFor(a); }catch(e){} if(!tl||!tl.ok)return;
+    const t=tl.terms.find(t=>t.start<=d&&(!t.end||d<=t.end)); if(!t)return;
+    const revs=t.revisions.filter(r=>r.rate!=null).map(r=>({from:String(r.rateDate||r.effective_date).slice(0,10),rate:+r.rate}));
+    let rate=null; revs.forEach(r=>{ if(r.from<=d)rate=r.rate; }); if(rate==null&&revs.length)rate=revs[0].rate;
+    const fits=(rate>0&&[1,3,6,12].some(k=>Math.abs(rate*k-amt)<0.05))||(t.revisions.some(r=>Math.abs((+r.term_price||0)-amt)<0.05));
+    if(fits)out.push(a); });
+  return out;
+}
+async function autoMatchInvoices27(apply){
+  const todo=Object.values(INV_BY_NO).filter(v=>!v.agreement_number);
+  const plan=[]; todo.forEach(v=>{ const c=invoiceMatchCandidates27(v); if(c.length===1)plan.push({inv:v.invoice_number,ag:String(c[0].agreement_number)}); });
+  if(!apply)return {linked:0,plan};
+  const byAg={}; plan.forEach(x=>(byAg[x.ag]=byAg[x.ag]||[]).push(x.inv));
+  let n=0; for(const ag of Object.keys(byAg)){ const {error}=await sb.from('rmr_vista_invoices').update({agreement_number:ag,map_method:'matched by customer #, date and amount (Vista agreement terms)'}).in('invoice_number',byAg[ag]); if(!error)n+=byAg[ag].length; }
+  if(n){ audit('Vista invoices matched to agreements','Import',null,null,{linked:n,byAgreement:byAg},'Unique match on customer #, invoice date within the Vista term, amount = rate × 1/3/6/12 months or the term price');
+    try{ P27.invoices=await fetchAll('rmr_vista_invoices'); indexEvidence(); PRICE_STAMP++; }catch(_){} }
+  return {linked:n,plan};
 }
 window.P1Import={ scheduled:(feed,file)=>stageFile(feed,file,'scheduled'), manual:(feed,file)=>stageFile(feed,file,'manual') };
 

@@ -25,6 +25,7 @@ function termMonths(start,end){
   return {months:std||r,standard:std||null,raw:Math.round(m*100)/100};
 }
 const cents=x=>Math.round((+x||0)*100)/100;
+function addMonthsIso(d,n){ const [y,m]=String(d).slice(0,10).split('-').map(Number); const t=new Date(Date.UTC(y,m-1+n,1)); return t.toISOString().slice(0,10); }
 /* Renewal type follows the current term: a 12-month term renews manually, anything longer auto-renews.
    An Administrator can switch it for the current term; the switch lapses when the next term starts. */
 function ruleType(months){ return months!=null&&months<=12?'manual':'auto'; }
@@ -40,12 +41,15 @@ function timeline(revisions,opts){
   const terms=[...byTerm.values()].sort((a,b)=>String(a.start).localeCompare(String(b.start)));
   terms.forEach(t=>{ let billed=0, monthsBilled=0; t.revisions.sort((a,b)=>a.revNo-b.revNo); const first=t.revisions[0];
     t.revisions.forEach((r,i)=>{ const end=r.expiration_date||t.end;
-      if(opts.annualised){ // SLA: the price is the annual value — monthly equivalent = price ÷ 12 (÷ the term in months when longer than a year)
+      if(opts.annualised&&i===0){ // SLA: the price is the annual value — monthly equivalent = price ÷ 12 (÷ the term in months when longer than a year)
         const mo=monthsBetween(t.start,end); r.rate=(r.term_price!=null&&mo)?cents(r.term_price/Math.max(12,Math.round(mo))):null; }
       else if(i===0){ const mo=monthsBetween(r.effective_date,end); r.rate=(mo&&mo>0&&r.term_price!=null)?cents(r.term_price/mo):null; }
       else { // a later revision's price includes what was already billed in the term: spread the rest over the months not yet billed
         const span=Math.round(monthsBetween(first.effective_date,end)||0), own=Math.round(monthsBetween(r.effective_date,end)||0), left=Math.min(span-monthsBilled,own);
-        r.rate=(left>0&&r.term_price!=null)?cents((r.term_price-billed)/left):null; }
+        r.rate=(left>0&&r.term_price!=null)?cents((r.term_price-billed)/left):null;
+        // SLA re-papered mid-term: Vista dates the new revision at the term start (#149: rev 2 'effective' 1/2/26)
+        // although the old rate kept billing — the new rate starts the month after the months already billed (8/1/26)
+        if(opts.annualised&&monthsBilled>0){ const sd=addMonthsIso(first.effective_date,monthsBilled); if(sd>String(r.effective_date).slice(0,10))r.rateDate=sd; } }
       // agreements older than Vista only carry the months billed since they entered Vista (#14: $1,260 = 28 × $45): when the
       // agreement's own monthly rate divides the price into a whole number of months that fits, that rate is the rate
       if(i===0&&opts.knownRate>0&&r.term_price>0&&r===revs[revs.length-1]){ const k=r.term_price/opts.knownRate, span=monthsBetween(r.effective_date,end)||0;
@@ -75,7 +79,7 @@ function timeline(revisions,opts){
       if(next!=null&&(hw==null||next>hw))hw=next; }
     t.revisions.slice(1).forEach((r,j)=>{ const prev=t.revisions[j]; if(r.rate==null||prev.rate==null||Math.abs(r.rate-prev.rate)<0.05)return;
       const inc=(hw!=null&&r.rate-hw>0.04)?cents(r.rate-hw):0;
-      events.push({kind:'rate_change',date:iso(r.effective_date),term:t.months,standardTerm:t.standardTerm,rawMonths:t.rawMonths,prior:prev.rate,next:r.rate,increase:inc,highWater:hw,revision:r.revNo,termStart:t.start,termEnd:t.end});
+      events.push({kind:'rate_change',date:r.rateDate||iso(r.effective_date),term:t.months,standardTerm:t.standardTerm,rawMonths:t.rawMonths,prior:prev.rate,next:r.rate,increase:inc,highWater:hw,revision:r.revNo,termStart:t.start,termEnd:t.end});
       if(hw==null||r.rate>hw)hw=r.rate; });
   });
   events.sort((a,b)=>String(a.date).localeCompare(String(b.date)));

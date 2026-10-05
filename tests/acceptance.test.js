@@ -134,9 +134,10 @@ t('Agreement 41: a revision after one billed month spreads the rest over 11 mont
 t('Agreement 67: Alarm.com additions take $36 to $115 (the September invoice)',()=>{
   const tl=RT.timeline([rv(2,'Terminated','2026-06-01','2027-12-31',684,108,'2026-06-01','2027-12-31'),rv(3,'Active','2026-06-02','2027-12-31',1948,345,'2026-06-01','2027-12-31')],{today:'2026-10-03'});
   eq(tl.currentRate,115); });
-t('SLA (agreement 149): the price is the annual value — $592,664.61 ÷ 12',()=>{
+t('SLA (agreement 149): $61,416.08/mo Jan–Jul, re-papered to $32,550.41/mo from 8/1 (Vista dates rev 2 at 1/2)',()=>{
   const tl=RT.timeline([rv(1,'Terminated','2026-01-01','2026-12-31',736993,429912.56,'2026-01-01','2026-12-31'),rv(2,'Active','2026-01-02','2026-12-31',592664.61,130201.64,'2026-01-01','2026-12-31')],{today:'2026-10-03',annualised:true});
-  eq(tl.currentRate,49388.72); });
+  eq(tl.events[0].next,61416.08); eq(tl.currentRate,32550.41);
+  const rc=tl.events.find(e=>e.kind==='rate_change'); eq(rc.date,'2026-08-01'); eq(rc.prior,61416.08); eq(rc.next,32550.41); });
 t('Agreement 14: Vista only holds the months billed since it entered Vista — $1,260 = 28 × $45, so the rate is $45',()=>{
   const r=[rv(1,'Active','2022-02-01','2027-01-31',1260,1170,'2022-02-01','2027-01-31')];
   eq(RT.timeline(r,{today:'2026-10-03'}).currentRate,21); eq(RT.timeline(r,{today:'2026-10-03',knownRate:45}).currentRate,45);

@@ -33,7 +33,7 @@ let DB={
     rv('306',1,'Active','2026-09-01','2029-08-31',3240,90,'2026-09-01','2029-08-31','Active'),
     rv('307',1,'Active','2023-01-01','2027-12-31',7200,5400,'2023-01-01','2027-12-31','Active'),
     rv('308',1,'Terminated','2024-01-01','2026-12-31',2160,1860,'2024-01-01','2026-12-31','Terminated',{terminated_date:'2026-08-15'})],
-  rmr_vista_invoices:[inv('60001','304','2026-09-01',200)],
+  rmr_vista_invoices:[inv('60001','304','2026-09-01',200),{invoice_number:'61001',status:'Invoiced',customer:'9305 Cust 305',invoice_date:'2026-09-01',amount:150,total:150,balance:0,agreement_number:null},{invoice_number:'61002',status:'Invoiced',customer:'9305 Cust 305',invoice_date:'2026-09-15',amount:99,total:99,balance:99,agreement_number:null},{invoice_number:'61003',status:'Invoiced',customer:'9307 Cust 307',invoice_date:'2025-01-01',amount:360,total:360,balance:0,agreement_number:null}],
   rmr_receipt_verifications:[ver('60001',200,'2026-09-10')],
   rmr_plan_versions:[{id:'v-hyb2',family:'Hybrid',version_no:2,label:'Hybrid v2',status:'published',effective_date:'2026-10-04',approved_by:'Sean Bithell',rate_basis:'mrr_multiple',config:V2}],
   rmr_plan_assignments:[{id:1,email:SEAN,plan_version_id:'v-hyb2',effective_from:'2026-10-04',approved_by:SEAN}],
@@ -53,6 +53,11 @@ async function open(browser,email){ const ctx=await browser.newContext({viewport
   const browser=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
   const p=await open(browser,SEAN);
 
+  // invoices with no agreement are matched by customer #, date within the term and amount = rate × months
+  const am=await p.evaluate(async()=>{ const r=await autoMatchInvoices27(true); return {n:r.linked,m:Object.fromEntries(Object.values(INV_BY_NO).map(v=>[v.invoice_number,v.agreement_number||null]))}; });
+  ok(am.m['61001']==='305','a $150 invoice inside #305\'s term at its $150 rate is linked to #305');
+  ok(am.m['61002']===null,'an amount no agreement explains stays unlinked');
+  ok(am.m['61003']==='307','a quarterly bill (3 × $120) is linked');
   // nav
   ok(await p.evaluate(()=>{ const t=[...document.querySelectorAll('#side27 nav.tabs button')].filter(b=>b.style.display!=='none').map(b=>b.textContent.trim()); return t.includes('Deals')&&t.includes('Customers')&&!t.includes('Pipeline'); }),'side menu shows Deals and Customers, Pipeline is folded in');
 
