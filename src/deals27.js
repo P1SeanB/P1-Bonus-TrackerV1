@@ -610,3 +610,22 @@ async function syncRenewalSwitch27(a,before){
   audit('Renewal type switched','Agreement',a.agreement_number,{agreement_type:before||null},Object.assign({agreement_type:v},patch),`From the agreement window · current term from ${tl.current.start}`);
   render();
 }
+
+/* ---------------- new-version notice ---------------- */
+// A tab left open keeps running the code it loaded. Every 10 minutes (and when the tab comes back into view)
+// check the live page; if a newer build is published, offer a one-click refresh.
+(function versionWatch27(){
+  if(typeof APP_VERSION==='undefined'||!/^https?:/.test(location.protocol))return;
+  let shown=false, last=0;
+  const check=async()=>{ if(shown||Date.now()-last<60000)return; last=Date.now();
+    try{ const t=await fetch(location.pathname+'?vcheck='+Date.now(),{cache:'no-store'}).then(r=>r.text());
+      const m=t.match(/const APP_VERSION='([^']+)'/); const sig=t.length;
+      if(!window.__BUILD_SIG27)window.__BUILD_SIG27=sig;
+      if((m&&m[1]!==APP_VERSION)||sig!==window.__BUILD_SIG27){ shown=true;
+        const b=document.createElement('div'); b.id='newver27';
+        b.style.cssText='position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:300;background:#1b2333;color:#fff;padding:12px 16px;border-radius:999px;box-shadow:0 10px 30px rgba(0,0,0,.3);display:flex;gap:12px;align-items:center;font-size:14px';
+        b.innerHTML='A newer version of the tracker is available. <button class="btn-primary" style="min-height:32px;padding:6px 16px!important">Refresh</button>';
+        b.querySelector('button').onclick=()=>location.reload(); document.body.appendChild(b); } }catch(_){} };
+  setTimeout(check,15000); setInterval(check,600000);
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible')check(); });
+})();
