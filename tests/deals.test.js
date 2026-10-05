@@ -148,6 +148,16 @@ async function open(browser,email){ const ctx=await browser.newContext({viewport
     __DB.rmr_users.length=0; keep.forEach(u=>__DB.rmr_users.push(u)); await resolveRole(__EMAIL); return [a,b,CURRENT_ROLE]; });
   ok(roles[0]==='Representative','the owner set to Representative is a Representative while another Administrator exists');
   ok(roles[1]==='Administrator','…and falls back to Administrator if no other Administrator exists (no lock-out)');
+  // plan editor: Displayed TCV % follows the multiple as it is typed
+  await p.evaluate(()=>switchView('admin')); await p.waitForTimeout(500);
+  if(await p.evaluate(()=>!!document.getElementById('newdraft27'))){ await p.click('#newdraft27'); await p.waitForTimeout(800); }
+  const tcv=await p.evaluate(()=>{ const i=document.getElementById('m_new_12'); if(!i||i.disabled)return 'no editable draft'; i.value='0.75'; i.dispatchEvent(new Event('input',{bubbles:true})); return document.getElementById('m_tcv_12').textContent.trim(); });
+  ok(/^6\.25/.test(tcv),'typing 0.75× for 12 months shows 6.25% TCV right away: '+tcv);
+  // a draft can be discarded (two clicks); the live version stays
+  const dd=await p.evaluate(async()=>{ const b=document.getElementById('dd27'); if(!b)return 'no button'; b.click(); b.click(); await new Promise(r=>setTimeout(r,700));
+    return P27.versions.filter(v=>v.family==='Hybrid').map(v=>v.version_no+':'+v.status).join(',')+' | '+document.getElementById('adminWrap').innerText.match(/Editing[^\n]*/)[0]; });
+  ok(/^2:published \| Editing Hybrid v2/.test(dd),'Discard draft deletes the draft and the editor shows the live version again: '+dd);
+  ok(await p.evaluate(()=>!!document.getElementById('newdraft27')&&!document.getElementById('dd27')),'after discarding, the Edit button is back in its place');
   ok(!p.__errors.length,'no page errors'+(p.__errors.length?': '+p.__errors.slice(0,3).join(' | '):''));
   await browser.close();
   results.forEach(r=>console.log(r)); console.log(`\n${results.length-fail} passed, ${fail} failed`); process.exit(fail?1:0);

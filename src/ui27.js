@@ -896,7 +896,7 @@ function renderAdmin27(){
     <div style="display:flex;gap:8px;flex-wrap:wrap">${PLAN_FAMILIES.map(f=>{ const s=famStatus(f); return `<button class="${f===ADM_FAMILY?'btn-primary':'iconbtn'}" data-fam27="${f}" style="padding:8px 14px">${f} <span style="font-weight:500;font-size:11px;opacity:.85">· ${esc(s.txt)}</span></button>`; }).join('')}
      <button class="iconbtn" id="hist27" style="margin-left:auto" title="Read-only. Historical versions are evidence, not offered plans (CAT-02).">Historical rules ▸</button></div>
     <div style="margin-top:10px;font-size:12.5px">Editing <b>${esc(v?v.label:'—')}</b> · version ${v?v.version_no:'—'} · status <b>${esc(v?v.status:'—')}</b>${v&&v.effective_date?' · effective '+esc(v.effective_date):''}${v&&v.approved_by?' · approved by '+esc(v.approved_by):''} · rate basis <b>${esc(v&&v.rate_basis||'—')}</b>
-     ${v&&v.status==='published'&&can('editConfig')?' <button class="iconbtn" id="newdraft27">Edit → opens a new draft version</button>':''}</div>
+     ${v&&v.status==='published'&&can('editConfig')?' <button class="iconbtn" id="newdraft27">Edit → opens a new draft version</button>':''}${v&&v.status==='draft'&&can('editConfig')&&P27.versions.some(x=>x.family===v.family&&x.status==='published')?' <button class="iconbtn" id="dd27" title="Delete this unpublished draft. The live version is untouched.">Discard draft</button>':''}</div>
     ${ph?`<div style="margin-top:10px;background:#fbeaea;border:2px solid #e6a6a6;border-radius:8px;padding:10px 12px;font-size:13px;color:#9a2a2a"><b>NOT CONFIGURED — placeholder.</b> Compensation, allocations, rates, thresholds and earning terms are blank. Authorised editors may save future draft inputs; calculation, employee assignment and activation stay disabled until a complete plan is supplied, validated and approved (ADM-05).</div>`:''}
    </div></div>
    ${ADM_SHOW_HIST?historicalRulesHTML():''}
@@ -912,7 +912,7 @@ function renderAdmin27(){
       <label class="cfg-lbl">Monthly new-MRR quota</label>${inp('a_quota',c.quotaMonthlyMrr,'type="number" step="50"')} $/mo <span class="qctx">${c.quotaMonthlyMrr?'annual '+fmt(c.quotaMonthlyMrr*12):''}</span>
       <label class="cfg-lbl">Above-quota accelerator</label>${inp('a_accel',c.accelMultiplier,'type="number" step="0.05"')} × <span class="qctx">1.0 = dormant · no annual cap</span></div></div>
     <div class="panel"><div class="panel-head"><h2>Commission rates</h2><span class="qctx">exact multiples of eligible MRR · % shown is derived</span></div><div class="admin-body">
-      <table class="cfg-table"><thead><tr><th>Term</th><th>New sale / expansion</th><th>Displayed TCV %</th><th>New SLA (× MRR equiv.)</th></tr></thead><tbody>${terms.map(t=>`<tr><td>${t} months</td><td>${inp('m_new_'+t,c.newMult&&c.newMult[t],'style="width:80px"')} ×</td><td class="mono">${derived(t)}</td><td>${inp('m_sla_'+t,c.slaNewMult&&c.slaNewMult[t],'style="width:80px"')} ×</td></tr>`).join('')}</tbody></table>
+      <table class="cfg-table"><thead><tr><th>Term</th><th>New sale / expansion</th><th>Displayed TCV %</th><th>New SLA (× MRR equiv.)</th></tr></thead><tbody>${terms.map(t=>`<tr><td>${t} months</td><td>${inp('m_new_'+t,c.newMult&&c.newMult[t],'style="width:80px"')} ×</td><td class="mono" id="m_tcv_${t}">${derived(t)}</td><td>${inp('m_sla_'+t,c.slaNewMult&&c.slaNewMult[t],'style="width:80px"')} ×</td></tr>`).join('')}</tbody></table>
       <div class="cfg-two" style="margin-top:8px"><div><label class="cfg-lbl">Manual renewal (× retained MRR, all terms)</label>${inp('m_ren',c.renewalMult,'style="width:80px"')} ×</div><div><label class="cfg-lbl">SLA renewal (× retained MRR equiv.)</label>${inp('m_slaren',c.slaRenewalMult,'style="width:80px"')} ×</div></div>
       <div class="qctx" style="margin-top:6px">Above 60 months: capped at ${val(c.newMultCapAbove60||'—')}×. Auto-renewal ${val(c.autoRenewalMult||'—')}×, escalation ${val(c.escalatorMult||'—')}×, term conversion ${val(c.termConversionMult||'—')}× (fixed at 0, COM-04). Nonstandard terms below 60 months need an approved mapping. ${c.approvedTermNote48?esc(c.approvedTermNote48):''}</div></div></div>
     <div class="panel"><div class="panel-head"><h2>Margin</h2></div><div class="admin-body">
@@ -939,6 +939,7 @@ function renderAdmin27(){
    </div>
    <div class="admin-actions">
      <button class="btn-primary" id="sv27" ${ed?'':'disabled'}>Save draft</button>
+
      <button class="iconbtn" id="pv27" ${(v&&!ph)?'':'disabled title="Not configured"'}>Preview calculation</button>
      <button class="iconbtn" id="pb27" ${(can('editConfig')&&v&&v.status==='draft'&&!ph)?'':'disabled'}>Publish version…</button>
      <span id="msg27" style="font-size:12px;color:var(--muted)">Save draft never changes live calculations.</span></div>
@@ -952,6 +953,14 @@ function renderAdmin27(){
   if($('newdraft27')) $('newdraft27').onclick=async()=>{ const nv={family:v.family,version_no:Math.max(...P27.versions.filter(x=>x.family===v.family).map(x=>x.version_no))+1,label:`${v.family} v${Math.max(...P27.versions.filter(x=>x.family===v.family).map(x=>x.version_no))+1}`,status:'draft',rate_basis:v.rate_basis,config:v.config,supersedes:v.id,created_by:CURRENT_EMAIL};
     const {error}=await sb.from('rmr_plan_versions').insert(nv); if(error){toast(error.message);return;} audit('Plan draft version opened','Admin',nv.label,null,nv,null); await load27(); renderAdmin27(); };
   $('sv27').onclick=()=>saveDraft27(v);
+  if($('dd27')) $('dd27').onclick=async()=>{ const b=$('dd27');
+    if(b.dataset.armed!=='1'){ b.dataset.armed='1'; b.textContent='Click again to discard '+v.label; b.style.borderColor='var(--held)'; b.style.color='var(--held)'; setTimeout(()=>{ if(b.isConnected){ b.dataset.armed=''; b.textContent='Discard draft'; b.style.borderColor=''; b.style.color=''; } },5000); return; }
+    const {error}=await sb.from('rmr_plan_versions').delete().eq('id',v.id).eq('status','draft'); if(error){ toast(error.message); return; }
+    audit('Plan draft discarded','Admin',v.label,{config:v.config},null,'Unpublished draft deleted; the live version is unchanged');
+    P27.versions=P27.versions.filter(x=>x.id!==v.id); ADM_PREVIEW=null; toast(v.label+' discarded — the live version is unchanged'); await load27(); render(); };
+  // Displayed TCV % follows the multiple as it is typed (multiple ÷ term months; display only — COM-06)
+  terms.forEach(t=>{ const i=$('m_new_'+t), o=$('m_tcv_'+t); if(!i||!o)return;
+    i.addEventListener('input',()=>{ const x=String(i.value).trim(); try{ o.textContent=x===''?'—':E27.pctStr(E27.div(E27.dec(x),E27.R(BigInt(t))),4); }catch(e){ o.textContent='—'; } }); });
   $('pv27').onclick=()=>previewDraft27(v);
   $('pb27').onclick=()=>publishForm27(v);
   renderEmployees27(); renderCalendar27(); renderInventory27(); renderForecast27(v);
