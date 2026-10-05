@@ -954,7 +954,7 @@ function renderAdmin27(){
     const {error}=await sb.from('rmr_plan_versions').insert(nv); if(error){toast(error.message);return;} audit('Plan draft version opened','Admin',nv.label,null,nv,null); await load27(); renderAdmin27(); };
   $('sv27').onclick=()=>saveDraft27(v);
   if($('dd27')) $('dd27').onclick=async()=>{ const b=$('dd27');
-    if(b.dataset.armed!=='1'){ b.dataset.armed='1'; b.textContent='Click again to discard '+v.label; b.style.borderColor='var(--held)'; b.style.color='var(--held)'; setTimeout(()=>{ if(b.isConnected){ b.dataset.armed=''; b.textContent='Discard draft'; b.style.borderColor=''; b.style.color=''; } },5000); return; }
+    if(b.dataset.armed!=='1'){ b.dataset.armed='1'; b.textContent='Click again to discard '+v.label; setTimeout(()=>{ if(b.isConnected){ b.dataset.armed=''; b.textContent='Discard draft'; } },5000); return; }
     const {error}=await sb.from('rmr_plan_versions').delete().eq('id',v.id).eq('status','draft'); if(error){ toast(error.message); return; }
     audit('Plan draft discarded','Admin',v.label,{config:v.config},null,'Unpublished draft deleted; the live version is unchanged');
     P27.versions=P27.versions.filter(x=>x.id!==v.id); ADM_PREVIEW=null; toast(v.label+' discarded — the live version is unchanged'); await load27(); render(); };
