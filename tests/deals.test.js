@@ -138,6 +138,16 @@ async function open(browser,email){ const ctx=await browser.newContext({viewport
   ok(await p.evaluate(()=>{ const t=(document.getElementById('salesRep27')||{innerText:''}).innerText; return /Won RMR/i.test(t)&&/Churned RMR/i.test(t)&&/Pipeline right now/i.test(t); }),'sales report shows win/loss, churn and the live pipeline');
   ok(await p.evaluate(()=>{ const t=document.getElementById('salesRep27').innerText; return /reliable from the day stage tracking started/.test(t); }),'the data limit is stated on the report');
 
+  // owner address is break-glass only: it follows its Employees role when another Administrator exists
+  const roles=await p.evaluate(async()=>{ const me=__DB.rmr_users.find(u=>u.email===__EMAIL); const keep=JSON.parse(JSON.stringify(__DB.rmr_users));
+    me.permission_role='Representative'; me.role='Representative';
+    __DB.rmr_users.push({email:'other.admin@point1.com',role:'Administrator',permission_role:'Administrator'});
+    await resolveRole(__EMAIL); const a=CURRENT_ROLE;
+    __DB.rmr_users.splice(__DB.rmr_users.findIndex(u=>u.email==='other.admin@point1.com'),1);
+    await resolveRole(__EMAIL); const b=CURRENT_ROLE;
+    __DB.rmr_users.length=0; keep.forEach(u=>__DB.rmr_users.push(u)); await resolveRole(__EMAIL); return [a,b,CURRENT_ROLE]; });
+  ok(roles[0]==='Representative','the owner set to Representative is a Representative while another Administrator exists');
+  ok(roles[1]==='Administrator','…and falls back to Administrator if no other Administrator exists (no lock-out)');
   ok(!p.__errors.length,'no page errors'+(p.__errors.length?': '+p.__errors.slice(0,3).join(' | '):''));
   await browser.close();
   results.forEach(r=>console.log(r)); console.log(`\n${results.length-fail} passed, ${fail} failed`); process.exit(fail?1:0);
