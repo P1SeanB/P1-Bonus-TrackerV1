@@ -6101,8 +6101,14 @@ function previewDraft27(v){
   const {c,errs}=v.status==='draft'&&can('editConfig')?readDraft27(v):{c:v.config,errs:[]};
   const pv={...planVersionPlain(v),config:c}; const out=$('pvOut27');
   const val=E27.validatePlanVersion(pv);
-  const samples=[{t:'New 36-mo at $1,000 MRR',i:{eventType:'new_sale',term:36,newMrr:'1000'}},{t:'New 12-mo at $100 MRR',i:{eventType:'new_sale',term:12,newMrr:'100'}},{t:'Manual renewal $1,000→$1,300, 36 mo',i:{eventType:'manual_renewal',term:36,priorMrr:'1000',newMrr:'1300'}},
-    {t:'SLA $10,000/yr, 36 mo',i:{eventType:'sla_new',category:'sla',term:36,slaAnnual:'10000'}},{t:'SLA renewal $10,000 retained',i:{eventType:'sla_renewal',category:'sla',term:12,priorSlaAnnual:'10000',slaAnnual:'10000'}},{t:'Margin 44.999%',i:{eventType:'new_sale',term:36,newMrr:'1000',margin:E27.dec('0.44999')}}];
+  // every reference case is on the same $100/month, so the terms compare directly
+  const samples=[12,24,36,48,60].map(t=>({t:`New ${t}-month sale at $100/mo`,i:{eventType:'new_sale',term:t,newMrr:'100'}})).concat([
+    {t:'Manual renewal (12-month), $100/mo kept',i:{eventType:'manual_renewal',term:12,priorMrr:'100',newMrr:'100'}},
+    {t:'Manual renewal (12-month), $100 → $120/mo',i:{eventType:'manual_renewal',term:12,priorMrr:'100',newMrr:'120'}},
+    {t:'Auto-renewal (36-month), $100 → $120/mo',i:{eventType:'auto_renewal',term:36,priorMrr:'100',newMrr:'120'}},
+    {t:'New SLA, 36-month, $1,200/yr ($100/mo equiv.)',i:{eventType:'sla_new',category:'sla',term:36,slaAnnual:'1200'}},
+    {t:'SLA renewal, $1,200/yr kept',i:{eventType:'sla_renewal',category:'sla',term:12,priorSlaAnnual:'1200',slaAnnual:'1200'}},
+    {t:'New 36-month sale at $100/mo, margin 44.999%',i:{eventType:'new_sale',term:36,newMrr:'100',margin:E27.dec('0.44999')}}]);
   const run=(i)=>{ try{ const r=E27.calculate(Object.assign({plan:pv,margin:E27.dec('0.5'),shares:[{email:'preview',bp:10000}]},i)); return `${E27.fmtCents(r.totalCents)} <span class="qctx">(${E27.fmtCents(r.tranche1Cents)} + ${E27.fmtCents(r.tranche2Cents)})</span>`; }catch(e){ return `<span style="color:var(--held)">${esc(e.message)}</span>`; } };
   const book=scopedAgreements().filter(a=>!a.history_only).slice(0,25);
   const rows=book.map(a=>{ const before=compute(a); const inp=revisedInputs(a); let after; try{ after=E27.calculate({plan:pv,eventType:inp.eventType,term:inp.term,category:a.category,newMrr:inp.mrrQ?E27.toDollars(E27.roundHalfUp(inp.mrrQ)):null,priorMrr:inp.prior!=null?String(inp.prior):null,slaAnnual:inp.isSla&&inp.mrrQ?E27.toDollars(E27.roundHalfUp(E27.mul(inp.mrrQ,E27.R(12n)))):null,margin:inp.qm.margin,shares:[{email:'preview',bp:10000}]}); after=E27.fmtCents(after.totalCents); }catch(e){ after=`<span style="color:var(--held)">${esc(e.message)}</span>`; }
