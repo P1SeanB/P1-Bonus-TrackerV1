@@ -572,19 +572,23 @@ function openQuestion27(l){
 
 function myEarnWords27(){ const me=lc27(CURRENT_EMAIL), today=E27.businessToday();
   const asg=P27.assignments.filter(x=>lc27(x.email)===me).sort((x,y)=>String(y.effective_from).localeCompare(String(x.effective_from)));
-  const cur=asg.find(x=>x.effective_from<=today&&(!x.effective_to||today<x.effective_to))||asg[0]||null; const v=cur?versionById(cur.plan_version_id):null;
+  const gv=(typeof currentVersionOf27==='function')?currentVersionOf27(me):null;
+  const cur=(gv&&asg.find(x=>String(x.plan_version_id)===String(gv.id)))||asg.find(x=>x.effective_from<=today&&(!x.effective_to||today<x.effective_to))||asg[0]||null; const v=cur?versionById(cur.plan_version_id):null;
   return earningWords27((v&&v.config)||{}); }
 /* ---------------- Rep: My plan ---------------- */
 function renderMyPlan27(){
   const host=$('myplanHost27'); if(!host)return; if(!P27.ready){ host.innerHTML='<div class="card27"><div class="bd">Loading…</div></div>'; return; }
   const me=lc27(CURRENT_EMAIL); const today=E27.businessToday();
   const asg=P27.assignments.filter(x=>lc27(x.email)===me).sort((x,y)=>String(y.effective_from).localeCompare(String(x.effective_from)));
-  const cur=asg.find(x=>x.effective_from<=today&&(!x.effective_to||today<x.effective_to))||asg[0]||null;
+  // the version that governs this rep's commissions: a plan that applies to every agreement governs as soon as it is assigned
+  const gv=(typeof currentVersionOf27==='function')?currentVersionOf27(me):null;
+  const cur=(gv&&asg.find(x=>String(x.plan_version_id)===String(gv.id)))||asg.find(x=>x.effective_from<=today&&(!x.effective_to||today<x.effective_to))||asg[0]||null;
   const v=cur?versionById(cur.plan_version_id):null; const ack=v?P27.acks.find(k=>lc27(k.email)===me&&String(k.plan_version_id)===String(v.id)):null;
+  const allAg=!!(v&&v.config&&v.config.appliesToAllAgreements);
   const run=E27.payoutCalendar(P27.settings.payout_calendar); const c=(v&&v.config)||{}; const m=c.newMult||{};
   host.innerHTML=!v?`<div class="card27"><div class="empty"><b>No plan assigned yet</b>Your admin assigns your commission plan in Admin ▸ Employees.</div></div>`:`
    <div class="kpis27">
-    <div class="kpi27 hero"><span class="k">Your plan</span><span class="v" style="font-family:inherit;font-weight:800;font-size:22px">${esc(v.label)}</span><span class="s">effective ${fmtD27(cur.effective_from)}</span></div>
+    <div class="kpi27 hero"><span class="k">Your plan</span><span class="v" style="font-family:inherit;font-weight:800;font-size:22px">${esc(v.label)}</span><span class="s">${allAg?`applies to all your agreements · ${cur.effective_from>today?'assigned from':'since'} ${fmtD27(cur.effective_from)}`:`effective ${fmtD27(cur.effective_from)}`}</span></div>
     <div class="kpi27"><span class="k">Acknowledged</span><span class="v" style="font-family:inherit;font-weight:800;font-size:20px">${ack?fmtD27(ack.created_at||ack.acknowledged_at):'Not yet'}</span><span class="s">${ack?'stored with the exact terms shown':'<button class="lnk27" id="mp27ack">Read and acknowledge</button>'}</span></div>
     <div class="kpi27"><span class="k">Paid</span><span class="v" style="font-family:inherit;font-weight:800;font-size:20px">Quarterly</span><span class="s">next pay date ${fmtD27(run.payBy)}</span></div></div>
    <div class="row27">
@@ -595,7 +599,7 @@ function renderMyPlan27(){
       <div>Earned payments are verified by the 15th after quarter end and paid by the 30th. A payment not verified in time moves to the next quarter.</div>
       <div>Manual renewals pay ${c.renewalMult!=null?c.renewalMult+'×':'—'} the retained monthly RMR.</div>
       <button class="btn-ghost" id="mp27guide" style="align-self:flex-start">Open the full guide</button></div></div>
-    <div class="card27" style="flex:1 1 420px"><div class="hd"><h2>The terms you accepted</h2></div><div class="bd"><div style="white-space:pre-wrap;font-size:13px;line-height:1.6;color:#3d4452;max-height:520px;overflow:auto">${esc(ack&&ack.text_shown?ack.text_shown:termsText(v))}</div></div></div>
+    <div class="card27" style="flex:1 1 420px"><div class="hd"><h2>${ack?'The terms you accepted':'Your plan terms — not acknowledged yet'}</h2></div><div class="bd"><div style="white-space:pre-wrap;font-size:13px;line-height:1.6;color:#3d4452;max-height:520px;overflow:auto">${esc(ack&&ack.text_shown?ack.text_shown:termsText(v))}</div></div></div>
    </div>`;
   if($('mp27guide')) $('mp27guide').onclick=()=>openGuide();
   if($('mp27ack')) $('mp27ack').onclick=()=>checkAcknowledgement();
