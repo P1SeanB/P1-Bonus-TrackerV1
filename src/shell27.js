@@ -625,10 +625,19 @@ function mathOf27(l){
   const gate=c.gate&&rn27(c.gate.mult)!=null&&rn27(c.gate.mult)!==1?` · margin gate ×${rn27(c.gate.mult)}`:'';
   return parts.join(' + ')+gate+` → this payment is half`;
 }
+/* one row per event when both payments land in the same quarter with the same status */
+function drillList27(L,D){
+  const all=L.filter(l=>l.qi===D.qi), st=D.st||'all';
+  const pick=all.filter(l=>st==='all'?l.state!=='actual':l.state===st);
+  const map=new Map(), out=[];
+  pick.forEach(l=>{ const k=l.p&&l.p.uid?l.p.uid+'|'+l.state:null; if(k&&map.has(k)){ const m=map.get(k); m.amount+=(+l.amount||0); m.both=true; return; }
+    const c=Object.assign({},l,{amount:+l.amount||0}); if(k)map.set(k,c); out.push(c); });
+  out.sort((x,y)=>String(x.a.agreement_number||'').localeCompare(String(y.a.agreement_number||''),undefined,{numeric:true})||((x.piece||0)-(y.piece||0)));
+  return {all,list:out,st};
+}
 function drillHTML27(L,D){
   if(!D)return '';
-  const all=L.filter(l=>l.qi===D.qi), st=D.st||'all';
-  const list=all.filter(l=>st==='all'?l.state!=='actual':l.state===st).sort((x,y)=>String(x.a.agreement_number||'').localeCompare(String(y.a.agreement_number||''),undefined,{numeric:true})||(x.piece-y.piece));
+  const {all,list,st}=drillList27(L,D);
   const sum=f=>all.filter(f).reduce((s,l)=>s+(+l.amount||0),0);
   const byKind={}; all.filter(l=>l.state!=='actual').forEach(l=>{ const k=l.payout?'Payout':l.piece==='adj'?'Adjustment':(KIND27[l.kind]||'Sale'); byKind[k]=(byKind[k]||0)+(+l.amount||0); });
   const act=sum(l=>l.state==='actual'); const pre=all.some(l=>l.override);
@@ -646,10 +655,10 @@ function drillHTML27(L,D){
        ${list.map((l,i)=>`<tr><td>${l.payout?`<b>${esc(l.a.customer_name||'Payout')}</b>`:`<b>#${esc(l.a.agreement_number||'—')}</b> ${esc(l.a.customer_name||'')}`}</td>
          <td>${esc(l.payout?'Payout':l.piece==='adj'?'Adjustment':(KIND27[l.kind]||'Sale'))}</td>
          <td class="num">${l.p&&l.p.term?l.p.term+' mo':'—'}</td><td class="num">${l.p&&l.p.e&&l.p.e.next!=null?money27(+l.p.e.next):'—'}</td>
-         <td style="font-size:13px;min-width:220px">${esc(mathOf27(l))}</td>
-         <td style="white-space:nowrap">${esc(l.payout?'—':(l.label.replace(/^.*·\s*/,'')))}</td>
+         <td style="font-size:13px;min-width:220px">${esc(l.both?mathOf27(l).replace(' → this payment is half',' → both payments'):mathOf27(l))}</td>
+         <td style="white-space:nowrap">${esc(l.payout?'—':l.both?'Payments 1 + 2':(l.label.replace(/^.*·\s*/,'')))}</td>
          <td class="num"><b>${money27(l.amount)}</b></td><td>${l.state==='paid'?'<span class="pill27 paid">Paid</span>':l.state==='earned'?'<span class="pill27 ear">Earned</span>':'<span class="pill27 exp">Expected</span>'}</td>
-         <td style="font-size:12.5px;max-width:260px">${esc(plainText27(String(l.note||'')))}${l.p&&l.p.evRow?`<div class="qctx" style="font-size:12px">Sold ✓ ${esc(nameOf27(l.p.evRow.created_by))} · ${esc(fmtD27(l.p.evRow.created_at))}</div>`:''}</td>
+         <td style="font-size:12.5px;max-width:260px">${esc(l.override?'Prior plan — paid before Jul 1, 2026':plainText27(String(l.note||'')))}${l.p&&l.p.evRow?`<div class="qctx" style="font-size:12px">Sold ✓ ${esc(nameOf27(l.p.evRow.created_by))} · ${esc(fmtD27(l.p.evRow.created_at))}</div>`:''}</td>
          <td>${l.a&&l.a.id?`<button class="lnk27" data-dopen="${i}">Open</button>`:''}</td></tr>`).join('')}
        <tr style="font-weight:800;background:#fafbfc"><td colspan="6">Total · ${list.length}</td><td class="num">${money27(list.reduce((s,l)=>s+(+l.amount||0),0))}</td><td colspan="3"></td></tr></tbody></table></div>`
       :'<div class="empty" style="padding:20px"><b>Nothing here</b>Pick another status above.</div>'}
@@ -657,8 +666,7 @@ function drillHTML27(L,D){
 }
 function wireDrill27(el,L){
   if(!DRILL27||!$('drill27'))return;
-  const all=L.filter(l=>l.qi===DRILL27.qi), st=DRILL27.st||'all';
-  const list=all.filter(l=>st==='all'?l.state!=='actual':l.state===st).sort((x,y)=>String(x.a.agreement_number||'').localeCompare(String(y.a.agreement_number||''),undefined,{numeric:true})||(x.piece-y.piece));
+  const {list}=drillList27(L,DRILL27);
   $('dr27x').onclick=()=>{ DRILL27=null; renderMyPay27(); };
   el.querySelectorAll('[data-dst]').forEach(b=>b.onclick=()=>{ DRILL27.st=b.dataset.dst; renderMyPay27(); });
   el.querySelectorAll('[data-dopen]').forEach(b=>b.onclick=()=>{ const l=list[+b.dataset.dopen]; if(!l||!l.a.id)return;
