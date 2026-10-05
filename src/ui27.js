@@ -316,7 +316,7 @@ function hybridLines27(a){
     [[1,k.t1],[2,k.t2]].forEach(([n,c])=>{ if(!(c>0n))return; const amount=Number(c)/100; const t=p.tranches?(n===1?p.tranches.t1:p.tranches.t2):null;
       const label=(p.e.kind==='new_sale'?'':KIND_LABEL27[p.e.kind]+' · ')+`Payment ${n} of 2`;
       let rstate,note,date;
-      if(p.override){ rstate='paid'; date=n===1?p.date:E27.addMonthsClamp(p.date,3); note=`Paid before ${qLabel(qiOf(E27.addDays(ov.through,1)))} — manager override, approved by ${ov.approver}`; }
+      if(p.override){ rstate='paid'; date=p.date;   /* covered by the override in the quarter it was sold — both payments */ note=`Paid before ${qLabel(qiOf(E27.addDays(ov.through,1)))} — manager override, approved by ${ov.approver}`; }
       else { const led=P27.ledger.filter(x=>x.event_uid===p.uid&&+x.tranche===n); const has=st=>led.some(x=>x.stage===st);
         rstate=has('paid')?'paid':has('payable')?'approved':(t&&t.state==='Earned'?'earned':'expected');
         date=t&&t.earnedDate||null;

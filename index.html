@@ -5419,7 +5419,7 @@ function hybridLines27(a){
     [[1,k.t1],[2,k.t2]].forEach(([n,c])=>{ if(!(c>0n))return; const amount=Number(c)/100; const t=p.tranches?(n===1?p.tranches.t1:p.tranches.t2):null;
       const label=(p.e.kind==='new_sale'?'':KIND_LABEL27[p.e.kind]+' · ')+`Payment ${n} of 2`;
       let rstate,note,date;
-      if(p.override){ rstate='paid'; date=n===1?p.date:E27.addMonthsClamp(p.date,3); note=`Paid before ${qLabel(qiOf(E27.addDays(ov.through,1)))} — manager override, approved by ${ov.approver}`; }
+      if(p.override){ rstate='paid'; date=p.date;   /* covered by the override in the quarter it was sold — both payments */ note=`Paid before ${qLabel(qiOf(E27.addDays(ov.through,1)))} — manager override, approved by ${ov.approver}`; }
       else { const led=P27.ledger.filter(x=>x.event_uid===p.uid&&+x.tranche===n); const has=st=>led.some(x=>x.stage===st);
         rstate=has('paid')?'paid':has('payable')?'approved':(t&&t.state==='Earned'?'earned':'expected');
         date=t&&t.earnedDate||null;
@@ -7308,11 +7308,24 @@ function renderImports27(){
 function myLines27(){
   const out=[];
   scopedAgreements().forEach(a=>{ let c; try{ c=compute(a); }catch(_){ return; }
-    if(c.revised&&(c.revisedCalc||pricedEvents27(a))){ revisedQuarterLines27(a,c).forEach(l=>out.push({a,piece:l.piece,label:l.label||`Payment ${l.piece} of 2`,amount:l.amount,qi:l.qi,state:l.rstate==='approved'?'earned':l.rstate,rstate:l.rstate,note:l.override?l.note:l.rstate==='paid'?'Paid on payroll':l.rstate==='approved'?'Approved — on the next payroll':l.rstate==='earned'?`Earned ${fmtD27(String(l.note).replace(/^earned /,''))} — in the next payout`:l.note})); return; }
+    if(c.revised&&(c.revisedCalc||pricedEvents27(a))){ revisedQuarterLines27(a,c).forEach(l=>out.push({a,override:!!l.override,piece:l.piece,label:l.label||`Payment ${l.piece} of 2`,amount:l.amount,qi:l.qi,state:l.rstate==='approved'?'earned':l.rstate,rstate:l.rstate,note:l.override?l.note:l.rstate==='paid'?'Paid on payroll':l.rstate==='approved'?'Approved — on the next payroll':l.rstate==='earned'?`Earned ${fmtD27(String(l.note).replace(/^earned /,''))} — in the next payout`:l.note})); return; }
     const push=(type,flag,qi)=>{ if(qi==null)return; const f=frozenAmount(a,type); if(!(f.amount>0))return; out.push({a,piece:type,label:type==='holdback'?'Deferred piece':'Initial piece',amount:f.amount,qi,state:a[flag]?'paid':(qi<=CUR_QI?'earned':'expected'),rstate:a[flag]?'paid':'expected',note:a[flag]?'paid':'historical plan'}); };
     if(c.legacyFull) push('initial','paid_initial',c.initialQI); else { push('immediate','paid_immediate',c.initialQI); push('holdback','paid_holdback',c.holdbackQI); }
   });
   const team=isTeam27(), me=lc27(CURRENT_EMAIL);
+  // Before July 1, 2026 the tracker shows what was actually paid — the signed quarterly payouts and the
+  // settlement check — and not a recalculation of those old deals under today's plan.
+  // Before July 1, 2026 each agreement shows what THIS plan would have paid (the deals were paid under the prior plan).
+  // The actual signed payouts are listed beside them for comparison and never count toward the totals.
+  const myPayouts=(LEGACY_PAYOUTS||[]).filter(p=>team?(!USER_FILTER||!USER_FILTER.length||USER_FILTER.includes(lc27(p.owner_email))):lc27(p.owner_email)===me);
+  const FROM_QI=qIndexFromYM(2025,0);
+  for(let i=out.length-1;i>=0;i--){ const l=out[i]; if(!l.override)continue;
+    if(l.qi==null||l.qi<FROM_QI){ out.splice(i,1); continue; }   // sales before 2025 were paid under older plans
+    l.note='What this plan would have paid · the deal was paid under the prior plan (before Jul 1, 2026)'; }
+  myPayouts.filter(p=>team?(!USER_FILTER||!USER_FILTER.length||USER_FILTER.includes(lc27(p.owner_email))):lc27(p.owner_email)===me).forEach(p=>{
+    const qi=qIndexFromYM(+p.year,(+p.quarter-1)*3);
+    out.push({a:{agreement_number:'',customer_name:p.plan_label||'Quarterly payout'},piece:'payout',label:`Q${p.quarter} ${p.year} payout`,amount:+p.amount||0,qi,state:'actual',rstate:'actual',payout:true,
+      note:p.source_doc?`What you were actually paid (for comparison, not counted) · ${p.source_doc}`:'What you were actually paid (for comparison, not counted)'}); });
   P27.ledger.filter(x=>x.stage==='adjustment'&&(team||lc27(x.recipient_email)===me)).forEach(x=>{ const ev=P27.events.find(e=>e.event_uid===x.event_uid); const a=ev&&AGREEMENTS.find(g=>String(g.id)===String(ev.agreement_id)); if(!a)return;
     const paid=P27.ledger.some(y=>y.entry_uid===String(x.entry_uid).replace('|adjustment|','|paid|')); const d=String(x.earned_date||x.created_at||E27.businessToday()).slice(0,10);
     out.push({a,piece:'adj',label:'Adjustment',amount:Number(x.amount_cents)/100,qi:qIndexFromYM(+d.slice(0,4),+d.slice(5,7)-1),state:paid?'paid':'earned',rstate:paid?'paid':'earned',note:(x.reason||'Adjustment')+(paid?' · paid':' · in the next payout')}); });
@@ -7329,9 +7342,21 @@ function renderMyPay27(){
   const nextRun=readyNow>0?run:E27.payoutCalendar(P27.settings.payout_calendar,E27.addDays(run.quarterEnd,100));
   const next=readyNow>0?readyNow:earnedOpen;
   const waiting=sum(l=>l.state==='expected'&&l.piece===1), expected=sum(l=>l.state==='expected'&&l.piece!==1), paidAll=sum(l=>l.state==='paid');
-  // chart: two quarters back → four ahead
-  const qs=[]; for(let q=CUR_QI-2;q<=CUR_QI+4;q++) qs.push(q);
-  const by=qs.map(q=>({q,expected:0,earned:0,paid:0})); L.forEach(l=>{ const b=by.find(x=>x.q===l.qi); if(b) b[l.state]+=l.amount; });
+  // chart range: presets or From/To quarters, as far back as the records go (remembered per browser)
+  const allQ=L.map(l=>l.qi).filter(q=>q!=null); const minQ=Math.min(CUR_QI,...allQ), maxQ=Math.max(CUR_QI+4,...allQ);
+  let R={preset:'default'}; try{ R=JSON.parse(LS.get('mpr27')||'0')||R; }catch(_){}
+  const yQ=y=>qIndexFromYM(y,0);
+  const rng=R.preset==='thisyear'?[yQ(yr),yQ(yr)+3]:R.preset==='lastyear'?[yQ(yr-1),yQ(yr-1)+3]:R.preset==='since2025'?[yQ(2025),CUR_QI+4]:R.preset==='all'?[minQ,maxQ]
+    :R.preset==='custom'&&R.from!=null&&R.to!=null?[Math.min(+R.from,+R.to),Math.max(+R.from,+R.to)]:[CUR_QI-3,CUR_QI+4];
+  const inR=q=>q!=null&&q>=rng[0]&&q<=rng[1];
+  const qs=[]; for(let q=rng[0];q<=rng[1];q++) qs.push(q);
+  const paidRange=L.filter(l=>l.state==='paid'&&inR(l.qi)).reduce((s,l)=>s+l.amount,0);
+  const qOpts=sel=>{ let o=''; for(let q=Math.min(minQ,rng[0]);q<=Math.max(maxQ,rng[1]);q++) o+=`<option value="${q}" ${q===sel?'selected':''}>${esc(qLabel(q))}</option>`; return o; };
+  const rangeBar=`<div class="pillrow27" style="margin:0 0 6px;padding:10px 18px 0">
+     ${[['default','Next 4 quarters'],['thisyear',`${yr}`],['lastyear',`${yr-1}`],['since2025','2025 to now'],['all','All records']].map(([k,t])=>`<button data-mpr="${k}" data-pf="1" class="${R.preset===k?'on':''}">${t}</button>`).join('')}
+     <span style="margin-left:8px;font-size:13px;color:var(--muted)">From</span><select id="mpr_from" class="cfg-in" style="min-width:110px">${qOpts(rng[0])}</select>
+     <span style="font-size:13px;color:var(--muted)">to</span><select id="mpr_to" class="cfg-in" style="min-width:110px">${qOpts(rng[1])}</select></div>`;
+  const by=qs.map(q=>({q,expected:0,earned:0,paid:0,actual:0})); L.forEach(l=>{ const b=by.find(x=>x.q===l.qi); if(b&&b[l.state]!=null) b[l.state]+=l.amount; });
   const max=Math.max(1,...by.map(b=>b.expected+b.earned+b.paid)); const nice=(()=>{ const p=Math.pow(10,Math.floor(Math.log10(max))); return Math.ceil(max/p)*p; })();
   const W=720,H=240,pl=56,pr=12,pt=14,pb=34, cw=(W-pl-pr)/by.length, bw=Math.min(46,cw*0.56);
   const ys=v=>pt+(H-pt-pb)*(1-v/nice);
@@ -7343,15 +7368,15 @@ function renderMyPay27(){
     bars+=`<text x="${x+bw/2}" y="${H-pb+18}" text-anchor="middle" font-size="12" fill="${b.q===CUR_QI?'#242424':'#5B6478'}" font-weight="${b.q===CUR_QI?800:500}">${esc(qLabel(b.q))}</text>`; });
   let grid=''; for(let k=0;k<=4;k++){ const v=nice*k/4, y=ys(v); grid+=`<line x1="${pl}" x2="${W-pr}" y1="${y}" y2="${y}" stroke="#edf0f5"/><text x="${pl-8}" y="${y+4}" text-anchor="end" font-size="11" fill="#5B6478">${v>=1000?'$'+(v/1000).toFixed(v%1000?1:0)+'k':'$'+Math.round(v)}</text>`; }
   const myQ=P27.worklist.filter(w=>w.type==='rep_question'&&lc27((w.detail||{}).requested_by)===me).sort((x,y)=>y.id-x.id);
-  const rows=L.filter(l=>l.state!=='paid'||(l.qi!=null&&l.qi>=CUR_QI-2)).sort((x,y)=>(x.qi??1e9)-(y.qi??1e9));
-  const pill=s=>s==='paid'?'<span class="pill27 paid">Paid</span>':s==='earned'?'<span class="pill27 ear">Earned</span>':'<span class="pill27 exp">Expected</span>';
+  const rows=L.filter(l=>inR(l.qi)||(l.qi==null&&l.state!=='paid')).sort((x,y)=>(y.qi??1e9)-(x.qi??1e9)||(x.state==='actual'?-1:0));
+  const pill=s=>s==='actual'?'<span class="pill27" style="background:#eef1f6;color:#3d4759">Actual payout</span>':s==='paid'?'<span class="pill27 paid">Paid</span>':s==='earned'?'<span class="pill27 ear">Earned</span>':'<span class="pill27 exp">Expected</span>';
   el.innerHTML=`<div class="kpis27">
      <div class="kpi27 hero"><span class="k">Next commission payment</span><span class="v">${money27(next)}</span><span class="s">${next>0?`Q${nextRun.q} ${nextRun.y} payout · paid by ${fmtD27(nextRun.payBy)} · final once approved`:'Nothing earned yet — see Waiting on payment'}</span></div>
      <div class="kpi27"><span class="k">Waiting on payment</span><span class="v">${money27(waiting)}</span><span class="s">${esc(myEarnWords27().k1)}</span></div>
      <div class="kpi27"><span class="k">Expected later</span><span class="v">${money27(expected)}</span><span class="s">${esc(myEarnWords27().k2)}</span></div>
-     <div class="kpi27"><span class="k">Paid to date</span><span class="v">${money27(paidAll)}</span><span class="s">on payroll</span></div></div>
+     <div class="kpi27"><span class="k">Paid · ${esc(qLabel(rng[0]))} – ${esc(qLabel(rng[1]))}</span><span class="v">${money27(paidRange)}</span><span class="s">in the selected range${L.some(l=>l.override&&inR(l.qi))?' · before Jul 1, 2026 = what this plan would have paid':''}</span></div></div>
    <div class="row27">
-    <div class="card27" style="flex:999 1 520px"><div class="hd"><h2>Commission by quarter</h2><div class="legend27"><span><i style="background:${RAMP27.expected}"></i>Expected</span><span><i style="background:${RAMP27.earned}"></i>Earned</span><span><i style="background:${RAMP27.paid}"></i>Paid</span></div></div>
+    <div class="card27" style="flex:999 1 520px"><div class="hd"><h2>Commission by quarter</h2><div class="legend27"><span><i style="background:${RAMP27.expected}"></i>Expected</span><span><i style="background:${RAMP27.earned}"></i>Earned</span><span><i style="background:${RAMP27.paid}"></i>Paid</span></div></div>${rangeBar}
       <div class="bd"><svg class="chart27" viewBox="0 0 ${W} ${H}" role="img" aria-label="Your commission by quarter: expected, earned and paid">${grid}${bars}<line x1="${pl}" x2="${W-pr}" y1="${ys(0)}" y2="${ys(0)}" stroke="#c4ccd9"/></svg></div></div>
     <div class="card27" style="flex:1 1 300px"><div class="hd"><h2>Estimate a deal</h2></div><div class="bd" style="display:flex;flex-direction:column;gap:12px">
       <label class="fld27">Monthly RMR<input type="number" id="es27_m" value="250" min="0"></label>
@@ -7359,17 +7384,20 @@ function renderMyPay27(){
       <div class="note27" id="es27_out"></div></div></div>
    </div>
    <div class="card27"><div class="hd"><h2>My payments</h2><span class="qctx">Each deal pays in two parts. Question anything that looks wrong.</span></div>
-     ${rows.length?`<div style="overflow-x:auto"><table class="tbl27"><thead><tr><th>Deal</th><th>Payment</th><th>Quarter</th><th>Status</th><th>What it's waiting on</th><th class="num">Amount</th><th></th></tr></thead><tbody>${rows.map((l,i)=>`<tr><td><b>#${esc(l.a.agreement_number||'—')}</b> ${esc(l.a.customer_name||'')}</td><td style="white-space:nowrap">${esc(l.label)}</td><td>${l.qi!=null?esc(qLabel(l.qi)):'—'}</td><td>${pill(l.state)}</td><td class="qctx" style="max-width:280px">${esc(plainText27(String(l.note||'')))}</td><td class="num">${money27(l.amount)}</td><td style="text-align:right"><button class="lnk27" data-q27="${i}">Question this</button></td></tr>`).join('')}</tbody></table></div>`
+     ${rows.length?`<div style="overflow-x:auto"><table class="tbl27"><thead><tr><th>Deal</th><th>Payment</th><th>Quarter</th><th>Status</th><th>What it's waiting on</th><th class="num">Amount</th><th></th></tr></thead><tbody>${rows.map((l,i)=>`<tr><td>${l.payout?`<b>${esc(l.a.customer_name||'Payout')}</b>`:`<b>#${esc(l.a.agreement_number||'—')}</b> ${esc(l.a.customer_name||'')}`}</td><td style="white-space:nowrap">${esc(l.label)}</td><td>${l.qi!=null?esc(qLabel(l.qi)):'—'}</td><td>${pill(l.state)}</td><td class="qctx" style="max-width:280px">${esc(plainText27(String(l.note||'')))}</td><td class="num">${l.noAmt?'—':money27(l.amount)}</td><td style="text-align:right"><button class="lnk27" data-q27="${i}">Question this</button></td></tr>`).join('')}</tbody></table></div>`
        :`<div class="empty"><b>No payments yet</b>When your admin records a sale, both payments appear here.</div>`}</div>
    <div class="card27"><div class="hd"><h2>My questions</h2><span class="qctx">${myQ.filter(w=>w.status==='open').length} open</span></div>
      ${myQ.length?`<div class="bd" style="display:flex;flex-direction:column;gap:12px">${myQ.map(w=>`<div style="border:1px solid #e3e7ee;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><b style="font-size:14px">#${esc((w.detail||{}).agreement||w.record_ref||'')} · ${esc((w.detail||{}).piece_label||'')}</b>${w.status==='open'?'<span class="pill27 exp">Waiting for an answer</span>':'<span class="pill27 ear">Answered</span>'}</div><div style="font-size:13.5px">${esc((w.detail||{}).question||w.title)}</div>${w.status==='closed'?`<div class="note27"><b>Answer from ${esc(nameOf27(w.closed_by))}</b> · ${esc(fmtD27(w.closed_at))}<br>${esc(w.close_basis||'')}</div>`:`<div class="qctx">Asked ${esc(fmtD27(w.created_at))}</div>`}</div>`).join('')}</div>`
        :`<div class="empty" style="padding:28px 20px"><b>No questions</b>Use “Question this” on any payment and your admin's answer shows here.</div>`}</div>`;
   // estimator
   const est=()=>{ const v=liveVersionOf(compFamilyOf(me)||'Hybrid'); const m=+$('es27_m').value||0, t=+$('es27_t').value; const mult=v&&v.config&&v.config.newMult?+v.config.newMult[t]:null;
-    $('es27_out').innerHTML=mult==null?'Your plan is not set up yet — ask your admin.':`<span style="font-size:12px;font-weight:800;letter-spacing:.06em;color:var(--muted)">ESTIMATED COMMISSION</span><div class="mono" style="font-size:24px;margin:2px 0">${money27(m*mult)}</div>${money27(m)}/mo × ${mult}× for ${t} months, at a 45%+ margin. Paid in two parts: ${money27(m*mult/2)} when the first invoice is paid, ${money27(m*mult/2)} three months after first billing.`; };
+    $('es27_out').innerHTML=mult==null?'Your plan is not set up yet — ask your admin.':`<span style="font-size:12px;font-weight:800;letter-spacing:.06em;color:var(--muted)">ESTIMATED COMMISSION</span><div class="mono" style="font-size:24px;margin:2px 0">${money27(m*mult)}</div>${money27(m)}/mo × ${mult}× for ${t} months, at a 45%+ margin. Paid in two parts: ${money27(m*mult/2)} ${esc(myEarnWords27().p1)}, and ${money27(m*mult/2)} ${esc(myEarnWords27().p2)}.`; };
   $('es27_m').oninput=est; $('es27_t').onchange=est; est();
   // hover tooltips
-  const tip=$('tip27'); el.querySelectorAll('[data-tip27]').forEach(r=>{ r.onmousemove=e=>{ const b=by[+r.dataset.tip27]; tip.innerHTML=`<b>${esc(qLabel(b.q))}</b><br>Expected ${money27(b.expected)}<br>Earned ${money27(b.earned)}<br>Paid ${money27(b.paid)}`; tip.style.display='block'; tip.style.left=(e.clientX+14)+'px'; tip.style.top=(e.clientY+14)+'px'; }; r.onmouseleave=()=>tip.style.display='none'; });
+  const tip=$('tip27'); el.querySelectorAll('[data-tip27]').forEach(r=>{ r.onmousemove=e=>{ const b=by[+r.dataset.tip27]; tip.innerHTML=`<b>${esc(qLabel(b.q))}</b><br>Expected ${money27(b.expected)}<br>Earned ${money27(b.earned)}<br>Paid ${money27(b.paid)}${b.actual?`<br><span style="opacity:.8">Actually paid then: ${money27(b.actual)}</span>`:''}`; tip.style.display='block'; tip.style.left=(e.clientX+14)+'px'; tip.style.top=(e.clientY+14)+'px'; }; r.onmouseleave=()=>tip.style.display='none'; });
+  el.querySelectorAll('[data-mpr]').forEach(b=>b.onclick=()=>{ LS.set('mpr27',JSON.stringify({preset:b.dataset.mpr})); renderMyPay27(); });
+  const setCustom=()=>{ LS.set('mpr27',JSON.stringify({preset:'custom',from:+$('mpr_from').value,to:+$('mpr_to').value})); renderMyPay27(); };
+  if($('mpr_from')){ $('mpr_from').onchange=setCustom; $('mpr_to').onchange=setCustom; }
   el.querySelectorAll('[data-q27]').forEach(b=>b.onclick=()=>openQuestion27(rows[+b.dataset.q27]));
 }
 function openQuestion27(l){

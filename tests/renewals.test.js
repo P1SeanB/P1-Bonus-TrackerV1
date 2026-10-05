@@ -106,7 +106,7 @@ async function open(browser,email){ const ctx=await browser.newContext({viewport
   ok(r201.some(i=>i.l==='Renewal · Payment 1 of 2'&&i.s==='Ready to pay'&&i.amt===10),'renewal Payment 1 ($10) is ready: first invoice of the new rate paid 7/10');
   ok(r201.some(i=>i.l==='Renewal · Payment 2 of 2'&&/after quarter end|next run/.test(i.r)),'renewal Payment 2 waits for the next run (three months after 7/1 billing)');
   ok(await p.evaluate(()=>{ const v=P27.versions.find(x=>x.id==='v-hyb2'); const t=termsText(v); return /pay only the increase/.test(t)&&/manager override \(approved by Sean Bithell \(self-approved\)/.test(t)&&/applies to every agreement/.test(t)&&/12-month term renews manually/.test(t); }),'written terms state the v2 rules and the override');
-  ok(await p.evaluate(()=>{ const L=myLines27(); return L.some(l=>l.a.agreement_number==='203'&&l.state==='paid'&&/manager override/.test(l.note)); }),'My pay lists pre-Q3 commissions as paid by override');
+  ok(await p.evaluate(()=>{ const L=myLines27(); return L.some(l=>l.a.agreement_number==='203'&&l.state==='paid'&&/paid under the prior plan/.test(l.note)); }),'My pay lists pre-Q3 commissions as paid by override');
   // Hybrid v3 earning rules: Payment 1 once a manager marks the sale sold (records the event); Payment 2 when the first invoice is paid (net 60)
   items=await p.evaluate(()=>{ const v=P27.versions.find(x=>x.id==='v-hyb2'); Object.assign(v.config,{tranche1Trigger:'marked_sold',tranche2Trigger:'first_invoice_collected',tranche2ExpectDays:60}); PRICE_STAMP++;
     const run=E27.payoutCalendar(P27.settings.payout_calendar); return payoutItems(run).map(i=>({n:i.a.agreement_number,l:i.label,s:i.state,r:i.reason||'',amt:i.amount})); });
