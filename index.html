@@ -7671,11 +7671,11 @@ function renderDeals27(){
   const ord={opportunity:0,quoted:1,signed:2,sold:3,lost:4};
   list=[...list].sort((x,y)=>(ord[x.stage]-ord[y.stage])||String(y.date||'').localeCompare(String(x.date||''))); list=applySort27(list);
   const team=canViewAll();
-  const sumRmr=openRows.reduce((s,r)=>s+(+r.rmr||0),0);
+  const sumRmr=openRows.filter(r=>r.a.category!=='sla').reduce((s,r)=>s+(+r.rmr||0),0), sumSla=openRows.filter(r=>r.a.category==='sla').reduce((s,r)=>s+(+r.rmr||0),0);
   host.innerHTML=`
    <div class="kpis27">
     <div class="kpi27 hero"><span class="k">Open deals</span><span class="v">${openRows.length}</span><span class="s">opportunity → sold, not yet fully paid</span></div>
-    <div class="kpi27"><span class="k">RMR in motion</span><span class="v">${money27(sumRmr)}</span><span class="s">per month, across open deals</span></div>
+    <div class="kpi27"><span class="k">Open deal RMR</span><span class="v">${money27(sumRmr)}</span><span class="s">per month on open RMR deals (not the whole book)${sumSla?` · SLA deals ${money27(sumSla)}/mo separate`:''}</span></div>
     <div class="kpi27"><span class="k">Waiting on a manager</span><span class="v">${n('signed')}</span><span class="s">signed, not marked sold yet</span></div>
     <div class="kpi27"><span class="k">Sold, unpaid</span><span class="v">${n('sold')}</span><span class="s">commission recorded, a payment still open</span></div></div>
    <div class="pillrow27">${pills.map(([k,l,c])=>`<button data-pill="${k}" class="${DEAL_PILL27===k?'on':''}">${l}${c!=null?`<span class="cnt">${c}</span>`:''}</button>`).join('')}
